@@ -240,6 +240,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         # route, so the prefix must survive rather than be stripped.
     ),
     ProviderSpec(
+        name="aistupidlevel",
+        keywords=("aistupidlevel",),
+        env_key="AISTUPIDLEVEL_API_KEY",
+        display_name="AI Stupid Level",
+        backend="openai_compat",
+        is_gateway=True,
+        endpoint_class="gateway",
+        detect_by_key_prefix="aism_",
+        detect_by_base_keyword="aistupidlevel.info",
+        default_api_base="https://aistupidlevel.info/v1",
+        # Ids are bare: a routing mode such as ``auto-coding`` or a pinned
+        # model such as ``claude-opus-4-7``. The router answers
+        # ``aistupidlevel/auto-coding`` with ``model_not_found``, so the
+        # prefix is stripped, as it is for Forge.
+        strip_model_prefix=True,
+        # Prompt caching stays off: the router already asks Claude to cache
+        # every conversation that continues, so the markers are not needed.
+    ),
+    ProviderSpec(
         name="forge",
         keywords=("forge",),
         env_key="FORGE_API_KEY",
