@@ -328,7 +328,8 @@ def test_chinese_text_fills_each_line_and_hangs_under_its_mark(deepcode):
 
 
 def test_resuming_mid_answer_shows_each_line_once_in_order(deepcode):
-    lines = _numbered_lines(24, "Resumed")
+    # Long enough that the second TUI attaches mid-answer even on a slow host.
+    lines = _numbered_lines(40, "Resumed")
     deepcode.model.on("answer slowly", _slow_answer(lines, pause=0.25))
     first = deepcode.open_tui("--access", "read-only")
     session = re.search(r"session ([0-9a-f]{8})", first.screen())[1]
@@ -345,6 +346,26 @@ def test_resuming_mid_answer_shows_each_line_once_in_order(deepcode):
     assert [screen.count(line) for line in lines] == [1] * len(lines), screen
     positions = [screen.index(line) for line in lines]
     assert positions == sorted(positions)
+
+
+def test_resuming_a_turn_that_waits_for_approval_shows_the_approval(deepcode):
+    deepcode.model.on(
+        "list the files",
+        Reply([ToolCall("bash", {"command": "ls"})]),
+        Reply([Text("Listed the files.")]),
+    )
+    first = deepcode.open_tui("--access", "ask")
+    session = re.search(r"session ([0-9a-f]{8})", first.screen())[1]
+    first.submit("list the files")
+    first.wait_for(r"Approval needed")
+
+    second = deepcode.open_tui("--access", "ask", "--resume", session)
+    second.wait_for_screen(r"Approval needed")
+    # Answered here, as if it had been asked here.
+    second.submit("y")
+    deepcode.wait_idle(timeout=30)
+    second.wait_for_screen(r"Listed the files\.")
+    assert second.screen().count("Approval needed") == 1
 
 
 def test_an_approval_waits_still_holds_typing_and_always_allow_is_narrow(deepcode):

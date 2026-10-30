@@ -430,3 +430,27 @@ def test_joining_shows_the_thinking_and_the_tool_in_progress() -> None:
     # The thinking continues from what was shown.
     more = renderer.convert_live(_live(len(b"Weighing it"), " up", channel="summary"))
     assert [event.msg.delta for event in more] == [" up"]
+
+
+def test_an_item_created_before_the_snapshot_it_joined_is_not_shown_again() -> None:
+    """Its creation was replayed after the snapshot already showed it."""
+    renderer = ServiceEventRenderer()
+    answer = _running_item(
+        ITEM, ItemKind.ASSISTANT_MESSAGE, {"text": "Hello", "messageId": "msg-1"}
+    )
+    renderer.join(TURN_A, [answer])
+
+    replayed = _messages(
+        renderer,
+        [
+            _event(
+                3,
+                "item.created",
+                _assistant("in_progress", "", streaming=True),
+                item_id=ITEM,
+            )
+        ],
+    )
+
+    assert replayed == []
+    assert _deltas(renderer.convert_live(_live(len(b"Hello"), " world"))) == [" world"]

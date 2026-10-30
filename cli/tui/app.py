@@ -1065,6 +1065,8 @@ class TuiApp:
         if not isinstance(approval, dict):
             return
         approval_id = approval.get("id")
+        if approval_id in self._shown_approvals:
+            return  # shown on joining the Turn, then replayed
         if isinstance(approval_id, str):
             self._prompted_approval_ids.add(approval_id)
             self._shown_approvals[approval_id] = approval

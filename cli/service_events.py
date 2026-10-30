@@ -9,6 +9,7 @@ item it has shown.
 from __future__ import annotations
 
 from cli.rpc_models import from_view
+from core.application.views import item_view
 from core.domain.event import DomainEvent
 from core.events import (
     AgentMessage,
@@ -80,17 +81,7 @@ class ServiceEventRenderer:
         messages = [TurnStarted()]
         for item in items:
             if item.status.value in {"in_progress", "pending"}:
-                messages += self._item_messages(
-                    turn_id,
-                    {
-                        "id": item.id,
-                        "kind": item.kind.value,
-                        "status": item.status.value,
-                        "summary": item.summary,
-                        "payload": item.payload,
-                    },
-                    created=True,
-                )
+                messages += self._item_messages(turn_id, item_view(item), created=True)
         return _events(f"join:{turn_id}", messages)
 
     def _remember(self, item_id, kind, message_id, turn_id):
@@ -244,6 +235,11 @@ class ServiceEventRenderer:
     def _item_messages(self, turn_id, item, *, created):
         """What one item's creation or update shows; ``item`` is its view."""
 
+        if created and item["id"] in self._items:
+            # Already followed from a snapshot read after this event (join or
+            # seed): what it carried is on screen, and resetting what was
+            # shown would print the text again.
+            return []
         kind, data = item["kind"], item["payload"]
         identity = data.get("messageId") or item["id"]
         running = item["status"] in {"in_progress", "pending"}

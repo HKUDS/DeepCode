@@ -27,8 +27,9 @@ messages, then tell DeepCode what you want to do next.
 
 If the conversation is still working on a Turn, for example one you started in
 another terminal, the TUI shows what that Turn is doing now (the answer so far,
-the thinking or tool in progress) and follows it to the end. Steps the Turn
-finished before you joined are not repeated.
+the thinking, a tool that is running or waiting for your approval) and follows
+it to the end. Steps it finished before you joined are not shown again; the
+latest messages printed above them give the context.
 
 ## Multiple clients, one Session
 
