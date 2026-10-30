@@ -540,6 +540,29 @@ def test_the_reasoning_preview_wraps_under_its_card_and_keeps_words():
     ]
 
 
+def test_a_summary_line_drops_markdown_marks_but_keeps_identifiers():
+    from cli.tui.renderer import _clean_line
+
+    assert _clean_line("## **Plan**: check `relic_offer` and _why_") == (
+        "Plan: check relic_offer and why"
+    )
+    for text in ("self._cache", "os._exit(1)", "*args / **kwargs", "a * b"):
+        assert _clean_line(text) == text
+    assert _clean_line("open `__init__.py` and `*.py`") == "open __init__.py and *.py"
+
+
+def test_a_summary_line_is_cleaned_in_linear_time():
+    """The status line cleans the newest reasoning line on every repaint."""
+    from time import perf_counter
+
+    from cli.tui.renderer import _clean_line
+
+    started = perf_counter()
+    for text in (" _x" * 7000, " *x" * 7000, " **x" * 5000):
+        _clean_line(text)
+    assert perf_counter() - started < 0.5
+
+
 def test_cli_status_line_tracks_live_reasoning_without_printing_deltas():
     output = io.StringIO()
     renderer = EventRenderer(Console(file=output, color_system=None, width=120))
@@ -856,8 +879,10 @@ def test_a_word_wider_than_the_line_is_cut_at_the_edge():
         "ntifier",
         "and more",
     ]
-    # Every line keeps at least one character, even one wider than the line.
+    # Every line keeps at least one character, even one wider than the line,
+    # and a combining accent stays with the character it marks.
     assert _wrapped("中文", 1) == ["中", "文"]
+    assert _wrapped("中\u0301文", 1) == ["中\u0301", "文"]
 
 
 def test_workspace_paths_shorten_only_when_they_are_paths():

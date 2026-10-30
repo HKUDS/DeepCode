@@ -136,15 +136,33 @@ class _TurnStats:
 
 
 # Markdown marks that say nothing in a one-line summary: a heading's, quote's
-# or bullet's at the start, emphasis and code marks around words. An
-# underscore inside a word (relic_offer) belongs to the word.
+# or bullet's at the start, code-span backticks, and emphasis marks that come
+# in pairs around text. Anything else is text: self._cache, *args, a * b.
 _LEADING_MARKS = re.compile(r"^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+)*")
-_INLINE_MARKS = re.compile(r"\*+|`+|(?<!\w)_+|_+(?!\w)")
+_CODE_SPAN = re.compile(r"(`+)(.+?)\1")
+# The text inside a pair holds no mark of its own kind, so a search from an
+# unpaired mark stops at the next one: linear on any line.
+_EMPHASIS = (
+    re.compile(r"(?<![\w*])(\*{1,3})(?=\S)([^*]+?)(?<=\S)\1(?![\w*])"),
+    re.compile(r"(?<![\w_])(_{1,3})(?=\S)([^_]+?)(?<=\S)\1(?![\w_])"),
+)
+
+
+def _unemphasized(text: str) -> str:
+    for pattern in _EMPHASIS:
+        text = pattern.sub(r"\2", text)
+    return text
 
 
 def _clean_line(line: str) -> str:
     """One line without its Markdown marks, for a status tail or a preview."""
-    return _INLINE_MARKS.sub("", _LEADING_MARKS.sub("", line)).strip()
+    # split() alternates prose, a span's backticks and its code, kept as written.
+    parts = _CODE_SPAN.split(_LEADING_MARKS.sub("", line))
+    return "".join(
+        _unemphasized(part) if index % 3 == 0 else part
+        for index, part in enumerate(parts)
+        if index % 3 != 1
+    ).strip()
 
 
 def _first_content_line(text: str, *, limit: int) -> str:

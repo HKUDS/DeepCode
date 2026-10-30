@@ -107,7 +107,9 @@ def wrap_offsets(text: str, width: int) -> list[int]:
         if body > width:
             for index, char in enumerate(unit):
                 size = get_character_cell_size(char)
-                if used and used + size > width and char not in _SPACES:
+                # Never before a space or a zero-width mark (a combining
+                # accent, a joiner): both belong to the character before.
+                if used and size and used + size > width and char not in _SPACES:
                     offsets.append(start + index)
                     used = 0
                 used += size
