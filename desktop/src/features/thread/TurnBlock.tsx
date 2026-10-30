@@ -422,6 +422,9 @@ function stepSubject(item: Item, t: TFunction): string {
 
 // A run opened on its own shows only its latest steps: a long one is hundreds.
 const AUTO_OPEN_STEPS = 20;
+// While the reader is away from the end the shown steps stay put, up to this
+// many; past that they slide again, so a run nobody watches stays cheap.
+const KEPT_STEPS_MAX = 2 * AUTO_OPEN_STEPS;
 
 /**
  * Whether a run of steps is open, and from which step it shows.
@@ -429,7 +432,8 @@ const AUTO_OPEN_STEPS = 20;
  * The run still at work at the end of a live Turn opens on its own, showing
  * its latest steps as they come. It folds once the agent moves on, unless the
  * reader is away from the end then: it is held open until they come back.
- * While they are away the shown steps stay put, new ones join at the end.
+ * While they are away the shown steps stay put and new ones join at the end,
+ * up to `KEPT_STEPS_MAX`.
  * Opening or closing it by hand, or the verbose transcript, wins over all of
  * that and shows every step.
  */
@@ -467,7 +471,9 @@ function useRunDisclosure({
   const showsLatest = chosen === null && !verbose && automatic;
   return {
     open,
-    firstShown: showsLatest ? (keptStart ?? latestStart) : 0,
+    firstShown: showsLatest
+      ? Math.max(keptStart ?? latestStart, stepCount - KEPT_STEPS_MAX)
+      : 0,
     toggle: () => setChosen(!open),
     showAll: () => setChosen(true),
   };

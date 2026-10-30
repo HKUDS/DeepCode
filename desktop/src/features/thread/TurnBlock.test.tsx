@@ -262,10 +262,15 @@ describe("TurnBlock", () => {
     expect(screen.getByText("command 5")).toBeTruthy();
     expect(screen.getByText("command 26")).toBeTruthy();
 
+    // A run nobody watches does not keep every step it adds.
+    update(steps(60), { status: "running", following: false });
+    expect(screen.queryByText("command 19")).toBeNull();
+    expect(screen.getByText("command 20")).toBeTruthy();
+
     // Back at the end, the latest steps show again.
-    update(steps(27), { status: "running", following: true });
-    expect(screen.queryByText("command 6")).toBeNull();
-    expect(screen.getByText("command 7")).toBeTruthy();
+    update(steps(60), { status: "running", following: true });
+    expect(screen.queryByText("command 39")).toBeNull();
+    expect(screen.getByText("command 40")).toBeTruthy();
   });
 
   it("does not open a group because one of its steps is selected", () => {
