@@ -387,8 +387,9 @@ def summarize_result(result: Any, limit: int = 400) -> str:
     A result longer than ``limit`` characters keeps its start and its end,
     joined by a line holding only ``…``: a command's summary or its error is
     usually at the end. Each end is cut at a line break when one is near;
-    where it is cut mid-line it says so with ``…`` there too. Pure and
-    defensive: any value becomes a string, never raises.
+    where it is cut mid-line it says so with ``…`` there too, so a preview
+    is at most ``limit + 5`` characters. Pure and defensive: any value
+    becomes a string, never raises.
     """
     if isinstance(result, str):
         text = result

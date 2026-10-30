@@ -33,9 +33,10 @@ from core.agent_runtime.compaction import message_chars
 from core.agent_runtime.context import EnvironmentContext
 from core.agent_runtime.hook import AgentHook, AgentHookContext
 from core.agent_runtime.microcompact import MicrocompactPolicy
-from core.agent_runtime.runner import ERROR_HINT, AgentRunner, AgentRunSpec
+from core.agent_runtime.runner import AgentRunner, AgentRunSpec
 from core.agent_runtime.token_meter import ProviderAnchoredTokenMeter
 from core.agent_runtime.tools.base import ToolResult
+from core.agent_runtime.tools.model_notes import for_people
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.events.protocol import (
     AgentMessage,
@@ -85,12 +86,16 @@ def _one_line_detail(value: str, *, limit: int = 80) -> str:
     return text[:limit] + ("…" if len(text) > limit else "")
 
 
-def _for_people(result: Any) -> Any:
-    """A tool result as people read it: without the nudge only the model needs."""
+def display_preview(result: Any) -> str:
+    """The bounded preview of a tool result that people see.
+
+    Used for a live Turn's tool items and for those rebuilt from the session
+    file, so both read the same.
+    """
     # A ToolResult is a str too; the preview needs only its text.
-    if isinstance(result, str):
-        return str(result).replace(ERROR_HINT, "")
-    return result
+    return summarize_result(
+        for_people(str(result)) if isinstance(result, str) else result
+    )
 
 
 def _is_error_result(result: Any) -> bool:
@@ -382,7 +387,7 @@ class _EventEmittingHook(AgentHook):
                     call_id=call.id,
                     name=call.name,
                     is_error=is_error,
-                    result_preview=summarize_result(_for_people(result)),
+                    result_preview=display_preview(result),
                     denied=event.get("status") == "denied",
                 )
             )

@@ -838,7 +838,23 @@ def test_a_command_result_reads_by_both_ends_on_one_line():
 
     assert len(shown) == 1
     assert "test session starts ===== … ===== 360 passed" in shown[0]
-    assert "360 passed" in shown[0]
+
+
+def test_a_two_line_command_result_shows_both_lines_side_by_side():
+    (elbow,) = _settled_elbow("[exit 1]\nnpm ERR! missing script: test")
+
+    assert "[exit 1] · npm ERR! missing script: test" in elbow
+
+
+def test_a_result_without_its_card_reads_by_its_first_line():
+    output = io.StringIO()
+    renderer = EventRenderer(Console(file=output, color_system=None, width=100))
+    renderer.on_event(
+        Event("1", ToolCompleted("lost", "bash", False, "first\nsecond\nlast"))
+    )
+
+    elbow = output.getvalue().splitlines()[-1]
+    assert "first" in elbow and "last" not in elbow
 
 
 def test_other_tools_say_what_came_back_by_their_first_line():

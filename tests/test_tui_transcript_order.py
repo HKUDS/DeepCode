@@ -210,12 +210,18 @@ def test_a_preview_cut_mid_line_says_so_at_the_cut():
 
 
 def test_a_preview_keeps_the_indentation_of_its_tail():
-    trace = "Traceback\n" + "".join(
-        f'  File "x{i}.py"\n    call_{i}()\n' for i in range(40)
-    )
-    preview = summarize_result(trace + "ValueError: bad", limit=400)
+    # The tail's cut falls near a line break, before an indented frame.
+    frames = "\n".join(["    frame()"] * 10)
+    text = "head\n" + "x" * 500 + "\n" + frames + "\nValueError: bad"
+    preview = summarize_result(text, limit=400)
 
-    assert "\n    call_39()\nValueError: bad" in preview
+    tail = preview.split("\n…\n")[1]
+    assert tail.startswith("    frame()")
+
+
+def test_a_preview_is_bounded_with_its_cut_marks():
+    for size in (401, 500, 5000):
+        assert len(summarize_result("y" * size, limit=400)) <= 405
 
 
 def test_program_output_reads_as_a_terminal_shows_it():
@@ -223,3 +229,26 @@ def test_program_output_reads_as_a_terminal_shows_it():
 
     raw = "\x1b[32mok\x1b[0m\tdone\r\n10%\r50%\r100%\nend\x1b]0;title\x07"
     assert terminal_text(raw) == "ok  done\n100%\nend"
+    # Escapes of every form, ended or cut short, never reach the terminal.
+    for raw in (
+        "bold\x1b(B plain",
+        "\x1b[38:2:255:0:0mred\x1b[0m",
+        "\x1b[>4;1mx",
+        "\x1b7a\x1b8b\x1b=c",
+        "text \x1b[3",
+        "link \x1b]8;;http://example.com",
+    ):
+        assert "\x1b" not in terminal_text(raw)
+    # A line a carriage return ends keeps its text.
+    assert terminal_text("progress 100%\r\r\nnext") == "progress 100%\nnext"
+
+
+def test_a_preview_for_people_leaves_out_the_models_notes():
+    from core.agent_runtime.tools.model_notes import ERROR_HINT, with_hook_context
+    from core.events.session import display_preview
+
+    result = with_hook_context(
+        "Error: lint failed" + ERROR_HINT, ["ruff found 2 issues"]
+    )
+
+    assert display_preview(result) == "Error: lint failed"

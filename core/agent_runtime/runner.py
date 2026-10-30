@@ -69,6 +69,7 @@ from core.agent_runtime.runtime import (
     repeated_external_lookup_error,
 )
 from core.agent_runtime.tools.base import ToolResult
+from core.agent_runtime.tools.model_notes import ERROR_HINT, with_hook_context
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.agent_runtime.tools.semantic_hint import build_miss_message
 from core.providers.base import (
@@ -142,11 +143,6 @@ def _build_precompact_checkpoint(
     if not parts:
         return None
     return prefix + "\n".join(parts)
-
-
-# Appended to every tool result the runner builds from a failure. It is for
-# the model; people reading the result have no use for it.
-ERROR_HINT = "\n\n[Analyze the error above and try a different approach.]"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1569,8 +1565,7 @@ class AgentRunner:
         """Append accumulated hook context to a tool result the model will read."""
         if not contexts:
             return result
-        joined = "\n\n".join(f"[hook] {c}" for c in contexts)
-        content = f"{result}\n\n{joined}"
+        content = with_hook_context(str(result), contexts)
         if isinstance(result, ToolResult):
             return result.with_content(content)
         return content

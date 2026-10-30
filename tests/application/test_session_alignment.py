@@ -123,6 +123,55 @@ def test_reading_an_up_to_date_thread_takes_no_write_lock(tmp_path: Path) -> Non
         application.close()
 
 
+def test_a_rebuilt_tool_result_shows_people_what_a_live_one_shows(
+    tmp_path: Path,
+) -> None:
+    from core.agent_runtime.tools.model_notes import ERROR_HINT, with_hook_context
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SessionStore(tmp_path / "sessions")
+    session = store.create_session(
+        title="tool work",
+        metadata={"kind": "tui", "workspace": str(workspace)},
+    )
+    sid = session.session_id
+    output = "Error: " + "lint failed\n" * 100 + "2 issues"
+    store.append_message(sid, "user", "lint it")
+    store.append_message(sid, "assistant", "", metadata={"toolCalls": [{"id": "c1"}]})
+    store.append_message(
+        sid,
+        "tool",
+        with_hook_context(output + ERROR_HINT, ["ruff ran"]),
+        metadata={"toolCallId": "c1", "name": "bash"},
+    )
+    store.append_message(sid, "assistant", "two issues remain")
+
+    application = DeepCodeApplication.open(
+        tmp_path / "state.sqlite3",
+        session_store=store,
+    )
+    try:
+        application.threads.list()
+        with application.database.read() as connection:
+            items = [
+                item
+                for turn in TurnRepository(connection).list_for_thread(sid)
+                for item in ItemRepository(connection).list_for_turn(turn.id)
+            ]
+    finally:
+        application.close()
+
+    preview = next(
+        item.payload["resultPreview"]
+        for item in items
+        if item.kind is ItemKind.COMMAND_EXECUTION
+    )
+    assert preview.endswith("2 issues")
+    assert "Analyze the error" not in preview and "[hook]" not in preview
+    assert len(preview) <= 405
+
+
 def test_rebuild_from_jsonl_shows_tool_activity_and_stays_idempotent(
     tmp_path: Path,
 ) -> None:

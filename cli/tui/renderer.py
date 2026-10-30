@@ -36,7 +36,6 @@ from rich.cells import cell_len
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.markup import escape
-from rich.padding import Padding
 from rich.text import Text
 
 from cli.transcript import TranscriptMode
@@ -207,13 +206,18 @@ def _fit_ends(first: str, last: str, width: int, *, skipped: bool) -> str:
     """
     if not last:
         return fit_head(first, width)
+    # A last line the preview cut into shows its end, where the news is.
+    fit_last = fit_tail if last.startswith(RESULT_ELISION) else fit_head
+    if skipped:
+        # The joining ellipsis already says text is left out between them.
+        first = first.removesuffix(RESULT_ELISION)
+        last = last.removeprefix(RESULT_ELISION)
     separator = f" {RESULT_ELISION} " if skipped else " · "
     joined = f"{first}{separator}{last}"
     if cell_len(joined) <= width:
         return joined
     room = max(2, width - cell_len(separator))
     first_width = min(cell_len(first), max(room // 2, room - cell_len(last)))
-    fit_last = fit_tail if last.startswith(RESULT_ELISION) else fit_head
     return (
         f"{fit_head(first, first_width)}{separator}{fit_last(last, room - first_width)}"
     )
@@ -996,32 +1000,33 @@ class EventRenderer:
         # The elbow is a SINGLE line: the result snippet is cut to the width
         # left over, so a long error path can never wrap into an unindented
         # mess below.
-        budget = _ELBOW_MIN_CELLS
+        fits = True
         if first_line:
             used = cell_len(theme.TOOL_RESULT_ELBOW) + 1 + cell_len(head) + 3
             budget = max(_ELBOW_MIN_CELLS, self.console.width - used - 1)
+            fits = cell_len(first_line) <= budget
             snippet = _fit_ends(first_line, last_line, budget, skipped=skipped)
             # A dot separates two facts; a space separates a mark from the
             # one fact it carries ("✓ total 0", but "✗ bash failed · …").
             separator = " · " if (rendered or msg.is_error) else " "
             mark += f"{separator}[{theme.TOOL_DETAIL_STYLE}]{escape(snippet)}[/]"
         self.console.print(f"{theme.TOOL_RESULT_ELBOW} {mark}", highlight=False)
-        if self.transcript_mode is TranscriptMode.VERBOSE and (
-            len(lines) > 1 or cell_len(first_line) > budget
+        if (
+            self.transcript_mode is TranscriptMode.VERBOSE
+            and not msg.denied
+            and (len(lines) > 1 or not fits)
         ):
             # Verbose shows the preview the elbow could not: its start and its
             # end, wrapped under the elbow rather than cut.
-            indent = cell_len(theme.TOOL_RESULT_ELBOW) + 1
-            self.console.print(
-                Padding(
-                    Text(
-                        terminal_text(preview).strip("\n"),
-                        style=theme.TOOL_DETAIL_STYLE,
-                    ),
-                    (0, 0, 0, indent),
-                    expand=False,
+            indent = " " * (cell_len(theme.TOOL_RESULT_ELBOW) + 1)
+            text = Text(terminal_text(preview).strip("\n"))
+            for row in text.wrap(self.console, self.console.width - len(indent) - 1):
+                self.console.print(
+                    f"{indent}{row.plain.rstrip()}",
+                    style=theme.TOOL_DETAIL_STYLE,
+                    markup=False,
+                    highlight=False,
                 )
-            )
         self._gap_pending = True
 
     def _on_plan_updated(self, msg) -> None:

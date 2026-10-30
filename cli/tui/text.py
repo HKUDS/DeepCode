@@ -28,22 +28,30 @@ from rich.cells import cell_len, set_cell_size
 _ELLIPSIS = "…"
 
 
-# Escape sequences a program writes for a terminal: colours, cursor moves,
-# window titles. Shown as text they are noise, and cut short they leak.
+# Escape sequences a program writes for a terminal (colours, cursor moves,
+# window titles, keypad modes), including ones a preview cut short, and the
+# control characters left over. Shown as text they are noise; cut short they
+# leak into the terminal.
 _TERMINAL_ESCAPE = re.compile(
-    r"\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])"
+    r"\x1b\][^\x07\x1b\n]*(?:\x07|\x1b\\)?"  # OSC, ended or cut short
+    r"|\x1b[P_^X][^\x1b\n]*(?:\x1b\\)?"  # DCS, APC, PM and SOS strings
+    r"|\x1b\[[0-?]*[ -/]*[@-~]?"  # CSI, ended or cut short
+    r"|\x1b[ -/]*[0-~]?"  # every other escape
+    r"|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]"  # other controls; tab, LF, CR stay
 )
 
 
 def terminal_text(text: str) -> str:
     """Program output as a terminal would have left it on screen.
 
-    Escape sequences go, a carriage return overwrites its line (progress
-    bars keep only their last frame) and tabs become spaces, so the width
-    Rich measures is the width shown.
+    Escape sequences go, a carriage return overwrites its line (a progress
+    bar keeps only its last frame) and tabs become spaces, so the width Rich
+    measures is the width shown.
     """
-    lines = _TERMINAL_ESCAPE.sub("", text).replace("\r\n", "\n").split("\n")
-    return "\n".join(line.rsplit("\r", 1)[-1].expandtabs(4) for line in lines)
+    lines = _TERMINAL_ESCAPE.sub("", text).split("\n")
+    return "\n".join(
+        line.rstrip("\r").rsplit("\r", 1)[-1].expandtabs(4) for line in lines
+    )
 
 
 def fit_head(text: str, width: int) -> str:
