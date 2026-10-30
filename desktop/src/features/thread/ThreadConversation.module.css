@@ -20,6 +20,21 @@
   padding: 42px 30px calc(var(--composer-clearance, 160px) + 42px);
 }
 
+.earlierTurns {
+  display: block;
+  margin: 0 auto 28px;
+  padding: 5px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  color: var(--text-tertiary);
+  font: var(--text-micro) var(--font-mono);
+}
+
+.earlierTurns:hover {
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+}
+
 .turnBlock {
   margin-bottom: 54px;
 }

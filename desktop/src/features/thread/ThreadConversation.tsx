@@ -18,7 +18,7 @@ import type {
 } from "../../generated/app-server";
 import type { TurnPlanState } from "../../app/workspaceState";
 import type { DesktopInspectorTab } from "../../app/useDesktopUi";
-import { buildConversationTurns } from "./conversationModel";
+import { buildConversationTurns, historyBatchStart } from "./conversationModel";
 import { PlanProgress } from "./PlanProgress";
 import styles from "./ThreadConversation.module.css";
 import { TurnBlock } from "./TurnBlock";
@@ -44,6 +44,10 @@ interface ThreadConversationProps {
 // How near the end still counts as at the end: room for a small nudge and for
 // fractional scroll positions.
 const FOLLOW_THRESHOLD = 40;
+// How much history a batch renders, in rows (see historyBatchStart): opening
+// a long Session costs this much, not its whole length. Earlier Turns load on
+// request.
+const HISTORY_BATCH_ROWS = 200;
 
 export function ThreadConversation({
   turns,
@@ -71,6 +75,25 @@ export function ThreadConversation({
     () => buildConversationTurns(turns, items),
     [items, turns],
   );
+  // The first Turn shown. Fixed once the history arrives, so Turns that come
+  // later never push older ones out of view.
+  const [firstTurnId, setFirstTurnId] = useState<string | null>(null);
+  if (firstTurnId === null && groupedTurns.length > 0) {
+    const start = historyBatchStart(
+      groupedTurns,
+      groupedTurns.length,
+      HISTORY_BATCH_ROWS,
+    );
+    setFirstTurnId(groupedTurns[start].id);
+  }
+  const firstShown = Math.max(
+    0,
+    groupedTurns.findIndex((group) => group.id === firstTurnId),
+  );
+  const showEarlierTurns = () => {
+    const start = historyBatchStart(groupedTurns, firstShown, HISTORY_BATCH_ROWS);
+    setFirstTurnId(groupedTurns[start].id);
+  };
   const hasConversation = groupedTurns.length > 0;
   const approvalsByItem = useMemo(
     () => new Map(approvals.map((approval) => [approval.itemId, approval])),
@@ -210,7 +233,20 @@ export function ThreadConversation({
           ref={contentRef}
           onClick={handleContentClick}
         >
-          {groupedTurns.map((group) => (
+          {firstShown > 0 ? (
+            <button
+              type="button"
+              className={styles.earlierTurns}
+              // Loading history above is reading it: see handleContentClick.
+              data-reveals=""
+              onClick={showEarlierTurns}
+            >
+              {t("thread.earlierTurns", "Show earlier Turns ({{count}})", {
+                count: firstShown,
+              })}
+            </button>
+          ) : null}
+          {groupedTurns.slice(firstShown).map((group) => (
             <TurnBlock
               key={group.id}
               group={group}

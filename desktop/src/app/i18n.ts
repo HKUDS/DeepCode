@@ -883,6 +883,7 @@ const ZH_CN: Record<string, string> = {
   "turn.work.searches": "搜索 {{count}}",
   "turn.work.tools": "工具 {{count}}",
   "turn.work.failed": "失败 {{count}}",
+  "thread.earlierTurns": "显示更早的 Turn（{{count}}）",
   "turn.goalContinued": "目标已自动继续",
   "turn.goalRequested": "继续推进目标",
   "turn.goalInstruction": "发给模型的指令",

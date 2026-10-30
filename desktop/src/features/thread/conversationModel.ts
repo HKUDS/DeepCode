@@ -254,6 +254,33 @@ export function buildConversationTurns(
     }));
 }
 
+/**
+ * What a Turn costs to show, in rows: a folded run of steps is one row, so a
+ * Turn of hundreds of steps is cheap while its runs stay folded.
+ */
+function turnRows(group: ConversationTurn): number {
+  return group.userMessages.length + group.timeline.length + (group.completion ? 1 : 0);
+}
+
+/**
+ * Where a batch of history ending before `end` starts: as many Turns as fit
+ * in `budget` rows, counting back from `end`, and always at least one.
+ */
+export function historyBatchStart(
+  groups: readonly ConversationTurn[],
+  end: number,
+  budget: number,
+): number {
+  let start = end;
+  let rows = 0;
+  while (start > 0) {
+    rows += turnRows(groups[start - 1]);
+    if (rows > budget && start < end) break;
+    start -= 1;
+  }
+  return start;
+}
+
 export function turnDurationSeconds(
   turn: Turn | null,
   now = Date.now(),

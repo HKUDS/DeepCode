@@ -4,6 +4,7 @@ import type { Item, Turn } from "../../generated/app-server";
 import {
   buildConversationTurns,
   formatTurnDuration,
+  historyBatchStart,
   summarizeWork,
   turnDurationSeconds,
 } from "./conversationModel";
@@ -188,6 +189,34 @@ describe("conversationModel", () => {
       type: "item",
       item: { id: "orphan" },
     });
+  });
+
+  it("batches history from the end by rows shown, always at least one Turn", () => {
+    // Turns of 3, 3, 10 and 3 rows: each assistant message is one.
+    const sizes = [3, 3, 10, 3];
+    const turns = sizes.map((_, index) => ({ ...turn, id: `turn-${index}`, ordinal: index + 1 }));
+    const items = sizes.flatMap((size, index) =>
+      Array.from({ length: size }, (_, step) => ({
+        ...item(`t${index}-${step}`, step + 1, "assistant_message", "text"),
+        turnId: `turn-${index}`,
+      })),
+    );
+    const groups = buildConversationTurns(turns, items);
+
+    expect(historyBatchStart(groups, 4, 100)).toBe(0);
+    expect(historyBatchStart(groups, 4, 13)).toBe(2);
+    expect(historyBatchStart(groups, 4, 12)).toBe(3);
+    // A Turn larger than the budget still comes whole.
+    expect(historyBatchStart(groups, 3, 5)).toBe(2);
+    expect(historyBatchStart(groups, 2, 6)).toBe(0);
+
+    // A folded run of hundreds of steps is a single row.
+    const steps = Array.from({ length: 300 }, (_, step) =>
+      item(`step-${step}`, step + 1, "command_execution", `step ${step}`),
+    );
+    const [long] = buildConversationTurns([turn], steps);
+    expect(historyBatchStart([long], 1, 0)).toBe(0);
+    expect(long.timeline).toHaveLength(1);
   });
 
   it("formats stable elapsed durations for completed Turns", () => {

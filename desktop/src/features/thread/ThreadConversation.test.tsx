@@ -320,4 +320,43 @@ describe("ThreadConversation", () => {
     rerender(conversation(turns, items, { ...outcome, decidedByTurnId: null }));
     expect(screen.queryByRole("region", { name: "Goal complete" })).toBeNull();
   });
+
+  it("opens a long Session at its recent history and loads earlier Turns on request", () => {
+    // 30 Turns of 20 rows: a batch of history holds 10 of them.
+    const turns = Array.from({ length: 30 }, (_, index): Turn => ({
+      ...turn,
+      id: `turn-${index}`,
+      ordinal: index + 1,
+      status: "completed",
+    }));
+    const note = (id: string, turnId: string, text: string): Item => ({
+      ...item(id, 1, text),
+      turnId,
+      kind: "assistant_message",
+      payload: { text, phase: "commentary" },
+    });
+    const items = turns.flatMap((each, index) =>
+      Array.from({ length: 20 }, (_, step) =>
+        note(`t${index}-${step}`, each.id, `Turn ${index} line ${step}`),
+      ),
+    );
+    const { rerender } = render(conversation(turns, items));
+    expect(screen.queryByText("Turn 19 line 0")).toBeNull();
+    expect(screen.getByText("Turn 20 line 0")).toBeTruthy();
+
+    // A new Turn does not push the first shown one out.
+    const next: Turn = { ...turn, id: "turn-30", ordinal: 31, status: "completed" };
+    rerender(
+      conversation([...turns, next], [...items, note("t30", next.id, "Turn 30 line 0")]),
+    );
+    expect(screen.getByText("Turn 20 line 0")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show earlier Turns (20)" }));
+    expect(screen.getByText("Turn 10 line 0")).toBeTruthy();
+    expect(screen.queryByText("Turn 9 line 0")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show earlier Turns (10)" }));
+    expect(screen.getByText("Turn 0 line 0")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Show earlier Turns/ })).toBeNull();
+  });
 });
