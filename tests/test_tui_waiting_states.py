@@ -772,3 +772,20 @@ def test_approval_status_answers_are_unchanged() -> None:
     assert tui_app._APPROVAL_ANSWERS["a"] is ApprovalStatus.APPROVED_SESSION
     assert tui_app._APPROVAL_ANSWERS["y"] is ApprovalStatus.APPROVED_ONCE
     assert tui_app._APPROVAL_ANSWERS["n"] is ApprovalStatus.DENIED
+
+
+def test_ctrl_o_says_which_transcript_mode_it_chose_while_work_runs(
+    monkeypatch,
+) -> None:
+    clock = [10.0]
+    monkeypatch.setattr(renderer_module, "monotonic", lambda: clock[0])
+    renderer = EventRenderer(Console(file=io.StringIO(), color_system=None, width=120))
+    renderer.on_event(Event("1", TurnStarted()))
+
+    renderer.cycle_transcript_mode()
+    assert "Transcript: verbose from here on" in renderer.status_line()
+    fragments = "".join(text for _style, text in renderer.status_fragments())
+    assert "Transcript: verbose from here on" in fragments
+
+    clock[0] = 14.0
+    assert "Transcript" not in renderer.status_line()

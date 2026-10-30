@@ -62,6 +62,9 @@ _QUEUED_DETAIL = "waiting to start"  # until the app learns why
 # How the kernel reports a call the user denied at its approval prompt.
 _USER_DENIAL = "permission denied: user rejected"
 APPROVAL_STATUS = "Waiting for your approval"
+# How long the status line says which transcript mode Ctrl+O chose, while a
+# Turn's activity otherwise fills it.
+_MODE_NOTICE_SECONDS = 3.0
 
 
 @dataclass(slots=True)
@@ -301,6 +304,7 @@ class EventRenderer:
         self._queued: dict[str, float] = {}
         self._running: set[str] = set()
         self._queue_reason: str | None = None
+        self._mode_chosen_at: float | None = None
 
     def _emit_gap(self) -> None:
         if self._gap_pending:
@@ -385,7 +389,18 @@ class EventRenderer:
 
     def cycle_transcript_mode(self) -> str:
         mode = self.set_transcript_mode(self.transcript_mode.next())
+        # Only what comes next changes, so say so where the user looks.
+        self._mode_chosen_at = monotonic()
         return mode.value
+
+    def _mode_notice(self) -> str | None:
+        """The mode Ctrl+O just chose, for a few seconds after it."""
+        if self._mode_chosen_at is None:
+            return None
+        if monotonic() - self._mode_chosen_at > _MODE_NOTICE_SECONDS:
+            self._mode_chosen_at = None
+            return None
+        return f"Transcript: {self.transcript_mode.value} from here on"
 
     # -- waiting states (fed from service events by the app) ----------------
 
@@ -546,6 +561,8 @@ class EventRenderer:
         parts = [label, f"{int(elapsed)}s"]
         if detail:
             parts.append(detail)
+        if notice := self._mode_notice():
+            parts.append(notice)
         return f" {' · '.join(parts)} "
 
     def preview_lines(self) -> list[str]:
@@ -609,7 +626,10 @@ class EventRenderer:
         tail = f" · {int(elapsed)}s"
         if detail:
             tail += f" · {detail}"
-        fragments.append((theme.STATUS_DETAIL_PTK, tail + " "))
+        fragments.append((theme.STATUS_DETAIL_PTK, tail))
+        if notice := self._mode_notice():
+            fragments.append((theme.STATUS_LABEL_PTK, f" · {notice}"))
+        fragments.append((theme.STATUS_DETAIL_PTK, " "))
         return fragments
 
     # -- event entrypoint -----------------------------------------------------
