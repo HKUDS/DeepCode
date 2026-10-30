@@ -152,11 +152,12 @@ shown just above. `Queued` says what your message waits for: the current Turn
 in this session, another session working in the same folder, or a free slot
 (the service runs two Turns at once). A message queued behind a running Turn
 shows as `1 queued next`. While an approval waits, nothing runs and the line
-stands still. A tool call you denied shows as `Denied by you`, and one a
-permission rule or a hook refused as `⊘ … declined` with its reason. If it
-stays there unexpectedly
-long, see [Troubleshooting](troubleshooting.md).
-When idle, the line shows your display mode and keyboard hints.
+stands still; if it stays there unexpectedly long, see
+[Troubleshooting](troubleshooting.md). When idle, the line shows your display
+mode and keyboard hints.
+
+A tool call you denied shows as `Denied by you`, and one a permission rule or a
+hook refused as `⊘ … declined` with its reason.
 
 Leaving with `Ctrl-D` while a task runs does not stop it: the service keeps
 running it, and the TUI prints the command to come back to it
