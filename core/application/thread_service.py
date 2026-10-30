@@ -42,6 +42,7 @@ from core.domain.runtime_coordination import ExecutionClass
 from core.domain.thread import Thread, ThreadMode, ThreadStatus
 from core.domain.turn import Turn, TurnExecutor, TurnStatus
 from core.domain.workflow import WorkflowRun, WorkflowStatus
+from core.events.protocol import summarize_result
 from core.persistence.automation_repository import AutomationRepository
 from core.persistence.database import Database
 from core.persistence.event_repository import EventRepository
@@ -124,7 +125,8 @@ def _projected_item_payload(message: SessionMessage) -> dict[str, object]:
         "detail": message.content[:160],
         "activity": None,
         "isError": False,
-        "resultPreview": message.content,
+        # The same bounded preview a live Turn stores, not the whole output.
+        "resultPreview": summarize_result(message.content),
         "projectedFromSession": True,
     }
 

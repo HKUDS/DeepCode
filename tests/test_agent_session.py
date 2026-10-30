@@ -640,6 +640,9 @@ async def test_denied_tool_marks_completed_as_error():
     assert completed.is_error is True
     # Refused, not broken: it never ran.
     assert completed.denied is True
+    # The nudge appended for the model is not shown to people.
+    assert "Analyze the error above" not in completed.result_preview
+    assert "blocked" in completed.result_preview
 
 
 @pytest.mark.asyncio

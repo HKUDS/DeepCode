@@ -36,12 +36,13 @@ from rich.cells import cell_len
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.markup import escape
+from rich.padding import Padding
 from rich.text import Text
 
 from cli.transcript import TranscriptMode
 from cli.tui import animation, theme
 from cli.tui.markdown_stream import MarkdownStream
-from cli.tui.text import fit_head, fit_tail, workspace_path
+from cli.tui.text import fit_head, fit_tail, terminal_text, workspace_path
 from core.events.protocol import RESULT_ELISION, Event
 from core.reasoning import ReasoningAvailability, ReasoningChannel
 
@@ -191,25 +192,30 @@ def _duration_label(duration_ms: int | None) -> str | None:
 
 
 def _result_lines(preview: str) -> list[str]:
-    """A result preview's lines with content, without its elision mark."""
-    return [
-        line.strip()
-        for line in preview.splitlines()
-        if line.strip() and line.strip() != RESULT_ELISION
-    ]
+    """A result preview's lines with content, as a terminal shows them,
+    without the line that marks where the preview skips."""
+    lines = (line.strip() for line in terminal_text(preview).split("\n"))
+    return [line for line in lines if line and line != RESULT_ELISION]
 
 
-def _fit_ends(first: str, last: str, width: int) -> str:
-    """``first … last`` within ``width`` cells, or ``first`` alone."""
+def _fit_ends(first: str, last: str, width: int, *, skipped: bool) -> str:
+    """``first`` and ``last`` on one line within ``width`` cells.
+
+    ``…`` joins them when lines between them are left out, `` · `` when
+    they are all there is. Each end gets the room it needs, up to half; a
+    last line the preview cut into keeps its real end.
+    """
     if not last:
         return fit_head(first, width)
-    joined = f"{first} {RESULT_ELISION} {last}"
+    separator = f" {RESULT_ELISION} " if skipped else " · "
+    joined = f"{first}{separator}{last}"
     if cell_len(joined) <= width:
         return joined
-    # Each end gets half; the last line keeps its start, where its point is.
-    half = max(1, (width - 3) // 2)
+    room = max(2, width - cell_len(separator))
+    first_width = min(cell_len(first), max(room // 2, room - cell_len(last)))
+    fit_last = fit_tail if last.startswith(RESULT_ELISION) else fit_head
     return (
-        f"{fit_head(first, half)} {RESULT_ELISION} {fit_head(last, width - half - 3)}"
+        f"{fit_head(first, first_width)}{separator}{fit_last(last, room - first_width)}"
     )
 
 
@@ -953,9 +959,13 @@ class EventRenderer:
         preview = getattr(msg, "result_preview", "") or ""
         lines = _result_lines(preview)
         first_line = lines[0] if lines else ""
-        # A result's news is often its last line (a test summary, the error
-        # under a traceback), so a longer one shows both ends.
-        last_line = lines[-1] if len(lines) > 1 else ""
+        # A command's news is often its last line (a test summary, the error
+        # under a traceback), so its output shows both ends. For other tools
+        # the first line says what came back; their last is often a listing's
+        # tail or a note for the model.
+        both_ends = call is not None and call.kind == "run" and len(lines) > 1
+        last_line = lines[-1] if both_ends else ""
+        skipped = len(lines) > 2 or f"\n{RESULT_ELISION}\n" in preview
 
         if msg.denied and _USER_DENIAL in first_line:
             # The user said no: the approval's reason is on screen above and
@@ -986,26 +996,32 @@ class EventRenderer:
         # The elbow is a SINGLE line: the result snippet is cut to the width
         # left over, so a long error path can never wrap into an unindented
         # mess below.
+        budget = _ELBOW_MIN_CELLS
         if first_line:
             used = cell_len(theme.TOOL_RESULT_ELBOW) + 1 + cell_len(head) + 3
             budget = max(_ELBOW_MIN_CELLS, self.console.width - used - 1)
-            snippet = _fit_ends(first_line, last_line, budget)
+            snippet = _fit_ends(first_line, last_line, budget, skipped=skipped)
             # A dot separates two facts; a space separates a mark from the
             # one fact it carries ("✓ total 0", but "✗ bash failed · …").
             separator = " · " if (rendered or msg.is_error) else " "
             mark += f"{separator}[{theme.TOOL_DETAIL_STYLE}]{escape(snippet)}[/]"
         self.console.print(f"{theme.TOOL_RESULT_ELBOW} {mark}", highlight=False)
-        if self.transcript_mode is TranscriptMode.VERBOSE and len(lines) > 1:
-            # Verbose shows what came back, as far as the preview holds it.
-            indent = " " * (cell_len(theme.TOOL_RESULT_ELBOW) + 1)
-            width = max(_ELBOW_MIN_CELLS, self.console.width - len(indent) - 1)
-            for line in preview.splitlines():
-                if line.strip():
-                    self.console.print(
-                        f"{indent}[{theme.TOOL_DETAIL_STYLE}]"
-                        f"{escape(fit_head(line.rstrip(), width))}[/]",
-                        highlight=False,
-                    )
+        if self.transcript_mode is TranscriptMode.VERBOSE and (
+            len(lines) > 1 or cell_len(first_line) > budget
+        ):
+            # Verbose shows the preview the elbow could not: its start and its
+            # end, wrapped under the elbow rather than cut.
+            indent = cell_len(theme.TOOL_RESULT_ELBOW) + 1
+            self.console.print(
+                Padding(
+                    Text(
+                        terminal_text(preview).strip("\n"),
+                        style=theme.TOOL_DETAIL_STYLE,
+                    ),
+                    (0, 0, 0, indent),
+                    expand=False,
+                )
+            )
         self._gap_pending = True
 
     def _on_plan_updated(self, msg) -> None:

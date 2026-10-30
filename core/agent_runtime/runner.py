@@ -144,6 +144,11 @@ def _build_precompact_checkpoint(
     return prefix + "\n".join(parts)
 
 
+# Appended to every tool result the runner builds from a failure. It is for
+# the model; people reading the result have no use for it.
+ERROR_HINT = "\n\n[Analyze the error above and try a different approach.]"
+
+
 @dataclass(frozen=True, slots=True)
 class _Refusal:
     """Why a tool call may not run.
@@ -1271,7 +1276,6 @@ class AgentRunner:
         tool_call: ToolCallRequest,
         external_lookup_counts: dict[str, int],
     ) -> tuple[Any, dict[str, str], BaseException | None]:
-        _HINT = "\n\n[Analyze the error above and try a different approach.]"
         allowed = spec.allowed_tool_names()
         if allowed is not None and tool_call.name not in allowed:
             visible = [
@@ -1290,7 +1294,7 @@ class AgentRunner:
                     f"Available: {available}"
                 )
                 return (
-                    message + _HINT,
+                    message + ERROR_HINT,
                     {
                         "name": tool_call.name,
                         "status": "error",
@@ -1307,7 +1311,7 @@ class AgentRunner:
                 f"Available: {available}"
             )
             return (
-                message + _HINT,
+                message + ERROR_HINT,
                 {
                     "name": tool_call.name,
                     "status": "denied",
@@ -1327,8 +1331,8 @@ class AgentRunner:
                 "detail": "repeated external lookup blocked",
             }
             if spec.fail_on_tool_error:
-                return lookup_error + _HINT, event, RuntimeError(lookup_error)
-            return lookup_error + _HINT, event, None
+                return lookup_error + ERROR_HINT, event, RuntimeError(lookup_error)
+            return lookup_error + ERROR_HINT, event, None
 
         # PreToolUse hook (C3). Fires before the permission gate — it may block
         # the call (errors-as-data, tool never runs), rewrite its arguments, or
@@ -1347,7 +1351,7 @@ class AgentRunner:
                         "detail": reason.replace("\n", " ").strip()[:120],
                     }
                     return (
-                        f"Error: blocked by PreToolUse hook: {reason}" + _HINT,
+                        f"Error: blocked by PreToolUse hook: {reason}" + ERROR_HINT,
                         event,
                         None,
                     )
@@ -1368,7 +1372,7 @@ class AgentRunner:
                 "detail": refusal.reason.replace("\n", " ").strip()[:120],
             }
             result = self._compose_hook_context(
-                f"Error: permission denied: {refusal.reason}" + _HINT, pre_contexts
+                f"Error: permission denied: {refusal.reason}" + ERROR_HINT, pre_contexts
             )
             return result, event, None
 
@@ -1389,7 +1393,7 @@ class AgentRunner:
             }
             # Tool never ran (bad args) — surface pre-hook context, no PostToolUse.
             return (
-                self._compose_hook_context(prep_error + _HINT, pre_contexts),
+                self._compose_hook_context(prep_error + ERROR_HINT, pre_contexts),
                 event,
                 RuntimeError(prep_error) if spec.fail_on_tool_error else None,
             )
@@ -1433,7 +1437,7 @@ class AgentRunner:
                         spec,
                         tool_call,
                         ToolResult(
-                            message + _HINT,
+                            message + ERROR_HINT,
                             is_error=True,
                             metadata={
                                 "error_code": "TOOL_TIMEOUT",
@@ -1475,7 +1479,7 @@ class AgentRunner:
             return await self._finish_tool(
                 spec,
                 tool_call,
-                result + _HINT,
+                result + ERROR_HINT,
                 event,
                 RuntimeError(result) if spec.fail_on_tool_error else None,
                 pre_contexts,

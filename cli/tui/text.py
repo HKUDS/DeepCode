@@ -20,11 +20,30 @@ neither.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from rich.cells import cell_len, set_cell_size
 
 _ELLIPSIS = "…"
+
+
+# Escape sequences a program writes for a terminal: colours, cursor moves,
+# window titles. Shown as text they are noise, and cut short they leak.
+_TERMINAL_ESCAPE = re.compile(
+    r"\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])"
+)
+
+
+def terminal_text(text: str) -> str:
+    """Program output as a terminal would have left it on screen.
+
+    Escape sequences go, a carriage return overwrites its line (progress
+    bars keep only their last frame) and tabs become spaces, so the width
+    Rich measures is the width shown.
+    """
+    lines = _TERMINAL_ESCAPE.sub("", text).replace("\r\n", "\n").split("\n")
+    return "\n".join(line.rsplit("\r", 1)[-1].expandtabs(4) for line in lines)
 
 
 def fit_head(text: str, width: int) -> str:

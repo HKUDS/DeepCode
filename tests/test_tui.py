@@ -809,38 +809,83 @@ _TEST_RUN = "\n".join(
 )
 
 
-def _settled_elbow(mode: TranscriptMode) -> list[str]:
+def _settled_elbow(
+    result: str,
+    *,
+    mode: TranscriptMode = TranscriptMode.NORMAL,
+    kind: ToolActivityKind = ToolActivityKind.RUN,
+    width: int = 100,
+) -> list[str]:
     from core.events.protocol import summarize_result
 
     output = io.StringIO()
     renderer = EventRenderer(
-        Console(file=output, color_system=None, width=100),
+        Console(file=output, color_system=None, width=width),
         transcript_mode=mode,
     )
-    renderer.on_event(Event("1", ToolStarted("call", "bash", "pytest")))
+    activity = ToolActivity(kind, kind.value.title(), "subject")
+    renderer.on_event(Event("1", ToolStarted("call", "tool", activity=activity)))
     renderer.on_event(
-        Event("2", ToolCompleted("call", "bash", False, summarize_result(_TEST_RUN)))
+        Event("2", ToolCompleted("call", "tool", False, summarize_result(result)))
     )
     lines = output.getvalue().splitlines()
     elbow = next(index for index, line in enumerate(lines) if "⎿" in line)
     return lines[elbow:]
 
 
-def test_a_long_result_reads_by_both_ends_on_one_line():
-    shown = _settled_elbow(TranscriptMode.NORMAL)
+def test_a_command_result_reads_by_both_ends_on_one_line():
+    shown = _settled_elbow(_TEST_RUN)
 
     assert len(shown) == 1
-    assert "test session starts" in shown[0]
+    assert "test session starts ===== … ===== 360 passed" in shown[0]
     assert "360 passed" in shown[0]
 
 
+def test_other_tools_say_what_came_back_by_their_first_line():
+    listing = "\n".join(f"src/file_{index}.py" for index in range(20))
+    (elbow,) = _settled_elbow(listing, kind=ToolActivityKind.LIST)
+
+    assert "src/file_0.py" in elbow
+    assert "file_19" not in elbow
+
+
+def test_a_short_first_line_leaves_the_room_to_the_last():
+    from cli.tui.renderer import _fit_ends
+
+    shown = _fit_ends(
+        "[exit 1]",
+        "AssertionError: expected 3, got 4 in test_calculator",
+        40,
+        skipped=True,
+    )
+    assert shown.startswith("[exit 1] … AssertionError: expected 3")
+    # The short first line takes only what it needs; the rest goes to the last.
+    assert 38 <= len(shown) <= 40
+
+
+def test_a_last_line_the_preview_cut_into_keeps_its_end():
+    # Longer than the preview holds, so the preview cuts into the last line.
+    shown = _settled_elbow("start\n" + "x" * 600 + " the real end", width=60)
+
+    assert shown[0].rstrip().endswith("the real end")
+
+
 def test_the_verbose_transcript_shows_what_came_back():
-    elbow, *below = _settled_elbow(TranscriptMode.VERBOSE)
+    elbow, *below = _settled_elbow(_TEST_RUN, mode=TranscriptMode.VERBOSE)
 
     assert "360 passed" in elbow
     assert any("tests/test_0.py" in line for line in below)
     assert any(line.strip() == "…" for line in below)
     assert below[-1].strip() == "===== 360 passed in 1.2s ====="
+
+
+def test_verbose_wraps_a_long_line_under_the_elbow():
+    error = "Error: " + "configuration key not found " * 8
+    elbow, *below = _settled_elbow(error, mode=TranscriptMode.VERBOSE, width=60)
+
+    assert len(below) >= 2
+    assert all(line.startswith("   ") for line in below)
+    assert "".join(line.strip() for line in below).count("configuration") == 8
 
 
 def test_elbow_names_its_card_only_while_calls_overlap():

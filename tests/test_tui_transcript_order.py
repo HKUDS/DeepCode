@@ -200,3 +200,26 @@ def test_a_long_result_preview_keeps_both_ends_at_line_breaks():
     # Neither end is cut mid-line.
     assert all(line in lines for line in head.splitlines() + tail.splitlines())
     assert len(preview) <= 400 + len("\n…\n")
+
+
+def test_a_preview_cut_mid_line_says_so_at_the_cut():
+    preview = summarize_result("x" * 500, limit=400)
+
+    head, elision, tail = preview.split("\n")
+    assert head.endswith("…") and elision == "…" and tail.startswith("…")
+
+
+def test_a_preview_keeps_the_indentation_of_its_tail():
+    trace = "Traceback\n" + "".join(
+        f'  File "x{i}.py"\n    call_{i}()\n' for i in range(40)
+    )
+    preview = summarize_result(trace + "ValueError: bad", limit=400)
+
+    assert "\n    call_39()\nValueError: bad" in preview
+
+
+def test_program_output_reads_as_a_terminal_shows_it():
+    from cli.tui.text import terminal_text
+
+    raw = "\x1b[32mok\x1b[0m\tdone\r\n10%\r50%\r100%\nend\x1b]0;title\x07"
+    assert terminal_text(raw) == "ok  done\n100%\nend"
