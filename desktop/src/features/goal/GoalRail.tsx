@@ -21,11 +21,8 @@ import type {
   Turn,
 } from "../../generated/app-server";
 import type { GoalDefinitionInput } from "../../app/useWorkspaceController";
-import {
-  deriveGoalPresentation,
-  formatOutcomeTime,
-  outcomeDecider,
-} from "./goalPresentation";
+import { deriveGoalPresentation } from "./goalPresentation";
+import { GoalOutcomeView } from "./GoalOutcomeView";
 import styles from "./GoalRail.module.css";
 
 interface GoalRailProps {
@@ -246,39 +243,11 @@ export function GoalRail({
               </p>
               {outcome ? (
                 <section className={styles.outcome} aria-label={t("goal.outcome", "Goal outcome")}>
-                  <header>
-                    <strong>
-                      {outcome.status === "complete"
-                        ? t("goal.completionOutcome", "Completion outcome")
-                        : t("goal.blockedOutcome", "Blocked outcome")}
-                    </strong>
-                    <small>
-                      {outcomeDecider(outcome.source, t)}
-                      {" · "}
-                      {formatOutcomeTime(outcome.decidedAt)}
-                    </small>
-                  </header>
-                  <p>{outcome.reason}</p>
+                  <GoalOutcomeView outcome={outcome} onSelectEvidence={onSelectEvidence} />
                   {outcome.decidedByTurnId ? (
                     <small>
                       {t("goal.decidingTurn", "Deciding Turn")} <code>{shortId(outcome.decidedByTurnId)}</code>
                     </small>
-                  ) : null}
-                  {outcome.evidenceRefs.length ? (
-                    <div className={styles.evidence}>
-                      <span>{t("goal.relatedActivity", "Related activity")}</span>
-                      {outcome.evidenceRefs.map((evidence) => (
-                        <button
-                          type="button"
-                          key={evidence.itemId}
-                          onClick={() => onSelectEvidence(evidence.itemId)}
-                          title={`Open ${evidence.kind.replaceAll("_", " ")} details`}
-                        >
-                          <Check size={12} />
-                          <span>{evidence.summary}</span>
-                        </button>
-                      ))}
-                    </div>
                   ) : null}
                 </section>
               ) : null}

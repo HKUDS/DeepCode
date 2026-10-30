@@ -1,24 +1,13 @@
-.card {
+/* Tracks no wider than their box: long activity lines end in an ellipsis. */
+.outcome {
   display: grid;
-  /* A track no wider than the card: long evidence lines end in an ellipsis. */
   grid-template-columns: minmax(0, 1fr);
   gap: 8px;
-  margin-top: 18px;
-  padding: 14px 16px;
-  border: 1px solid var(--border-subtle);
-  border-left: 3px solid var(--success);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--success-soft) 55%, var(--surface-raised));
   color: var(--text-secondary);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
 }
 
-.card[data-status="blocked"] {
-  border-left-color: var(--danger);
-  background: color-mix(in srgb, var(--danger-soft) 55%, var(--surface-raised));
-}
-
-.card > header {
+.outcome > header {
   display: flex;
   min-width: 0;
   flex-wrap: wrap;
@@ -26,37 +15,38 @@
   gap: 4px 8px;
 }
 
-.card > header > svg {
+.outcome > header > svg {
   flex: 0 0 auto;
   color: var(--success);
 }
 
-.card[data-status="blocked"] > header > svg {
-  color: var(--danger);
+/* Blocked means it needs the user, not that something broke. */
+.outcome[data-status="blocked"] > header > svg {
+  color: var(--attention);
 }
 
-.card > header strong {
+.outcome > header strong {
   color: var(--text-primary);
   font-weight: var(--weight-bold);
 }
 
-.card > header small {
+.outcome > header small {
   color: var(--text-tertiary);
   font: var(--text-micro) var(--font-mono);
 }
 
-.evidence {
+.related {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 4px;
 }
 
-.evidence > span {
+.related > span {
   color: var(--text-tertiary);
   font: var(--text-micro) var(--font-mono);
 }
 
-.evidence ul {
+.related ul {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 2px;
@@ -65,7 +55,7 @@
   list-style: none;
 }
 
-.evidence button {
+.related button {
   display: flex;
   width: 100%;
   min-width: 0;
@@ -79,13 +69,13 @@
   text-align: left;
 }
 
-.evidence button > span {
+.related button > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.evidence button:hover {
+.related button:hover {
   background: var(--surface-hover);
   color: var(--text-primary);
 }

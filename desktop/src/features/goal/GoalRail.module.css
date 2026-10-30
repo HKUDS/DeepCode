@@ -231,20 +231,6 @@
   background: var(--surface-inset);
 }
 
-.outcome > header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.outcome > header strong {
-  color: var(--text-primary);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-bold);
-}
-
-.outcome > header small,
 .outcome > small {
   color: var(--text-tertiary);
   font: var(--text-micro) var(--font-mono);
@@ -252,48 +238,6 @@
 
 .outcome code {
   color: var(--text-secondary);
-}
-
-.evidence {
-  display: grid;
-  gap: 4px;
-  margin-top: 2px;
-}
-
-.evidence > span {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  font-weight: var(--weight-bold);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-caps);
-}
-
-.evidence button {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: 13px minmax(0, 1fr);
-  align-items: center;
-  gap: 5px;
-  padding: 5px 7px;
-  border-radius: var(--radius-xs);
-  color: var(--text-secondary);
-  text-align: left;
-}
-
-.evidence button:hover {
-  background: var(--surface-hover);
-  color: var(--text-primary);
-}
-
-.evidence button svg {
-  color: var(--success);
-}
-
-.evidence button span {
-  overflow: hidden;
-  font-size: var(--text-micro);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .clearButton {

@@ -46,6 +46,7 @@ function item(
 interface TurnView {
   transcriptMode?: TranscriptMode;
   status?: Turn["status"];
+  errorMessage?: string;
   selectedItemId?: string | null;
   following?: boolean;
   goalOutcome?: GoalOutcome | null;
@@ -55,7 +56,13 @@ interface TurnView {
 
 function turnBlock(items: Item[], view: TurnView = {}) {
   const [group] = buildConversationTurns(
-    [{ ...turn, status: view.status ?? turn.status }],
+    [
+      {
+        ...turn,
+        status: view.status ?? turn.status,
+        errorMessage: view.errorMessage ?? turn.errorMessage,
+      },
+    ],
     items,
   );
   return (
@@ -316,37 +323,58 @@ describe("TurnBlock", () => {
     expect(screen.queryByText("Commands 2")).toBeNull();
   });
 
-  it("ends the deciding Turn with the Goal's outcome and its evidence", () => {
+  const blocked: GoalOutcome = {
+    status: "blocked",
+    reason: "The API key is missing.",
+    source: "runtime",
+    decidedByTurnId: turn.id,
+    decidedAt: "2026-07-23T01:10:00Z",
+    evidenceRefs: [
+      {
+        itemId: "test",
+        turnId: turn.id,
+        kind: "command_execution",
+        status: "failed",
+        summary: "npm test failed: missing key",
+      },
+    ],
+  };
+
+  it("ends the deciding Turn with the Goal's outcome and its related activity", () => {
     const onSelectItem = vi.fn();
     const onOpenInspector = vi.fn();
     renderTurn([run("test", 1, "npm test")], {
       onSelectItem,
       onOpenInspector,
-      goalOutcome: {
-        status: "blocked",
-        reason: "The API key is missing.",
-        source: "runtime",
-        decidedByTurnId: turn.id,
-        decidedAt: "2026-07-23T01:10:00Z",
-        evidenceRefs: [
-          {
-            itemId: "test",
-            turnId: turn.id,
-            kind: "command_execution",
-            status: "failed",
-            summary: "npm test failed: missing key",
-          },
-        ],
-      },
+      goalOutcome: blocked,
     });
 
     const card = screen.getByRole("region", { name: "Goal blocked" });
     expect(card.textContent).toContain("Decided by DeepCode");
     expect(card.textContent).toContain("The API key is missing.");
+    // It closes the Turn, after its actions.
+    const actions = screen.getByRole("button", { name: /Review changes/ });
+    expect(actions.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /npm test failed/ }));
     expect(onSelectItem).toHaveBeenCalledWith("test");
     expect(onOpenInspector).toHaveBeenCalledWith("details");
+  });
+
+  it("does not repeat a failed Turn's error as the outcome's reason", () => {
+    renderTurn([run("test", 1, "npm test")], {
+      status: "failed",
+      errorMessage: "The API key is missing.",
+      goalOutcome: blocked,
+    });
+
+    expect(screen.getAllByText("The API key is missing.")).toHaveLength(1);
+    expect(screen.getByRole("region", { name: "Goal blocked" })).toBeTruthy();
+  });
+
+  it("waits for the deciding Turn to finish before showing the outcome", () => {
+    renderTurn([run("test", 1, "npm test")], { status: "running", goalOutcome: blocked });
+    expect(screen.queryByRole("region", { name: "Goal blocked" })).toBeNull();
   });
 
   const instruction = "Continue working toward the active Thread Goal.";

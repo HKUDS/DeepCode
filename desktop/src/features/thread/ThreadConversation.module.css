@@ -480,6 +480,21 @@ div.runStep {
   background: color-mix(in srgb, var(--surface-canvas) 64%, transparent);
 }
 
+/* A Goal's outcome closes the Turn that decided it. */
+.goalOutcome {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--success);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--success-soft) 55%, var(--surface-raised));
+}
+
+.goalOutcome[data-status="blocked"] {
+  border-left-color: var(--attention);
+  background: color-mix(in srgb, var(--attention-soft) 55%, var(--surface-raised));
+}
+
 .workGroupAll {
   justify-self: start;
   margin: 2px 0 4px;

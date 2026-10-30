@@ -20,7 +20,7 @@ import {
   Wrench,
 } from "lucide-react";
 import type { TFunction } from "i18next";
-import { Fragment, type ReactNode, useEffect, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -31,6 +31,7 @@ import type {
 } from "../../generated/app-server";
 import type { DesktopInspectorTab } from "../../app/useDesktopUi";
 import { ApprovalCard } from "../execution/ApprovalCard";
+import { GoalOutcomeView } from "../goal/GoalOutcomeView";
 import { isWarning, presentItem } from "../execution/itemPresentation";
 import {
   formatTurnDuration,
@@ -43,7 +44,6 @@ import {
   type TimelineWorkGroup,
   type WorkTally,
 } from "./conversationModel";
-import { GoalOutcomeCard } from "./GoalOutcomeCard";
 import { MarkdownContent } from "./MarkdownContent";
 import { ReasoningBlock } from "./ReasoningBlock";
 import type { TranscriptMode } from "./transcriptMode";
@@ -661,6 +661,7 @@ export function TurnBlock({
       : group.turn?.errorMessage;
 
   const live = activeTurnStatuses.has(group.turn?.status ?? "");
+  const goalOutcomeHeading = useId();
   const renderActivity = (item: Item) => (
     <ActivityItem
       key={item.id}
@@ -787,15 +788,6 @@ export function TurnBlock({
       </div>
 
       {errorMessage ? <p className={styles.runError}>{errorMessage}</p> : null}
-      {goalOutcome ? (
-        <GoalOutcomeCard
-          outcome={goalOutcome}
-          onSelectEvidence={(itemId) => {
-            onSelectItem(itemId);
-            onOpenInspector("details");
-          }}
-        />
-      ) : null}
       {failed || lastExecutionItem ? (
         <div className={styles.runActions}>
           {failed && turnId ? (
@@ -821,6 +813,24 @@ export function TurnBlock({
             </button>
           ) : null}
         </div>
+      ) : null}
+      {goalOutcome && !live ? (
+        <section
+          className={styles.goalOutcome}
+          data-status={goalOutcome.status}
+          aria-labelledby={goalOutcomeHeading}
+        >
+          <GoalOutcomeView
+            outcome={goalOutcome}
+            headingId={goalOutcomeHeading}
+            // A runtime block records this Turn's own error, shown above.
+            showReason={goalOutcome.reason !== group.turn?.errorMessage}
+            onSelectEvidence={(itemId) => {
+              onSelectItem(itemId);
+              onOpenInspector("details");
+            }}
+          />
+        </section>
       ) : null}
     </section>
   );

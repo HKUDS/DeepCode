@@ -219,9 +219,7 @@ export function ThreadConversation({
               transcriptMode={transcriptMode}
               following={!showJumpToLatest}
               goalOutcome={
-                goalOutcome && goalOutcome.decidedByTurnId === group.turn?.id
-                  ? goalOutcome
-                  : null
+                goalOutcome?.decidedByTurnId === group.id ? goalOutcome : null
               }
               busy={busy}
               onSelectItem={onSelectItem}

@@ -293,26 +293,31 @@ describe("ThreadConversation", () => {
       turnId,
       payload: { text, phase: "final_answer" },
     });
-    render(
-      conversation(
-        [{ ...turn, status: "completed" }, later],
-        [reply("reply-1", turn.id, "First done"), reply("reply-2", later.id, "Second done")],
-        {
-          status: "complete",
-          reason: "All checks pass.",
-          source: "agent",
-          decidedByTurnId: later.id,
-          decidedAt: "2026-07-23T01:10:00Z",
-          evidenceRefs: [],
-        },
-      ),
-    );
+    const turns = [{ ...turn, status: "completed" as const }, later];
+    const items = [
+      reply("reply-1", turn.id, "First done"),
+      reply("reply-2", later.id, "Second done"),
+    ];
+    const outcome: GoalOutcome = {
+      status: "complete",
+      reason: "All checks pass.",
+      source: "agent",
+      decidedByTurnId: turn.id,
+      decidedAt: "2026-07-23T01:10:00Z",
+      evidenceRefs: [],
+    };
+    const { rerender } = render(conversation(turns, items, outcome));
 
+    // An earlier Turn decided it, not the latest one.
     const [card, ...others] = screen.getAllByRole("region", { name: "Goal complete" });
     expect(others).toHaveLength(0);
     expect(card.textContent).toContain("All checks pass.");
     const deciding = card.parentElement?.textContent ?? "";
-    expect(deciding).toContain("Second done");
-    expect(deciding).not.toContain("First done");
+    expect(deciding).toContain("First done");
+    expect(deciding).not.toContain("Second done");
+
+    // An outcome no Turn decided stays in the Goal rail.
+    rerender(conversation(turns, items, { ...outcome, decidedByTurnId: null }));
+    expect(screen.queryByRole("region", { name: "Goal complete" })).toBeNull();
   });
 });

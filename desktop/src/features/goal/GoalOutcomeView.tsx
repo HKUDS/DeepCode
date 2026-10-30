@@ -2,44 +2,49 @@ import { AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { GoalOutcome } from "../../generated/app-server";
-import { formatOutcomeTime, outcomeDecider } from "../goal/goalPresentation";
-import styles from "./GoalOutcomeCard.module.css";
-import { MarkdownContent } from "./MarkdownContent";
+import { MarkdownContent } from "../thread/MarkdownContent";
+import styles from "./GoalOutcomeView.module.css";
+import { formatOutcomeTime, outcomeDecider } from "./goalPresentation";
 
-/** How a Goal ended, shown at the end of the Turn that decided it. */
-export function GoalOutcomeCard({
+/**
+ * How a Goal ended: who decided it and why, and the work behind it. The
+ * caller frames it (the Goal rail, or the Turn that decided it) and names it.
+ */
+export function GoalOutcomeView({
   outcome,
+  headingId,
+  showReason = true,
   onSelectEvidence,
 }: {
   outcome: GoalOutcome;
+  /** Lets the caller's landmark take its name from the heading. */
+  headingId?: string;
+  showReason?: boolean;
   onSelectEvidence(itemId: string): void;
 }) {
   const { t } = useTranslation();
   const complete = outcome.status === "complete";
-  const heading = complete
-    ? t("goal.reached.complete", "Goal complete")
-    : t("goal.reached.blocked", "Goal blocked");
   return (
-    <section
-      className={styles.card}
-      data-status={outcome.status}
-      aria-label={heading}
-    >
+    <div className={styles.outcome} data-status={outcome.status}>
       <header>
         {complete ? (
-          <CheckCircle2 size={16} aria-hidden="true" />
+          <CheckCircle2 size={15} aria-hidden="true" />
         ) : (
-          <AlertTriangle size={16} aria-hidden="true" />
+          <AlertTriangle size={15} aria-hidden="true" />
         )}
-        <strong>{heading}</strong>
+        <strong id={headingId}>
+          {complete
+            ? t("goal.reached.complete", "Goal complete")
+            : t("goal.reached.blocked", "Goal blocked")}
+        </strong>
         <small>
           {outcomeDecider(outcome.source, t)} · {formatOutcomeTime(outcome.decidedAt)}
         </small>
       </header>
-      <MarkdownContent compact>{outcome.reason}</MarkdownContent>
+      {showReason ? <MarkdownContent compact>{outcome.reason}</MarkdownContent> : null}
       {outcome.evidenceRefs.length ? (
-        <div className={styles.evidence}>
-          <span>{t("goal.evidence", "Evidence")}</span>
+        <div className={styles.related}>
+          <span>{t("goal.relatedActivity", "Related activity")}</span>
           <ul>
             {outcome.evidenceRefs.map((evidence) => (
               <li key={evidence.itemId}>
@@ -55,6 +60,6 @@ export function GoalOutcomeCard({
           </ul>
         </div>
       ) : null}
-    </section>
+    </div>
   );
 }
