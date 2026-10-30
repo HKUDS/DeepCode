@@ -149,10 +149,13 @@ _EMPHASIS = (
     re.compile(r"(?<![\w_])(_{1,3})(?=\S)([^_]+?)(?<=\S)\1(?![\w_])"),
 )
 _HELD = "\ue000"  # a private-use character holding a code span's place
+_RULE = re.compile(r"\s*([-*_])(?:\s*\1){2,}\s*")
 
 
 def _clean_line(line: str) -> str:
     """One line without its Markdown marks, for a status tail or a preview."""
+    if _RULE.fullmatch(line):
+        return ""  # a rule says nothing; the next line summarises instead
     spans: list[str] = []
 
     def hold(match: re.Match[str]) -> str:

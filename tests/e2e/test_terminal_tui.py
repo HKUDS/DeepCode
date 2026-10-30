@@ -302,7 +302,11 @@ def test_chinese_text_fills_each_line_and_hangs_under_its_mark(deepcode):
         Reply([Reasoning(sentence * 4), Pause(0.3), Text("- " + sentence * 4)]),
     )
     tui = deepcode.open_tui("--access", "read-only")
+    # Ctrl+O sent before the TUI reads the keyboard reaches the terminal
+    # instead, which on macOS then discards the program's output.
+    tui.wait_for_screen(r"Transcript: normal")
     tui.send(CTRL_O, 0.3)  # verbose: the whole reasoning, under its card
+    tui.wait_for_screen(r"Transcript: verbose")
 
     tui.submit("wrap chinese")
     deepcode.wait_idle()

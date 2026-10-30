@@ -552,6 +552,8 @@ def test_a_summary_line_drops_markdown_marks_but_keeps_identifiers():
     # Chinese has no spaces around bold; marks around a code span go too.
     assert _clean_line("这是**重点**内容") == "这是重点内容"
     assert _clean_line("**`relic_offer`** 在哪里触发") == "relic_offer 在哪里触发"
+    # A rule is not a line of thought.
+    assert [_clean_line(rule) for rule in ("***", "- - -", "___")] == ["", "", ""]
 
 
 def test_a_summary_line_is_cleaned_in_linear_time():
