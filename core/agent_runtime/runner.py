@@ -1577,7 +1577,10 @@ class AgentRunner:
         """
         if not contexts:
             return result
-        result = encode_structured_tool_result(result)
+        # What the model would read without the context: never "None".
+        result = ensure_nonempty_tool_result(
+            event["name"], encode_structured_tool_result(result)
+        )
         if isinstance(result, dict):  # one content block
             result = [result]
         if isinstance(result, list):

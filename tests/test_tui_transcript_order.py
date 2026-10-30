@@ -252,7 +252,7 @@ def test_a_preview_for_people_leaves_out_the_models_notes():
     # Program output may hold the hook mark itself; only the runner's own
     # hook context is left out, found where the runner recorded it.
     output = "step 1\n\n[hook] printed by the program\nstep 2 ran" + ERROR_HINT
-    event: ToolEvent = {}
+    event: ToolEvent = {"name": "tool", "status": "ok", "detail": ""}
     composed = AgentRunner._compose_hook_context(output, ["ruff found 2 issues"], event)
 
     assert "ruff found 2 issues" in composed
@@ -265,18 +265,31 @@ def test_hook_context_keeps_a_structured_result_structured():
     from core.agent_runtime.runner import AgentRunner
     from core.events.session import display_preview
 
-    as_json = AgentRunner._compose_hook_context({"goal": "x"}, ["note"], {})
+    as_json = AgentRunner._compose_hook_context(
+        {"goal": "x"}, ["note"], {"name": "get_goal", "status": "ok", "detail": ""}
+    )
     assert as_json.startswith('{"goal": "x"}')
 
     image = {"type": "image_url", "image_url": {"url": "data:..."}}
     for result in ([image], image):
-        event: ToolEvent = {}
+        event: ToolEvent = {"name": "tool", "status": "ok", "detail": ""}
         blocks = AgentRunner._compose_hook_context(result, ["note"], event)
         assert blocks[0] == image
         assert blocks[-1] == {"type": "text", "text": "[hook] note"}
         # People see the blocks without the hook's.
         shown = display_preview(blocks, hook_context_at=event["hook_context_at"])
         assert "[hook]" not in shown and "image_url" in shown
+
+
+def test_hook_context_never_turns_an_empty_result_into_none():
+    from core.agent_runtime.runner import AgentRunner
+
+    composed = AgentRunner._compose_hook_context(
+        None, ["note"], {"name": "noop", "status": "ok", "detail": ""}
+    )
+
+    assert not composed.startswith("None")
+    assert "noop" in composed and composed.endswith("[hook] note")
 
 
 def test_a_rebuilt_preview_finds_hook_context_by_its_mark():
