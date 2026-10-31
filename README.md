@@ -432,6 +432,44 @@ vulnerability, see [SECURITY.md](SECURITY.md).
 - **2026-10-21** — The Windows background service no longer opens console
   windows, and Desktop and Web take a separate font for code.
 
+<details>
+<summary><strong>Earlier updates</strong></summary>
+
+- **2026-10-14** — Sessions that keep their history, a tighter sandbox, and the Desktop and Web apps in Chinese
+- **2026-10-13** — Smoother streaming, a self-managing background service, and safer Web sign-in
+- **2026-10-12** — DeepCode v2.3.1: Markdown answers in the TUI, a Windows service that stays up, `/compact` for coding sessions, and community fixes
+- **2026-10-10** — A steadier terminal UI: answers shown once, keys that keep your draft, and an orderly `/compact`
+- **2026-09-28** — DeepCode v2.3.0: voice dictation, Opper and Bedrock, Desktop polish, and opt-in hardening
+- **2026-09-09** — TUI, Desktop, and Web share one local background service
+- **2026-09-06** — DeepCode v2.2.0: Session context-window caps, compaction that leaves a memory, and a fully localized Desktop
+- **2026-09-03** — Desktop catalog race, an honest command screen, GLM-5.2, and two dependency bumps
+- **2026-08-28** — Community fixes: plugin credential warnings and a wider zh-CN Desktop
+- **2026-08-25** — Command executors close two bypasses
+- **2026-08-23** — Five repaired contributions land together
+- **2026-08-19** — Sessions that survive resume, compaction, and a second window
+- **2026-08-18** — Steadier context handling in the runtime, and the TUI gets a face
+- **2026-08-17** — Fixes from a review pass over the new settings and TUI work
+- **2026-08-16** — The TUI answers every bare command with a selector
+- **2026-08-15** — Settings grow up: a new settings dialog, declared models, and a safer config
+- **2026-08-14** — Subagent runtime, compaction, and one-way persistence
+- **2026-08-13** — Desktop typography, themes, and native controls
+- **2026-08-12** — Reviewed upstream core Skills, a managed MCP catalog, OAuth, and real connection checks
+- **2026-08-10** — Generic MCP runtime and portable local Plugins
+- **2026-08-09** — Skills now have a real runtime contract
+- **2026-08-07** — Thinking controls, more providers, and a Desktop you can tune
+- **2026-08-04** — Skills that work wherever you do
+- **2026-08-03** — 🎉 DeepCode v2.0 is here
+- **2026-07-31** — One execution model across CLI and Desktop
+- **2026-07-21** — Durable Goals and safe Session lifecycle
+- **2026-07-20** — Session-level model control and shared Skills
+- **2026-07-17** — Durable Session navigation and replay
+- **2026-07-10** — Loop Engineering and parallel agents
+- **2026-07-08** — General coding agent, durable Sessions, and memory
+- **2026-07-04** — Agent Harness foundation
+- Earlier history: [legacy README](docs/archive/README_LEGACY_2026-07-20.md)
+
+</details>
+
 All changes: [CHANGELOG.md](CHANGELOG.md).
 
 ## Research origin
