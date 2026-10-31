@@ -146,7 +146,10 @@ export function mcpRuntimeText(server: McpServerInfo, t: TFunction): string {
       return t("mcp.runtime.tested", "Connection test passed");
     case "connected":
       return t("mcp.runtime.connected", "Connected");
+    case "failed":
+      return server.runtimeMessage;
     default:
+      // A state the protocol does not know: the service's words for it.
       return server.runtimeMessage;
   }
 }

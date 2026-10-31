@@ -18,15 +18,38 @@ export function pluginStatusLabel(status: PluginInfo["status"], t: TFunction): s
 
 /** One component a plugin provides, in words: its kind and whether it works. */
 export function pluginComponentLabel(component: Component, t: TFunction): string {
-  const kind =
-    component.kind === "skills"
-      ? t("plugins.component.skills", "Skills")
-      : t("plugins.component.mcp", "MCP servers");
-  const status =
-    component.status === "ready"
-      ? t("plugins.component.ready", "ready")
-      : component.status === "unsupported"
-        ? t("plugins.component.unsupported", "not supported")
-        : t("plugins.component.invalid", "invalid");
-  return `${kind}: ${status}`;
+  return `${componentKindLabel(component.kind, t)}: ${componentStatusLabel(component.status, t)}`;
+}
+
+function componentKindLabel(kind: Component["kind"], t: TFunction): string {
+  switch (kind) {
+    case "skills":
+      return t("plugins.component.skills", "Skills");
+    case "mcp":
+      return t("plugins.component.mcp", "MCP servers");
+  }
+}
+
+function componentStatusLabel(status: Component["status"], t: TFunction): string {
+  switch (status) {
+    case "ready":
+      return t("plugins.component.ready", "ready");
+    case "unsupported":
+      return t("plugins.component.unsupported", "not supported");
+    case "invalid":
+      return t("plugins.component.invalid", "invalid");
+  }
+}
+
+/** How serious a plugin's diagnostic is, in words. */
+export function pluginSeverityLabel(
+  severity: PluginInfo["diagnostics"][number]["severity"],
+  t: TFunction,
+): string {
+  switch (severity) {
+    case "warning":
+      return t("plugins.severity.warning", "Warning");
+    case "error":
+      return t("plugins.severity.error", "Error");
+  }
 }

@@ -4,7 +4,11 @@ import { useTranslation } from "react-i18next";
 import { confirmAction } from "../../platform/confirmAction";
 import type { ClientRuntime } from "../../rpc/contracts";
 import styles from "../management/ManagementWorkspace.module.css";
-import { pluginComponentLabel, pluginStatusLabel } from "./pluginPresentation";
+import {
+  pluginComponentLabel,
+  pluginSeverityLabel,
+  pluginStatusLabel,
+} from "./pluginPresentation";
 import { usePluginCatalog } from "./usePluginCatalog";
 
 export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
@@ -72,7 +76,7 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
           </summary>
           {catalog.diagnostics.map((diagnostic, index) => (
             <p key={`${diagnostic.code}-${index}`}>
-              {diagnostic.severity}: {diagnostic.message}
+              {pluginSeverityLabel(diagnostic.severity, t)}: {diagnostic.message}
             </p>
           ))}
         </details>
@@ -216,7 +220,7 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
                   </summary>
                   {catalog.selected.diagnostics.map((diagnostic, index) => (
                     <p key={`${diagnostic.code}-${index}`}>
-                      {diagnostic.severity}: {diagnostic.message}
+                      {pluginSeverityLabel(diagnostic.severity, t)}: {diagnostic.message}
                     </p>
                   ))}
                 </details>

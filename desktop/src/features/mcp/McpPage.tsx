@@ -61,7 +61,8 @@ interface Draft {
   urlParamEnv: string;
   enabledTools: string;
   disabledTools: string;
-  approvalMode: "auto" | "prompt" | "writes" | "approve";
+  // "approve" is loaded as "auto"; the editor never writes it.
+  approvalMode: "auto" | "prompt" | "writes";
   startupTimeout: string;
   toolTimeout: string;
   required: boolean;

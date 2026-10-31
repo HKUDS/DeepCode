@@ -3,7 +3,11 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 
 import { __setLocaleForTests, initI18n } from "../../app/i18n";
 import type { PluginInfo } from "../../generated/app-server";
-import { pluginComponentLabel, pluginStatusLabel } from "./pluginPresentation";
+import {
+  pluginComponentLabel,
+  pluginSeverityLabel,
+  pluginStatusLabel,
+} from "./pluginPresentation";
 
 type Component = PluginInfo["components"][number];
 const STATUSES = Object.keys({ active: 1, disabled: 1, invalid: 1 } satisfies Record<PluginInfo["status"], 1>) as PluginInfo["status"][];
@@ -28,6 +32,8 @@ it("says every plugin and component state in Chinese", () => {
     ...KINDS.flatMap((kind) =>
       COMPONENT_STATUSES.map((status) => pluginComponentLabel({ kind, status } as Component, t)),
     ),
+    pluginSeverityLabel("warning", t),
+    pluginSeverityLabel("error", t),
   ];
   expect(labels.filter((label) => (label.match(/[A-Za-z]{2,}/g) ?? []).some((w) => w !== "MCP"))).toEqual([]);
 });

@@ -629,6 +629,8 @@ const ZH_CN: Record<string, string> = {
   "plugins.component.ready": "就绪",
   "plugins.component.unsupported": "不支持",
   "plugins.component.invalid": "无效",
+  "plugins.severity.warning": "警告",
+  "plugins.severity.error": "错误",
   "diagnostics.config": "配置",
   "diagnostics.configOk": "配置有效。",
   "diagnostics.database": "数据库",
