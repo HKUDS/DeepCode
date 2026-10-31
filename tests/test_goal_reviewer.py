@@ -75,21 +75,61 @@ def test_the_task_carries_goal_reason_and_evidence():
     assert "no result yet" in task and "npm test" in task
 
 
+def _req(text: str, met: bool) -> dict:
+    return {"requirement": text, "met": met, "evidence": "read it"}
+
+
 def test_verdicts_read_as_the_agent_needs_them():
-    passed = verdict_from_result({"verdict": "pass", "summary": "All good."})
+    passed = verdict_from_result(
+        {"verdict": "pass", "summary": "All good.", "requirements": [_req("CSV", True)]}
+    )
     assert passed == GoalVerdict(
         confirmed=True,
-        justification="An independent review passed the claim: All good.",
+        justification=(
+            "An independent review passed the claim: All good. "
+            "(1 requirement(s) checked.)"
+        ),
     )
     failed = verdict_from_result(
-        {"verdict": "fail", "summary": "Half done.", "missing": ["CSV export", " "]}
+        {
+            "verdict": "fail",
+            "summary": "Half done.",
+            "requirements": [_req("CSV export", False)],
+            "missing": ["CSV export", " "],
+        }
     )
     assert not failed.confirmed and not failed.impossible
     assert failed.justification.endswith("Still missing:\n- CSV export")
-    impossible = verdict_from_result({"verdict": "impossible", "summary": "No key."})
+    impossible = verdict_from_result(
+        {
+            "verdict": "impossible",
+            "summary": "No key.",
+            "requirements": [_req("API", False)],
+        }
+    )
     assert impossible.impossible and not impossible.confirmed
     with pytest.raises(ValueError, match="unknown verdict"):
         verdict_from_result({"verdict": "maybe", "summary": "?"})
+
+
+def test_a_pass_with_an_unmet_requirement_is_a_fail():
+    verdict = verdict_from_result(
+        {
+            "verdict": "pass",
+            "summary": "Tests pass.",
+            "requirements": [
+                _req("add validates", True),
+                _req("zero stock is removed", False),
+            ],
+        }
+    )
+    assert not verdict.confirmed
+    assert verdict.justification.endswith("Still missing:\n- zero stock is removed")
+
+
+def test_a_verdict_without_checked_requirements_is_refused():
+    with pytest.raises(ValueError, match="no requirements"):
+        verdict_from_result({"verdict": "pass", "summary": "Fine.", "requirements": []})
 
 
 def test_a_confirmed_verdict_cannot_be_impossible():
@@ -103,7 +143,7 @@ def test_the_rule_check_runs_first_and_spares_the_review():
     async def run(section, task, on_usage):
         calls.append(task)
         on_usage(120)
-        return {"verdict": "pass", "summary": "ok"}
+        return {"verdict": "pass", "summary": "ok", "requirements": [_req("x", True)]}
 
     verifier = AgentReviewVerifier(run)
     failed = GoalEvidenceItem(

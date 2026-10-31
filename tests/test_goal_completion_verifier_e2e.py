@@ -231,9 +231,19 @@ FIXED = "def add(a, b):\n    return a + b\n"
 
 
 def _verdict(verdict: str, summary: str, *missing: str) -> tuple[str, dict]:
+    requirement = {
+        "requirement": "calc.add adds",
+        "met": verdict == "pass",
+        "evidence": "read calc.py",
+    }
     return (
         "submit_result",
-        {"verdict": verdict, "summary": summary, "missing": list(missing)},
+        {
+            "verdict": verdict,
+            "summary": summary,
+            "requirements": [requirement],
+            "missing": list(missing),
+        },
     )
 
 
@@ -274,7 +284,10 @@ def test_reviewer_rejects_then_passes_the_fixed_work(monkeypatch, tmp_path) -> N
     )
     assert "- calc.add returns a - b" in first["verdict"]["justification"]
     assert second["updated"] is True
-    assert second["verdict"]["justification"].endswith("passed the claim: add adds.")
+    assert (
+        "passed the claim: add adds. (1 requirement(s) checked.)"
+        in (second["verdict"]["justification"])
+    )
     assert goal.status.value == "complete"
 
 

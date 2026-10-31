@@ -53,6 +53,30 @@ VERDICT_SCHEMA: dict[str, Any] = {
             "type": "string",
             "description": "One or two sentences: what you found.",
         },
+        "requirements": {
+            "type": "array",
+            "minItems": 1,
+            "description": (
+                "Every requirement of the Goal, including those in documents "
+                "it points to (a spec, an issue, a README section), each "
+                "checked on its own."
+            ),
+            "items": {
+                "type": "object",
+                "properties": {
+                    "requirement": {"type": "string"},
+                    "met": {"type": "boolean"},
+                    "evidence": {
+                        "type": "string",
+                        "description": (
+                            "How you know: the code you read, the command "
+                            "you ran and its result."
+                        ),
+                    },
+                },
+                "required": ["requirement", "met", "evidence"],
+            },
+        },
         "missing": {
             "type": "array",
             "items": {"type": "string"},
@@ -67,7 +91,7 @@ VERDICT_SCHEMA: dict[str, Any] = {
             "description": "What you actually checked: commands run, files read.",
         },
     },
-    "required": ["verdict", "summary"],
+    "required": ["verdict", "summary", "requirements"],
 }
 
 REVIEWER_PROMPT = """\
@@ -78,14 +102,17 @@ not do that work. Decide whether the Goal is really met in the workspace as it
 is now.
 
 How to review:
-1. Split the Goal into its requirements. Every part of it counts.
+1. List the Goal's requirements. Every part of it counts, and so does every
+   rule in a document the Goal points to, such as a spec or an issue: read it.
 2. See what changed: `git status` and `git diff` when the workspace is a git
    repository, otherwise the files the evidence names.
-3. Read the code that matters. Look for stubs, TODOs, hard-coded results,
-   skipped or deleted tests, and requirements that were only partly done.
-4. Re-run the checks that prove the work, such as the project's tests or build,
-   when that takes a few minutes at most. Do not trust the agent's evidence
-   alone when you can check it yourself.
+3. Check each requirement on its own against the code: read the code that
+   implements it, and where you can, exercise it directly, for example with a
+   short `python -c` snippet or one focused test. Passing tests are not proof
+   on their own: they show only what they test. Look for stubs, TODOs,
+   hard-coded results, skipped or deleted tests, and edge cases a rule names.
+4. Re-run the project's own checks, such as its tests or build, when that
+   takes a few minutes at most.
 
 You cannot change anything: you have no editing tools, and commands run with a
 read-only workspace and no network (the temporary directory stays writable).
@@ -94,8 +121,14 @@ If a command fails only because it could not write to the workspace
 that result tells you nothing about the work; do not count it against the
 claim.
 
-Judge the Goal as written. Do not ask for work beyond it, and do not fail a
-claim over style. Pass only when every requirement is met. Use "impossible"
+Judge the Goal as written. Do not ask for work beyond it: no requirement the
+text does not state, such as extra input validation, type checks or error
+handling it does not ask for. Do not fail a claim over style. A requirement is met only when the code does exactly what it
+says, including every edge case and boundary it names (for example "below" is
+not "at or below"). Any deviation from a stated rule makes that requirement
+unmet: do not decide that a deviation is minor or acceptable. Report every
+requirement with whether it is met and your evidence. Pass only when every
+requirement is met. Use "impossible"
 only when the Goal cannot be met by the agent at all, for example when it
 needs credentials or a service that is not there, or contradicts itself. Your
 own limits (read-only, no network) are never a reason for "impossible".
@@ -158,18 +191,35 @@ def verdict_from_result(result: dict[str, Any]) -> GoalVerdict:
 
     verdict = str(result.get("verdict") or "")
     summary = _clip(str(result.get("summary") or ""))
+    if verdict not in {"pass", "fail", "impossible"}:
+        raise ValueError(f"the reviewer returned an unknown verdict: {verdict!r}")
+    requirements = [
+        entry for entry in (result.get("requirements") or ()) if isinstance(entry, dict)
+    ]
+    if not requirements:
+        raise ValueError("the reviewer checked no requirements")
+    unmet = [
+        _clip(str(entry.get("requirement") or ""), 400)
+        for entry in requirements
+        if entry.get("met") is not True
+    ]
     missing = [
         _clip(str(entry), 400)
         for entry in (result.get("missing") or ())
         if str(entry).strip()
-    ][:_LIST_MAX_ITEMS]
-    if verdict == "pass":
+    ] or [entry for entry in unmet if entry]
+    missing = missing[:_LIST_MAX_ITEMS]
+    if verdict == "pass" and not unmet:
         return GoalVerdict(
             confirmed=True,
-            justification=f"An independent review passed the claim: {summary}",
+            justification=(
+                f"An independent review passed the claim: {summary} "
+                f"({len(requirements)} requirement(s) checked.)"
+            ),
         )
-    if verdict not in {"fail", "impossible"}:
-        raise ValueError(f"the reviewer returned an unknown verdict: {verdict!r}")
+    if verdict == "pass":
+        # A pass that lists an unmet requirement is not a pass.
+        verdict = "fail"
     text = (
         "An independent review found the Goal cannot be met here: "
         if verdict == "impossible"
