@@ -1,6 +1,6 @@
 # P1 · 安全底座(第一增量)
 
-实现 DEEPCODE_V2_MASTER_PLAN.md §4.3 的安全层——计划标注"现在裸奔,最高优先级"。**机制,非决策**:这些模块只做确定性的判定与包裹,不碰模型、不碰 UI(军规 5/7)。
+DeepCode 安全层的第一批实现:权限判定、命令沙箱与审批。**机制,非决策**:这些模块只做确定性的判定与包裹,不碰模型、不碰 UI。
 
 ## 交付
 
@@ -27,7 +27,7 @@
 
 `AgentRunSpec.permission_checker` 在每次工具执行前调用:
 - `allow` → 放行;
-- `deny` → 变成 `Error: permission denied: <reason>` 的**工具结果**回喂模型(军规 3,不崩溃、不中断);
+- `deny` → 变成 `Error: permission denied: <reason>` 的**工具结果**回喂模型(不崩溃、不中断);
 - `ask` → 有 `approval_callback` 则问(批准放行/拒绝回喂),无(无人值守)则默认拒绝并解释——**自主性永不静默升级**。
 
 fail-closed:checker 或 approver 抛异常 → 一律拒绝。

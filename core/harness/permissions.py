@@ -7,7 +7,7 @@ turn ``ASK`` into whatever their surface needs (auto-deny in headless runs,
 a real prompt in interactive ones).
 
 Design distilled from the reference harnesses (see
-DEEPCODE_V2_MASTER_PLAN.md §4.3), adapted rather than copied:
+docs/P1_SECURITY_BASE.md), adapted rather than copied:
 
 * **Central sensitive-path protection** (OpenHarness): credential stores
   (``.ssh``, ``.aws/credentials``, ``.env`` …) are blocked ahead of rules in

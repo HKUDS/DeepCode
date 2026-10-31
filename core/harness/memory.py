@@ -1,6 +1,6 @@
 """Agent memory — project instructions + persistent cross-session notes (P2).
 
-Two layers, aligned with Claude Code (DEEPCODE_V2_MASTER_PLAN.md P2-L5d(c)):
+Two layers, aligned with Claude Code:
 
 1. **Project instructions** — ``AGENTS.md`` / ``DEEPCODE.md`` / ``CLAUDE.md``
    discovered from the enclosing repo root down to the workspace (so a nested

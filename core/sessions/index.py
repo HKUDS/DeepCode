@@ -14,7 +14,7 @@ Those become single indexed SQL queries. The index is maintained
 incrementally on each store mutation and can be rebuilt from disk at any time
 (``rebuild``), so it is always disposable: delete ``index.db`` and it heals.
 
-Reliability stance (mechanism, DEEPCODE_V2_MASTER_PLAN.md §3.4): the index is
+Reliability stance: the index is
 an *optimisation*, never a correctness dependency. Every store method that
 uses it falls back to the JSONL scan if SQLite is unavailable or errors, and
 reconciles itself against canonical file signatures so a long-lived process

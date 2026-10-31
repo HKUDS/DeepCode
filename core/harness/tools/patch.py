@@ -3,8 +3,8 @@
 The ``edit`` tool changes one span in one file. Real changes often touch
 several files together — add a module, update two call sites, delete a dead
 helper — and want to land atomically or not at all. ``apply_patch`` takes the
-Codex/OpenAI patch envelope (DEEPCODE_V2_MASTER_PLAN.md §7 P2, "apply_patch
-语义锚点") and applies it as one unit::
+Codex/OpenAI patch envelope, anchored by context lines rather than line
+numbers, and applies it as one unit::
 
     *** Begin Patch
     *** Add File: pkg/new.py

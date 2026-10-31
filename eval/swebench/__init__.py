@@ -1,10 +1,10 @@
 """SWE-bench evaluation harness for DeepCode (P2 exit gate).
 
-DEEPCODE_V2_MASTER_PLAN.md §7 P2 exits on "establish a SWE-bench Verified
-50-subset baseline". SWE-bench measures whether an agent can resolve a real
-GitHub issue: given a repo at a base commit plus the issue text, the agent
-must produce a patch that makes the hidden FAIL_TO_PASS tests pass without
-breaking the PASS_TO_PASS tests.
+P2 exits on "establish a SWE-bench Verified 50-subset baseline".
+SWE-bench measures whether an agent can resolve a real GitHub issue: given
+a repo at a base commit plus the issue text, the agent must produce a patch
+that makes the hidden FAIL_TO_PASS tests pass without breaking the
+PASS_TO_PASS tests.
 
 This harness has two cleanly separated stages, so DeepCode owns only the part
 that is DeepCode's to own and reuses the rest:

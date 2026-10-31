@@ -4,7 +4,7 @@ Model-level quirks used to be scattered through
 ``OpenAICompatProvider._build_kwargs`` as ``model_name.lower()`` substring
 checks (temperature support, reasoning-model detection, Kimi "thinking"
 injection, effort spelling). That is the ``model_id.includes(...)``
-anti-pattern (DEEPCODE_V2_MASTER_PLAN.md §8 #15): it silently rots as
+anti-pattern: it silently rots as
 model names change and hides capability decisions in control flow.
 
 This module consolidates those decisions into one place. Given a
