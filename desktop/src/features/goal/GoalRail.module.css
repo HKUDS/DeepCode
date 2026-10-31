@@ -125,7 +125,7 @@
   align-items: center;
   gap: 4px;
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
 }
 
 .summaryText i {
@@ -233,7 +233,7 @@
 
 .outcome > small {
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
 }
 
 .outcome > small code {
@@ -359,7 +359,7 @@
 
 .editor legend small {
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
 }
 
 .skillList {

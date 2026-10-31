@@ -24,7 +24,7 @@
 
 .copy strong {
   color: var(--text-primary);
-  font: var(--text-2xs) var(--font-mono);
+  font: var(--text-xs) var(--font-ui);
 }
 
 .copy span {

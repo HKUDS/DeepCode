@@ -230,7 +230,7 @@
 
 .skillOptions em {
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
   font-style: normal;
 }
 
@@ -500,7 +500,7 @@
   border-radius: var(--radius-pill);
   background: var(--signal);
   color: var(--text-inverse);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
 }
 
 /* Toolbar labels only. A picker's popover sits inside the toolbar too, but
@@ -579,7 +579,7 @@
 .selectorCaption {
   white-space: nowrap;
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
 }
@@ -659,7 +659,7 @@
 
 .hint span {
   flex: 0 0 auto;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
 }
 
 @media (max-width: 680px) {

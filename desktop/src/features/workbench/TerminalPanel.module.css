@@ -18,7 +18,7 @@
   border-bottom: 1px solid var(--border-terminal);
   background: var(--surface-terminal-raised);
   color: var(--text-terminal-dim);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
   letter-spacing: var(--tracking-wide);
 }
 

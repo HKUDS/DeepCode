@@ -33,7 +33,7 @@
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--text-tertiary);
-  font: var(--text-2xs) var(--font-mono);
+  font: var(--text-xs) var(--font-ui);
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
 }
@@ -162,7 +162,7 @@
 .kicker,
 .percent {
   color: var(--signal);
-  font: var(--text-2xs) var(--font-mono);
+  font: var(--text-xs) var(--font-ui);
   letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
 }

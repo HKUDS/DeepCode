@@ -54,7 +54,7 @@
 
 .brandCopy small {
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
 }
@@ -128,7 +128,7 @@
 .search kbd {
   margin: 0;
   color: var(--text-tertiary);
-  font: var(--text-2xs) var(--font-mono);
+  font: var(--text-xs) var(--font-ui);
 }
 
 .search {
@@ -171,7 +171,7 @@
   justify-content: space-between;
   padding: 1px 5px 8px 9px;
   color: var(--text-tertiary);
-  font: var(--weight-bold) var(--text-micro) var(--font-mono);
+  font: var(--weight-bold) var(--text-2xs) var(--font-ui);
   letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
 }

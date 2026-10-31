@@ -36,7 +36,7 @@
 
 .trigger small {
   color: var(--text-tertiary);
-  font: var(--text-micro)/1.1 var(--font-mono);
+  font: var(--text-2xs)/1.1 var(--font-ui);
 }
 
 .trigger strong {
@@ -47,7 +47,7 @@
 
 .trigger em {
   color: var(--text-tertiary);
-  font: var(--text-micro)/1.1 var(--font-mono);
+  font: var(--text-2xs)/1.1 var(--font-ui);
   font-style: normal;
 }
 
@@ -224,7 +224,7 @@
   align-items: center;
   gap: 7px;
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
 }
 
 .models small svg {
@@ -311,7 +311,7 @@
 
 .context select {
   min-height: 34px;
-  font: var(--text-2xs) var(--font-mono);
+  font: var(--text-xs) var(--font-ui);
 }
 
 .menu > footer {

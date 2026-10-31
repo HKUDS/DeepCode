@@ -42,7 +42,7 @@
 
 .reasoning small {
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
 }
 
 .reasoning[data-active="true"] {
@@ -89,7 +89,7 @@
 .trace h4 {
   margin: 0 0 8px;
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
   font-weight: var(--weight-medium);
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
@@ -104,7 +104,7 @@
   padding: 10px 0 3px;
   color: var(--text-tertiary);
   cursor: pointer;
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
 }
 
 .waiting {

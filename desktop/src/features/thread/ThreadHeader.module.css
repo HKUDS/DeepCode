@@ -24,7 +24,7 @@
   gap: 7px;
   overflow: hidden;
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
   white-space: nowrap;
 }
 

@@ -21,17 +21,26 @@
      one value so the three cannot drift apart. */
   --conversation-width: min(820px, 100%);
 
-  font-family:
+  /* The interface face. Chinese falls to PingFang on macOS and Microsoft
+     YaHei on Windows; naming them keeps a Latin fallback from picking a
+     CJK face with odd Latin glyphs. */
+  --font-ui:
     var(--font-ui-preferred) -apple-system, BlinkMacSystemFont, "SF Pro Text",
-    "Segoe UI Variable", "Segoe UI", Inter, sans-serif;
+    "Segoe UI Variable", "Segoe UI", Inter, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  font-family: var(--font-ui);
   font-size: var(--font-size-base);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 
+  /* Titles use the interface face at display optical size, not a rounded
+     face: one family keeps headings and body text reading as one voice. */
   --font-display:
-    ui-rounded, "SF Pro Rounded", "Avenir Next", "Segoe UI Variable Display",
-    -apple-system, BlinkMacSystemFont, sans-serif;
+    var(--font-ui-preferred) -apple-system, BlinkMacSystemFont, "SF Pro Display",
+    "Segoe UI Variable Display", "Segoe UI", Inter, "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei",
+    "Noto Sans CJK SC", sans-serif;
   /* ui-monospace and "SFMono-Regular" reach SF Mono only in Safari; Chromium
      on macOS needs Menlo or Monaco, or it falls back to Courier. */
   --font-mono:
