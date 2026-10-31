@@ -165,7 +165,7 @@ def _resolve_interactively(
     target = requested_session_target(request)
     prompt = (
         f"Approval required · {tool_name}: {reason}\n"
-        f"Allow once [y], always allow {target} this session [a], or deny [n]? "
+        f"Allow once [y], always allow {target} this Session [a], or deny [n]? "
     )
     choices = {
         "y": ApprovalStatus.APPROVED_ONCE,
@@ -181,7 +181,7 @@ def _resolve_interactively(
         decision = choices.get(raw.strip().casefold())
         if decision is None:
             prompt = (
-                f"Enter y (once), a (always allow {target} this session), or n (deny): "
+                f"Enter y (once), a (always allow {target} this Session), or n (deny): "
             )
             continue
         try:

@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import io
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, ClassVar
@@ -1323,7 +1324,7 @@ def test_skill_command_is_one_turn_only_and_persists_invocation_metadata(
     assert provider.calls == 1
     output = capsys.readouterr().out
     assert "Skill error:" in output
-    assert "selected review for the next turn" in output
+    assert "selected review for the next Turn" in output
     assert "Skill review (explicit)" in output
 
     from core.sessions.store import SessionStore
@@ -1521,7 +1522,7 @@ def test_goal_edit_and_steer_remain_available_while_work_runs_in_background(
 
     assert rc == 0
     output = capsys.readouterr().out
-    assert "Steered the active turn" in output or "Queued — runs after" in output
+    assert "Steered the active Turn" in output or "Queued — runs after" in output
     assert "Goal saved with the same identity" in output
     store = SessionStore(tmp_path / "sessions")
     goal = ThreadGoalStore(store).read(store.list_sessions()[0].session_id)
@@ -1658,7 +1659,7 @@ def test_effort_switch_preserves_history_and_session_selection(
 
     assert rc == 0
     assert provider.calls == 2
-    assert "effort switched to high" in capsys.readouterr().out
+    assert "effort switched to High" in capsys.readouterr().out
 
     from core.sessions.store import SessionStore
 
@@ -1818,7 +1819,7 @@ def test_resume_without_arg_lists_sessions(monkeypatch, tmp_path, capsys):
     capsys.readouterr()
     rc, _ = _run_tui(monkeypatch, tmp_path, "/resume\n/exit\n", ["unused"])
     assert rc == 0
-    assert "recent sessions" in capsys.readouterr().out
+    assert "recent Sessions" in capsys.readouterr().out
 
 
 # --- directory scoping (P2-L5c: central storage, per-directory view) --------
@@ -1849,7 +1850,7 @@ def test_resume_scoped_to_directory(monkeypatch, tmp_path, capsys):
     )
     assert rc == 0
     out = capsys.readouterr().out
-    assert "no sessions for this directory" in out
+    assert "no Sessions for this directory" in out
     assert "task in A" in out  # shown in the `all` view
     # Origin directory annotated, exactly as the picker names it: a path under
     # the home directory is `~`-folded (pytest's tmp dir lives under $HOME on
@@ -1941,7 +1942,7 @@ def test_rename_command_updates_the_stored_session_title(monkeypatch, tmp_path, 
         ["hi"],
     )
     assert rc == 0
-    assert "session renamed to Renamed conversation" in capsys.readouterr().out
+    assert "Session renamed to Renamed conversation" in capsys.readouterr().out
 
     from core.sessions.store import SessionStore
 
@@ -1974,7 +1975,7 @@ def test_delete_command_removes_a_stored_session_but_needs_an_id(
     assert rc == 0
     out = capsys.readouterr().out
     assert "usage: /delete" in out
-    assert f"deleted session {victim}" in out
+    assert f"deleted Session {victim}" in out
 
     store = SessionStore(tmp_path / "sessions")
     assert victim not in [s.session_id for s in store.list_sessions()]
@@ -2038,7 +2039,7 @@ def test_picker_filters_by_title_and_wraps_navigation():
                 [
                     PickerItem(1, "Alpha task", "aa11"),
                     PickerItem(2, "Beta task", "bb22"),
-                    PickerItem(3, "Gamma", "cc33", disabled_reason="current session"),
+                    PickerItem(3, "Gamma", "cc33", disabled_reason="current Session"),
                 ],
             )
         ],
@@ -2202,7 +2203,7 @@ def test_resume_picker_marks_current_session_and_resumes_choice(monkeypatch):
     assert seen["resumed"] == "bb22cc33"
     assert "resumed bb22cc33" in status
     local_items = list(seen["scopes"][0].items)
-    assert local_items[0].disabled_reason == "current session"
+    assert local_items[0].disabled_reason == "current Session"
     assert local_items[1].disabled_reason is None
 
 
@@ -2235,3 +2236,44 @@ def test_agent_preset_overview_shows_the_deny_list(tmp_path: Path, monkeypatch) 
     # A deny-only preset must not claim "all tools" (the reviewer's point).
     assert "all tools except write, edit" in overview
     assert "read, bash except write" in overview
+
+
+def test_efforts_read_as_the_desktop_names_them():
+    from cli.tui.text import effort_label
+
+    assert [
+        effort_label(value)
+        for value in (None, "auto", "none", "off", "low", "high", "xhigh", "max")
+    ] == ["Auto", "Auto", "Off", "Off", "Low", "High", "Extra high", "Max"]
+
+
+def test_tui_text_names_keys_one_way():
+    """Ctrl+O, Esc, Enter, Shift+Tab — as the guide and the status line write them."""
+    import ast
+
+    lowercase_keys = re.compile(
+        r"\b(?:ctrl[-+][a-z]|Ctrl-[A-Z]|shift\+tab)\b|\b(?:esc|enter|tab) (?:cancel|select|interrupts|scope)\b"
+    )
+    offenders = []
+    for path in Path(ROOT, "cli", "tui").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        docstrings = {
+            id(node.body[0].value)
+            for node in ast.walk(tree)
+            if isinstance(
+                node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+            )
+            and node.body
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Constant)
+        }
+        offenders += [
+            f"{path.name}:{node.lineno}: {node.value!r}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in docstrings
+            and " " in node.value
+            and lowercase_keys.search(node.value)
+        ]
+    assert offenders == []

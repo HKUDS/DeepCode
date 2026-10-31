@@ -56,6 +56,7 @@ from cli.tui.goal_controller import TuiGoalController
 from cli.tui.input import InputInterrupted, InputReader, expand_file_refs
 from cli.tui.renderer import EventRenderer
 from cli.tui.session_bridge import SessionBridge
+from cli.tui.text import effort_label
 from core.application.errors import ApplicationError
 from core.config import ConfigError
 from core.domain.approval import ApprovalStatus
@@ -198,7 +199,7 @@ class TuiApp:
             return
         lease = self.bridge.store.acquire_activity_lease(session_id)
         if lease is None:
-            raise ValueError(f"no such session: {session_id}")
+            raise ValueError(f"no such Session: {session_id}")
         previous = self._session_activity
         self._session_activity = lease
         self._leased_session_id = session_id
@@ -371,7 +372,7 @@ class TuiApp:
         profile = self.thread_client.execution_profile
         current = (
             f"connection: {profile.connection_id} · model: {self.model} · "
-            f"effort: {self.requested_reasoning_effort} · "
+            f"effort: {effort_label(self.requested_reasoning_effort)} · "
             f"context: {self.requested_context_window}"
         )
         views = [
@@ -523,7 +524,7 @@ class TuiApp:
         return (
             f"Compacted: {report['messages_before']} → "
             f"{report['messages_after']} messages "
-            f"(~{saved:,} chars of older turns replaced by a summary)."
+            f"(~{saved:,} chars of older Turns replaced by a summary)."
         )
 
     def agent_preset_overview(self) -> str:
@@ -582,9 +583,9 @@ class TuiApp:
             return f"Skill {skill.name} is {skill.status} and cannot be selected"
         if skill.id not in self.selected_skill_ids:
             if len(self.selected_skill_ids) >= 8:
-                return "a turn may select at most 8 Skills"
+                return "a Turn may select at most 8 Skills"
             self.selected_skill_ids.append(skill.id)
-        return f"selected {skill.name} for the next turn"
+        return f"selected {skill.name} for the next Turn"
 
     def remove_skill(self, identifier: str) -> str:
         try:
@@ -606,7 +607,7 @@ class TuiApp:
             return f"Skill name is ambiguous: {identifier}; remove it by ID"
         skill = matches[0]
         self.selected_skill_ids.remove(skill.id)
-        return f"removed {skill.name} from the next turn"
+        return f"removed {skill.name} from the next Turn"
 
     def completion_candidates(self, key: str, load: Callable[[], object]):
         """A service-backed completion source that never holds the prompt.
@@ -675,7 +676,7 @@ class TuiApp:
 
     def clear_skills(self) -> str:
         self.selected_skill_ids.clear()
-        return "cleared next-turn Skills"
+        return "cleared next-Turn Skills"
 
     def list_plugins(self) -> str:
         try:
@@ -897,13 +898,13 @@ class TuiApp:
             return ""
         if delivery.kind == "queued":
             self.selected_skill_ids.clear()
-            return "Queued — runs after the active turn."
+            return "Queued — runs after the active Turn."
         suffix = (
             " Selected next-Turn Skills remain selected."
             if self.selected_skill_ids
             else ""
         )
-        return f"Steered the active turn.{suffix}"
+        return f"Steered the active Turn.{suffix}"
 
     def queue_turn(self, text: str) -> str:
         # Read busyness BEFORE enqueueing: an idle Session starts the
@@ -916,14 +917,14 @@ class TuiApp:
         )
         self.selected_skill_ids.clear()
         return (
-            "Queued — runs after the active turn." if busy else "Queued — starting now."
+            "Queued — runs after the active Turn." if busy else "Queued — starting now."
         )
 
     def stop_turn(self) -> str:
         try:
             result = self.thread_client.interrupt()
         except (RuntimeError, OSError) as exc:  # ApplicationError included
-            return f"Could not stop the turn: {_error_text(exc)}"
+            return f"Could not stop the Turn: {_error_text(exc)}"
         return self._settle_interrupt(result)
 
     async def stop_turn_async(self) -> str:
@@ -934,7 +935,7 @@ class TuiApp:
         try:
             result = await asyncio.to_thread(self.thread_client.interrupt)
         except (RuntimeError, OSError) as exc:  # ApplicationError included
-            return f"Could not stop the turn: {_error_text(exc)}"
+            return f"Could not stop the Turn: {_error_text(exc)}"
         return self._settle_interrupt(result)
 
     def _settle_interrupt(self, result) -> str:
@@ -948,7 +949,7 @@ class TuiApp:
         # that learns the truth.
         if turn.status.is_terminal:
             self.renderer.settle_turn()
-        return "Interrupted the turn." if accepted else "The turn had already stopped."
+        return "Interrupted the Turn." if accepted else "The Turn had already stopped."
 
     def _respond_to_pending_approval(self, text: str) -> str | None:
         decision = _APPROVAL_ANSWERS.get(text.strip().casefold())
@@ -1130,7 +1131,7 @@ class TuiApp:
         """
         client = self.thread_client
         if client.turns.executing_for_thread(client.session_id) is not None:
-            return "waiting for the current Turn in this session to finish"
+            return "waiting for the current Turn in this Session to finish"
         if not getattr(client.thread, "worktree_path", None):
             threads = client.rpc.call(
                 "thread/list", {"projectId": client.project.id, "limit": 100}
@@ -1142,7 +1143,7 @@ class TuiApp:
                     and thread.get("status") in {"running", "waiting"}
                     and client.turns.executing_for_thread(thread["id"]) is not None
                 ):
-                    return "waiting for another session in this workspace to finish"
+                    return "waiting for another Session in this workspace to finish"
         from app_server.service_client import ServiceClient
 
         # The service's own status (not a Session RPC) counts running Turns.
@@ -1189,10 +1190,10 @@ class TuiApp:
             highlight=False,
         )
         self.console.print(
-            f" [{theme.META_STYLE}]session {escape(self.bridge.session_id)} · "
+            f" [{theme.META_STYLE}]Session {escape(self.bridge.session_id)} · "
             f"runtime {self.thread_client.runtime_mode} · "
             f"access {escape(self.thread_client.access_summary())} · "
-            f"effort {escape(self.requested_reasoning_effort)}[/]",
+            f"effort {escape(effort_label(self.requested_reasoning_effort))}[/]",
             soft_wrap=True,
             highlight=False,
         )
@@ -1448,7 +1449,7 @@ class TuiApp:
 def main(argv: list[str] | None = None, *, shared_service: bool = True) -> int:
     parser = argparse.ArgumentParser(
         prog="deepcode",
-        description="Interactive DeepCode coding agent (multi-turn TUI).",
+        description="Interactive DeepCode coding agent (multi-Turn TUI).",
     )
     parser.add_argument("--workspace", "-w", default=os.getcwd())
     parser.add_argument("--model", "-m", default=None)

@@ -95,7 +95,7 @@ def _approval_decider(approval: Approval) -> ApprovalStatus:
     target = requested_session_target(request)
     print(
         f"\nApproval required for {tool}: {reason}\n"
-        f"  y = allow once · a = always allow {target} this session · "
+        f"  y = allow once · a = always allow {target} this Session · "
         "anything else = deny\n> ",
         end="",
         file=sys.stderr,

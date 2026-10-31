@@ -28,7 +28,7 @@ def add_reasoning_effort_argument(parser: argparse.ArgumentParser) -> None:
         default=None,
         metavar="LEVEL",
         help=(
-            "Reasoning effort for this session/command: auto, off, or a "
+            "Reasoning effort for this Session or command: auto, off, or a "
             "level supported by the selected model."
         ),
     )

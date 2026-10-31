@@ -41,6 +41,7 @@ from cli.transcript import TranscriptMode
 from cli.tui import animation, theme
 from cli.tui.markdown_stream import MarkdownStream
 from cli.tui.text import (
+    effort_label,
     fit_head,
     fit_tail,
     terminal_text,
@@ -539,7 +540,7 @@ class EventRenderer:
         if reasoning_id is not None:
             state = self._reasoning.get(reasoning_id)
             if state is not None:
-                effort = (state.effort or "auto").title()
+                effort = effort_label(state.effort)
                 detail = _last_content_line(
                     state.display_text,
                     limit=_STATUS_DETAIL_CHARS,
@@ -890,7 +891,7 @@ class EventRenderer:
         availability: ReasoningAvailability,
     ) -> None:
         self._begin_block()
-        effort = (state.effort or "auto").title()
+        effort = effort_label(state.effort)
         mark = theme.THINKING_MARK
         label = (
             f"{mark} Thought for {duration}"
@@ -1191,7 +1192,7 @@ class EventRenderer:
         self._close_line()
         if msg.stop_reason != "completed":
             self.console.print(
-                f"[{theme.META_STYLE}]· turn ended: {escape(str(msg.stop_reason))}[/]"
+                f"[{theme.META_STYLE}]· Turn ended: {escape(str(msg.stop_reason))}[/]"
             )
         if self.transcript_mode is not TranscriptMode.SUMMARY:
             footer = self._turn_footer()

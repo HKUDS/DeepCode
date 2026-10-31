@@ -49,7 +49,7 @@ def _approval(tool="bash", arguments=None, *, target="`rm …` and `echo …`"):
             "sessionScope": {
                 "keys": ["cmd:rm", "cmd:echo"],
                 "target": target,
-                "label": f"Always allow {target} this session",
+                "label": f"Always allow {target} this Session",
             },
         },
     }
@@ -81,7 +81,7 @@ def test_a_command_approval_shows_the_whole_command_where_it_runs_and_the_keys(
     # Wrapped, never cut: the whole command and directory are on screen.
     assert f"in{tmp_path}" in "".join(text.split())
     assert (
-        "y allow once · a always allow `rm …` and `echo …` this session · n deny"
+        "y allow once · a always allow `rm …` and `echo …` this Session · n deny"
         in " ".join(text.split())
     )
     assert "mutating" not in text
@@ -102,7 +102,7 @@ def test_an_edit_approval_shows_the_change_as_a_diff(tmp_path) -> None:
     assert "Approval needed · Edit app.py" in text
     assert "-b = 2" in text and "+b = 20" in text
     assert " a = 1" in text  # context
-    assert "always allow edits in this workspace this session" in text
+    assert "always allow edits in this workspace this Session" in text
 
 
 def test_a_new_file_shows_its_content_and_a_long_one_is_cut(tmp_path) -> None:
@@ -171,7 +171,7 @@ def test_an_approval_from_an_older_service_still_offers_its_keys() -> None:
     approval = _approval()
     del approval["request"]["sessionScope"]
     assert approval_view.answer_hint(approval) == (
-        "y allow once · a always allow this tool this session · n deny"
+        "y allow once · a always allow this tool this Session · n deny"
     )
 
 
@@ -179,7 +179,7 @@ def test_outcomes_say_what_was_allowed() -> None:
     approval = _approval(target="`git status …`")
     assert approval_view.outcome_text("approved_once", approval) == "Allowed once."
     assert approval_view.outcome_text("approved_session", approval) == (
-        "Allowed `git status …` for the rest of this session."
+        "Allowed `git status …` for the rest of this Session."
     )
     assert approval_view.outcome_text("denied", approval) == "Denied."
 
@@ -378,7 +378,7 @@ def test_answering_always_says_what_it_covers() -> None:
 
     status = app._respond_to_pending_approval("a")
 
-    assert status == "Allowed `rm …` and `echo …` for the rest of this session."
+    assert status == "Allowed `rm …` and `echo …` for the rest of this Session."
     assert app.renderer.approval_hint is None
 
 
@@ -435,10 +435,10 @@ def test_a_turn_queued_behind_this_sessions_turn_is_shown_then_waits(
     clock[0] = 15.0
     assert app.renderer.is_working()
     app.renderer.set_queue_reason(
-        "waiting for another session in this workspace to finish"
+        "waiting for another Session in this workspace to finish"
     )
     assert app.renderer.status_line() == (
-        " Queued · 5s · waiting for another session in this workspace to finish "
+        " Queued · 5s · waiting for another Session in this workspace to finish "
     )
 
     app._on_domain_event(
@@ -515,11 +515,11 @@ def _service_status(monkeypatch) -> None:
     [
         (
             _QueueClient(own="turn"),
-            "waiting for the current Turn in this session to finish",
+            "waiting for the current Turn in this Session to finish",
         ),
         (
             _QueueClient(others=("other-thread",), running=1),
-            "waiting for another session in this workspace to finish",
+            "waiting for another Session in this workspace to finish",
         ),
         (
             # In its own worktree, another session's work does not hold it.

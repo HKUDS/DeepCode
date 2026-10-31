@@ -332,7 +332,7 @@ def test_resuming_mid_answer_shows_each_line_once_in_order(deepcode):
     lines = _numbered_lines(40, "Resumed")
     deepcode.model.on("answer slowly", _slow_answer(lines, pause=0.25))
     first = deepcode.open_tui("--access", "read-only")
-    session = re.search(r"session ([0-9a-f]{8})", first.screen())[1]
+    session = re.search(r"Session ([0-9a-f]{8})", first.screen())[1]
 
     first.submit("answer slowly")
     first.wait_for(lines[6])
@@ -355,7 +355,7 @@ def test_resuming_a_turn_that_waits_for_approval_shows_the_approval(deepcode):
         Reply([Text("Listed the files.")]),
     )
     first = deepcode.open_tui("--access", "ask")
-    session = re.search(r"session ([0-9a-f]{8})", first.screen())[1]
+    session = re.search(r"Session ([0-9a-f]{8})", first.screen())[1]
     first.submit("list the files")
     first.wait_for(r"Approval needed")
 
@@ -401,7 +401,7 @@ def test_an_approval_waits_still_holds_typing_and_always_allow_is_narrow(deepcod
     tui.send(CTRL_C)  # clear the message that came back to the prompt
 
     tui.submit("a")
-    tui.wait_for(r"Allowed `ls …` for the rest of this session\.", since=start)
+    tui.wait_for(r"Allowed `ls …` for the rest of this Session\.", since=start)
     tui.wait_for(r"Listed the files\.", since=start)
     deepcode.wait_idle()
 

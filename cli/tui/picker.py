@@ -191,12 +191,12 @@ class Picker:
         return visible + details + pager
 
     def _hint_fragments(self) -> StyleAndTextTuples:
-        parts = ["type to filter", "↑/↓ move", "enter select"]
+        parts = ["type to filter", "↑/↓ move", "Enter select"]
         if len(self._scopes) > 1:
-            parts.append("tab scope")
+            parts.append("Tab scope")
         if any(item.variants for scope in self._scopes for item in scope.items):
-            parts.append(f"shift+tab {self._variant_hint}")
-        parts.append("esc cancel")
+            parts.append(f"Shift+Tab {self._variant_hint}")
+        parts.append("Esc cancel")
         return [("", " " + " · ".join(parts))]
 
     # -- keys ----------------------------------------------------------------

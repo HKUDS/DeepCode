@@ -127,6 +127,19 @@ def wrap_text(text: Text, width: int) -> list[Text]:
     return lines
 
 
+_EFFORT_LABELS = {"auto": "Auto", "none": "Off", "off": "Off", "xhigh": "Extra high"}
+
+
+def effort_label(effort: str | None) -> str:
+    """A reasoning effort as every surface names it: Auto, Off, High, Extra high.
+
+    The value is what the user types (``/effort high``); the label is what is
+    shown, the same words the Desktop and Web clients use.
+    """
+    value = effort or "auto"
+    return _EFFORT_LABELS.get(value, value.capitalize())
+
+
 def fit_head(text: str, width: int, *, mark: bool = True) -> str:
     """Keep the head of ``text`` within ``width`` terminal cells.
 

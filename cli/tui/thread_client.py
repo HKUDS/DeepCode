@@ -261,7 +261,7 @@ class TuiThreadClient:
         """
         if session_id == self.thread.id:
             raise RuntimeError(
-                "cannot delete the session you are in — /new first, then delete it"
+                "cannot delete the Session you are in — /new first, then delete it"
             )
         self.application.deletions.delete(session_id)
 

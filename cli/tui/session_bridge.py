@@ -37,7 +37,7 @@ class SessionBridge:
         self.workspace = os.path.abspath(workspace) if workspace else None
         existing = self.store.get_session(session_id)
         if existing is None:
-            raise ValueError(f"no such session: {session_id}")
+            raise ValueError(f"no such Session: {session_id}")
         self.session_id = existing.session_id
 
     def set_title_from(self, first_message: str) -> None:

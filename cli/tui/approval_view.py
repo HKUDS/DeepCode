@@ -56,7 +56,7 @@ def answer_hint(approval: Mapping) -> str:
     """The keys, as the prompt and the status line show them."""
 
     return (
-        f"y allow once · a always allow {session_target(approval)} this session"
+        f"y allow once · a always allow {session_target(approval)} this Session"
         " · n deny"
     )
 
@@ -68,7 +68,7 @@ def outcome_text(status: str, approval: Mapping | None) -> str:
         return "Allowed once."
     if status == "approved_session":
         target = session_target(approval) if approval is not None else "this"
-        return f"Allowed {target} for the rest of this session."
+        return f"Allowed {target} for the rest of this Session."
     if status == "denied":
         return "Denied."
     return f"Approval {status.replace('_', ' ')}."

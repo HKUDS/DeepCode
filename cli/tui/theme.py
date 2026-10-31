@@ -100,7 +100,7 @@ PLAN_ACTIVE_STYLE = ACCENT
 # -- status / meta ----------------------------------------------------------
 META_STYLE = DIM
 ERROR_STYLE = f"bold {ERROR}"
-INTERRUPT_HINT = "esc interrupts · ctrl+o transcript detail"
+INTERRUPT_HINT = "Esc interrupts · Ctrl+O transcript detail"
 DONE_OK = "✓"
 DONE_ERR = "✗"
 DONE_DECLINED = "⊘"  # refused before it ran: no failure
