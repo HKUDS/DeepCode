@@ -8,12 +8,13 @@ relies on: ``await parallel.generate_str(message, request_params)``.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable, Iterable, Type
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Type
 
 from loguru import logger
 
-from core.compat.agent import Agent, AugmentedLLM
-from core.compat.request_params import RequestParams
+if TYPE_CHECKING:
+    from core.compat.agent import Agent, AugmentedLLM
+    from core.compat.request_params import RequestParams
 
 
 class ParallelLLM:
