@@ -187,6 +187,7 @@ const ZH_CN: Record<string, string> = {
   "sidebar.openProject": "打开项目文件夹",
   "sidebar.sessionHistory": "会话历史",
   "sidebar.projectUntrusted": "项目未受信任",
+  "sidebar.closeNavigation": "关闭导航",
   // Composer high-traffic strings
   "composer.hint.send": "↵ 发送",
   "composer.hint.steerQueue": "↵ 引导 · ⌘↵ 排队",
@@ -1032,7 +1033,6 @@ const ZH_CN: Record<string, string> = {
   "app.loading.workspace": "正在加载工作区…",
   "app.loading.review": "正在加载审查…",
   "app.reviewPanel": "审查面板",
-  "app.openNavigation": "项目与会话",
   // Confirm dialogs
   "confirm.fullAccess.title": "启用完全访问？",
   "confirm.fullAccess.message": "完全访问允许工具在此会话中无需审批、在工作区沙箱之外运行。DeepCode 可能读取、修改或执行你的账户可访问的任何文件。",

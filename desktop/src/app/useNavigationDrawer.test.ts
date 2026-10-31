@@ -1,7 +1,8 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { NARROW_LAYOUT, useNavigationDrawer } from "./useNavigationDrawer";
+import { NARROW_LAYOUT } from "./layout";
+import { useNavigationDrawer } from "./useNavigationDrawer";
 
 function installWindowWidth(narrow: boolean) {
   let matches = narrow;
@@ -64,5 +65,55 @@ describe("useNavigationDrawer", () => {
     // Narrow again later: the drawer does not reopen by itself.
     act(() => width.resize(true));
     expect(result.current.open).toBe(false);
+  });
+});
+
+describe("useNavigationDrawer focus and Escape", () => {
+  function mountDrawer() {
+    const drawer = document.createElement("aside");
+    drawer.id = "nav";
+    drawer.innerHTML = '<button type="button">New Session</button><button type="button">Skills</button>';
+    const button = document.createElement("button");
+    button.textContent = "Menu";
+    document.body.append(drawer, button);
+    return { drawer, button, remove: () => { drawer.remove(); button.remove(); } };
+  }
+
+  it("moves focus into the drawer and back to the menu button, never on load", () => {
+    installWindowWidth(true);
+    const dom = mountDrawer();
+    const { result } = renderHook(() => useNavigationDrawer("nav"));
+    result.current.buttonRef.current = dom.button;
+    expect(document.activeElement).toBe(document.body);
+
+    act(() => result.current.toggle());
+    expect(document.activeElement?.textContent).toBe("New Session");
+
+    act(() => result.current.close());
+    expect(document.activeElement).toBe(dom.button);
+    dom.remove();
+  });
+
+  it("closes on Escape, but an inner layer such as a row's menu closes first", async () => {
+    const { useEscapeLayer } = await import("./escapeLayer");
+    installWindowWidth(true);
+    const dom = mountDrawer();
+    const { result } = renderHook(() => useNavigationDrawer("nav"));
+    act(() => result.current.toggle());
+    const closeMenu = vi.fn();
+    const menu = renderHook(() => useEscapeLayer(closeMenu, true));
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    expect(closeMenu).toHaveBeenCalledOnce();
+    expect(result.current.open).toBe(true);
+
+    menu.unmount();
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    expect(result.current.open).toBe(false);
+    dom.remove();
   });
 });

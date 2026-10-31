@@ -12,6 +12,7 @@ import {
   ShieldAlert,
   Sparkles,
   WandSparkles,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -32,6 +33,12 @@ import styles from "./DesktopSidebar.module.css";
 interface DesktopSidebarProps {
   /** The element id the narrow layout's menu button controls. */
   id?: string;
+  /** On a narrow window the sidebar is a drawer, open or closed. */
+  drawer?: "open" | "closed";
+  /** Behind a panel that holds the keyboard (the floating review panel). */
+  inert?: boolean;
+  onRevealDrawer?(): void;
+  onCloseDrawer?(): void;
   projects: Project[];
   threads: Thread[];
   selectedProjectId: string | null;
@@ -101,6 +108,10 @@ export function DesktopSidebar({
   onArchiveThread,
   onDeleteThread,
   id,
+  drawer,
+  inert,
+  onRevealDrawer,
+  onCloseDrawer,
 }: DesktopSidebarProps) {
   const { t } = useTranslation();
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -160,11 +171,26 @@ export function DesktopSidebar({
     projectGroups.find((group) => group.active)?.key ?? null;
   const disclosure = useProjectDisclosure(activeGroupKey);
 
+  // Cmd+K on a narrow window first opens the drawer the search field is in;
+  // the field takes focus once the drawer is open.
+  const searchWhenOpen = useRef(false);
+  useEffect(() => {
+    if (drawer !== "open" || !searchWhenOpen.current) return;
+    searchWhenOpen.current = false;
+    searchRef.current?.focus();
+    searchRef.current?.select();
+  }, [drawer]);
+
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
       if (event.key.toLocaleLowerCase() === "k") {
         event.preventDefault();
+        if (drawer === "closed") {
+          searchWhenOpen.current = true;
+          onRevealDrawer?.();
+          return;
+        }
         searchRef.current?.focus();
         searchRef.current?.select();
       }
@@ -179,10 +205,16 @@ export function DesktopSidebar({
     };
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [busy, canCreateThread, onCreateThread]);
+  }, [busy, canCreateThread, drawer, onCreateThread, onRevealDrawer]);
 
   return (
-    <aside id={id} className={styles.sidebar} aria-label={t("sidebar.label", "Projects and Sessions")}>
+    <aside
+      id={id}
+      className={styles.sidebar}
+      aria-label={t("sidebar.label", "Projects and Sessions")}
+      data-drawer={drawer}
+      inert={inert}
+    >
       <div className={styles.brandRow}>
         <span className={styles.brandMark} aria-hidden="true">
           {/* Three rules stepping inward: nesting, and so depth. The tile takes
@@ -198,6 +230,17 @@ export function DesktopSidebar({
           <strong>DeepCode</strong>
           <small>{t("sidebar.localAgent", "Local agent")}</small>
         </span>
+        {drawer ? (
+          // A phone has no Escape key, and the menu button is behind the drawer.
+          <button
+            className={styles.drawerClose}
+            type="button"
+            onClick={onCloseDrawer}
+            aria-label={t("sidebar.closeNavigation", "Close navigation")}
+          >
+            <X size={16} />
+          </button>
+        ) : null}
       </div>
 
       {destination === "threads" ? (

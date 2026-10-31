@@ -7,7 +7,7 @@
  */
 
 import { FileText, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { type RefObject, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -37,6 +37,8 @@ interface SettingsDialogProps {
     riskAcknowledged?: boolean,
   ): Promise<boolean>;
   onClose(): void;
+  /** Where focus goes on close when the button that opened it is gone. */
+  returnFocus?: RefObject<HTMLElement | null>;
 }
 
 export function SettingsDialog({
@@ -47,6 +49,7 @@ export function SettingsDialog({
   onRefresh,
   onUpdate,
   onClose,
+  returnFocus,
 }: SettingsDialogProps) {
   const { t } = useTranslation();
   const [activeId, setActiveId] = useState<SettingsSectionId>(
@@ -103,6 +106,7 @@ export function SettingsDialog({
       backdropClassName={styles.backdrop}
       labelledBy="settings-dialog-title"
       onClose={onClose}
+      returnFocus={returnFocus}
     >
       <header className={styles.header}>
         <h1 id="settings-dialog-title">{t("settings.title", "Settings")}</h1>

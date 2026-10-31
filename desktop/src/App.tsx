@@ -6,6 +6,9 @@ import { projectCanExecute } from "./app/projectPresentation";
 import { latestExecutingTurn } from "./app/interactiveTurnRouter";
 import { useAppearance } from "./app/useAppearance";
 import { useDesktopUi } from "./app/useDesktopUi";
+import { useEscapeLayer } from "./app/escapeLayer";
+import { FLOATING_REVIEW } from "./app/layout";
+import { useMediaQuery } from "./app/useMediaQuery";
 import { useNavigationDrawer } from "./app/useNavigationDrawer";
 import { useComposerCommands } from "./app/useComposerCommands";
 import { useWorkspaceController } from "./app/useWorkspaceController";
@@ -79,12 +82,14 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
   useAppearance();
   const ui = useDesktopUi();
   const {
+    narrow,
     open: navigationOpen,
     buttonRef: navigationButtonRef,
     toggle: toggleNavigation,
-    dismiss: dismissNavigation,
+    reveal: revealNavigation,
     close: closeNavigation,
   } = useNavigationDrawer(NAVIGATION_ID);
+  const floatingReviewWidth = useMediaQuery(FLOATING_REVIEW);
   const transcript = useTranscriptMode();
   const runComposerCommand = useComposerCommands(controller, ui);
   const [composerIntent, setComposerIntent] =
@@ -145,15 +150,24 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
   const inspectorVisible = Boolean(
     showingThreads && selectedThread && ui.inspectorOpen,
   );
+  // On a narrower window the review panel floats over the page: it holds the
+  // keyboard and Escape until it is closed, like a dialog.
+  const reviewFloating = inspectorVisible && floatingReviewWidth;
+  useEscapeLayer(() => void ui.closeInspector(), reviewFloating);
 
   return (
     <main
       className={styles.shell}
       data-inspector={inspectorVisible}
-      data-navigation={navigationOpen ? "open" : undefined}
+      data-layout={narrow ? "narrow" : undefined}
+      data-review={reviewFloating ? "floating" : undefined}
     >
       <DesktopSidebar
         id={NAVIGATION_ID}
+        drawer={narrow ? (navigationOpen ? "open" : "closed") : undefined}
+        inert={reviewFloating}
+        onRevealDrawer={revealNavigation}
+        onCloseDrawer={closeNavigation}
         projects={state.projects}
         threads={state.threads}
         selectedProjectId={state.selectedProjectId}
@@ -227,13 +241,13 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
 
       {navigationOpen ? (
         // A pointer target only: Escape and the menu button close it too.
-        <div className={styles.navigationScrim} aria-hidden="true" onClick={dismissNavigation} />
+        <div className={styles.navigationScrim} aria-hidden="true" onClick={closeNavigation} />
       ) : null}
 
       <section
         className={styles.workspace}
         aria-labelledby="thread-title"
-        inert={navigationOpen}
+        inert={navigationOpen || reviewFloating}
       >
         <button
           ref={navigationButtonRef}
@@ -241,7 +255,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
           type="button"
           aria-controls={NAVIGATION_ID}
           aria-expanded={navigationOpen}
-          aria-label={t("app.openNavigation", "Projects and Sessions")}
+          aria-label={t("sidebar.label", "Projects and Sessions")}
           onClick={toggleNavigation}
         >
           <Menu size={18} />
@@ -527,8 +541,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
         {showingThreads && selectedThread ? <ConversationSplitter /> : null}
       </section>
 
-      {inspectorVisible ? (
-        // Below 1180 px the review panel floats over the conversation.
+      {reviewFloating ? (
         <div
           className={styles.reviewScrim}
           aria-hidden="true"
@@ -576,6 +589,8 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
             onRefresh={controller.refreshSettings}
             onUpdate={controller.updateSettings}
             onClose={ui.closeSettings}
+            // Opened from the drawer, its button is hidden once it closes.
+            returnFocus={narrow ? navigationButtonRef : undefined}
           />
         </Suspense>
       ) : null}

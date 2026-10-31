@@ -391,37 +391,55 @@
   line-height: 1.45;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .disclosure {
-    transition: none;
-  }
+
+/* On a narrow window the sidebar is a drawer over the conversation, opened
+   by App's menu button; data-drawer is set only in that layout. */
+.drawerClose {
+  display: none;
 }
 
-/* On a narrow window the sidebar is a drawer over the conversation, opened by
-   the menu button in App (App.module.css, NARROW_LAYOUT). */
-@media (max-width: 720px) {
-  .sidebar {
-    position: fixed;
-    z-index: 30;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    width: min(300px, calc(100vw - 48px));
-    margin: 8px;
-    box-shadow: var(--shadow-float);
-    transform: translateX(calc(-100% - 16px));
-    transition: transform 180ms ease;
-    visibility: hidden;
-  }
+.sidebar[data-drawer] {
+  position: fixed;
+  z-index: 30;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(300px, calc(100vw - 48px));
+  margin: 8px;
+  box-shadow: var(--shadow-float);
+  transform: translateX(calc(-100% - 16px));
+  /* Hidden only once it has slid out, so closing animates too. */
+  transition:
+    transform 180ms ease,
+    visibility 0s linear 180ms;
+  visibility: hidden;
+}
 
-  :global([data-navigation="open"]) .sidebar {
-    transform: none;
-    visibility: visible;
-  }
+.sidebar[data-drawer="open"] {
+  transform: none;
+  transition: transform 180ms ease;
+  visibility: visible;
+}
+
+.sidebar[data-drawer] .drawerClose {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+}
+
+.sidebar[data-drawer] .drawerClose:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar {
+  .disclosure,
+  .sidebar[data-drawer],
+  .sidebar[data-drawer="open"] {
     transition: none;
   }
 }

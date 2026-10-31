@@ -8,7 +8,7 @@
   display: grid;
   place-items: center;
   padding: 28px;
-  background: rgb(18 22 20 / 32%);
+  background: var(--scrim);
   backdrop-filter: blur(8px);
 }
 

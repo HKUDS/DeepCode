@@ -25,19 +25,27 @@
   box-shadow: var(--shadow-soft);
 }
 
-/* Shown only on a narrow window (below), where the sidebar is a drawer. */
-.navigationButton,
-.navigationScrim,
-.reviewScrim {
+/* The menu button exists only in the narrow layout, where the sidebar is a
+   drawer (data-layout, set from src/app/layout.ts). */
+.navigationButton {
   display: none;
 }
 
-/* The dimmed page behind a drawer or a floating panel, like a dialog's. */
+/* The dimmed page behind the drawer or the floating review panel; App
+   renders each only while it is open. */
 .navigationScrim,
 .reviewScrim {
   position: fixed;
   inset: 0;
-  background: rgb(18 22 20 / 32%);
+  background: var(--scrim);
+}
+
+.navigationScrim {
+  z-index: 29;
+}
+
+.reviewScrim {
+  z-index: 19;
 }
 
 .threadViewport {
@@ -147,27 +155,21 @@
   box-shadow: var(--shadow-soft);
 }
 
-@media (max-width: 1180px) {
-  .shell[data-inspector="true"] {
-    grid-template-columns: 248px minmax(0, 1fr);
-  }
+/* The review panel floats over the conversation (data-review, set from
+   src/app/layout.ts). */
+.shell[data-review="floating"] {
+  grid-template-columns: 248px minmax(0, 1fr);
+}
 
-  /* The review panel floats over the conversation: a click beside it closes it. */
-  .reviewScrim {
-    z-index: 19;
-    display: block;
-  }
-
-  .reviewPane {
-    position: fixed;
-    z-index: 20;
-    top: 8px;
-    right: 8px;
-    width: min(430px, calc(100vw - 72px));
-    height: calc(100% - 16px);
-    margin: 0;
-    box-shadow: var(--shadow-float);
-  }
+.shell[data-review="floating"] .reviewPane {
+  position: fixed;
+  z-index: 20;
+  top: 8px;
+  right: 8px;
+  width: min(430px, calc(100vw - 72px));
+  height: calc(100% - 16px);
+  margin: 0;
+  box-shadow: var(--shadow-float);
 }
 
 @media (max-width: 920px) {
@@ -182,49 +184,45 @@
 
 }
 
-/* Keep in step with NARROW_LAYOUT in src/app/useNavigationDrawer.ts. */
-@media (max-width: 720px) {
-  /* The conversation takes the whole width; the sidebar slides in over it
-     (DesktopSidebar.module.css), opened by the menu button. */
-  .shell,
-  .shell[data-inspector="true"] {
-    grid-template-columns: minmax(0, 1fr);
-  }
+/* The narrow layout (data-layout, set from src/app/layout.ts): the
+   conversation takes the whole width and the sidebar slides in over it
+   (DesktopSidebar.module.css), opened by the menu button. Last, so it wins
+   over the wider layouts above. */
+.shell[data-layout="narrow"] {
+  grid-template-columns: minmax(0, 1fr);
+}
 
-  .workspace {
-    margin: 8px;
-    padding-top: 44px;
-  }
+.shell[data-layout="narrow"] .workspace {
+  /* Its own stacking context: the runtime notice inside stays under the
+     drawer. */
+  isolation: isolate;
+  margin: 8px;
+  padding-top: 44px;
+}
 
-  .navigationButton {
-    position: absolute;
-    z-index: 2;
-    top: 6px;
-    left: 8px;
-    display: grid;
-    width: 34px;
-    height: 34px;
-    place-items: center;
-    border-radius: var(--radius-sm);
-    color: var(--text-secondary);
-  }
+.shell[data-layout="narrow"] .navigationButton {
+  position: absolute;
+  z-index: 2;
+  top: 6px;
+  left: 8px;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+}
 
-  .navigationButton:hover {
-    background: var(--surface-hover);
-    color: var(--text-primary);
-  }
+.shell[data-layout="narrow"] .navigationButton:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
 
-  .shell[data-navigation="open"] .navigationScrim {
-    z-index: 29;
-    display: block;
-  }
+.shell[data-layout="narrow"] .startState {
+  padding: 48px 24px 110px;
+}
 
-  .startState {
-    padding: 48px 24px 110px;
-  }
-
-  .startActions {
-    align-items: flex-start;
-    flex-direction: column;
-  }
+.shell[data-layout="narrow"] .startActions {
+  align-items: flex-start;
+  flex-direction: column;
 }

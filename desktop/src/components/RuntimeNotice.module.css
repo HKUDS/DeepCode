@@ -73,3 +73,8 @@
     width: calc(100vw - 16px);
   }
 }
+
+/* In the narrow layout the workspace's top band holds the menu button. */
+:global([data-layout="narrow"]) .notice {
+  top: 52px;
+}
