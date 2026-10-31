@@ -421,8 +421,9 @@ vulnerability, see [SECURITY.md](SECURITY.md).
 - **2026-10-31** — Long tasks read better on the Web (folded steps, a Goal
   outcome, faster long Sessions), declined tools say so, the terminal UI
   wraps Chinese text and resumes a running Turn cleanly, the Chinese
-  interface has no stray English, and the sidebar becomes a drawer on a
-  narrow window.
+  interface has no stray English, the sidebar becomes a drawer on a narrow
+  window, and the Web and Desktop interface is calmer: one typeface, one-line
+  controls and steps, and fewer boxes and labels.
 - **2026-10-29** — Optional microcompact that clears old tool output before
   summarizing (`agents.defaults.microcompact`), an optional check before a
   Goal completes (`goal.completionVerifier`), folder browsing in the Web

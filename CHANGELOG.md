@@ -32,6 +32,13 @@ Released versions are named in the entry title; the version on PyPI is
 - **Narrow windows.** The composer's controls wrap instead of being cut, the
   sidebar becomes a drawer below 720 px, and the review panel that floats
   over the conversation holds the keyboard like a dialog.
+- **A calmer, more finished interface on Web and Desktop.** One typeface
+  throughout, with monospace kept for code, commands and paths. Each
+  composer control is one line. A tool step is one quiet line and leaves out
+  the repeated `cd` into the Session's folder. Selection in the sidebar is a
+  tint rather than a raised card, and the header buttons have no borders.
+  Settings and management pages lose a layer of labels and nested cards.
+  The Latest button, the goal bar, error notes and empty states are lighter.
 - DeepCode now requires Rich 13.4 or later.
 
 ## 2026-10-29 · Lighter compaction, checked Goal completion, and folder browsing on the Web

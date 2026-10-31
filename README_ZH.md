@@ -379,7 +379,8 @@ vLLM。**Custom** 连接可以指向任何支持 OpenAI Chat Completions、OpenA
 
 - **2026-10-31** — Web 端长任务更好读（步骤折叠、Goal 结果卡片、长会话打开更快）；
   被拒绝的工具会说明是拒绝；终端界面中文按字换行、恢复运行中的会话不再重复；
-  中文界面不再出现英文；窄窗口下侧栏变成抽屉。
+  中文界面不再出现英文；窄窗口下侧栏变成抽屉；Web 与 Desktop 界面更精致：统一字体，
+  控件和步骤各占一行，框和标签更少。
 - **2026-10-29** — 可选的 microcompact：总结之前先清掉旧的工具输出
   （`agents.defaults.microcompact`）；Goal 完成前的可选检查
   （`goal.completionVerifier`）；Web 客户端可以浏览文件夹；可选的风险检查
