@@ -179,7 +179,7 @@ export function DesktopSidebar({
   }, [busy, canCreateThread, onCreateThread]);
 
   return (
-    <aside className={styles.sidebar} aria-label="Projects and Sessions">
+    <aside className={styles.sidebar} aria-label={t("sidebar.label", "Projects and Sessions")}>
       <div className={styles.brandRow}>
         <span className={styles.brandMark} aria-hidden="true">
           {/* Three rules stepping inward: nesting, and so depth. The tile takes
@@ -231,7 +231,7 @@ export function DesktopSidebar({
         </>
       ) : null}
 
-      <nav className={styles.destinations} aria-label="DeepCode destinations">
+      <nav className={styles.destinations} aria-label={t("sidebar.destinations", "DeepCode destinations")}>
         <button
           type="button"
           data-active={destination === "threads"}
@@ -288,14 +288,14 @@ export function DesktopSidebar({
           type="button"
           onClick={onOpenProject}
           disabled={busy}
-          aria-label="Open project folder"
-          title="Open project folder"
+          aria-label={t("sidebar.openProject", "Open project folder")}
+          title={t("sidebar.openProject", "Open project folder")}
         >
           <Plus size={16} />
         </button>
       </div>
 
-      <nav className={styles.projectList} aria-label="Session history">
+      <nav className={styles.projectList} aria-label={t("sidebar.sessionHistory", "Session history")}>
         {projects.length === 0 ? (
           <button className={styles.emptyProject} type="button" onClick={onOpenProject}>
             <FolderOpen size={18} />
@@ -353,7 +353,7 @@ export function DesktopSidebar({
                     <ShieldAlert
                       size={14}
                       className={styles.untrusted}
-                      aria-label="Project not trusted"
+                      aria-label={t("sidebar.projectUntrusted", "Project not trusted")}
                     />
                   ) : null}
                 </button>

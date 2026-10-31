@@ -33,7 +33,15 @@ export function RuntimeNotice({
     <div className={styles.notice} role="alert">
       <AlertTriangle size={18} aria-hidden="true" />
       <div className={styles.copy}>
-        <strong>{authRequired ? t("runtime.browserAuthRequired", "Browser access required") : code ?? "APP_SERVER_OFFLINE"}</strong>
+        <strong>
+          {authRequired
+            ? t("runtime.browserAuthRequired", "Browser access required")
+            : code === "CONNECTION_LOST"
+              ? t("runtime.connectionLost", "Connection to DeepCode lost")
+              : serviceOffline
+                ? t("runtime.serviceUnavailable", "Local service unavailable")
+                : t("runtime.requestFailed", "Request failed")}
+        </strong>
         <span>{message}</span>
       </div>
       <div className={styles.actions}>
@@ -42,7 +50,7 @@ export function RuntimeNotice({
             className={styles.dismiss}
             type="button"
             onClick={onDismissError}
-            aria-label="Dismiss error"
+            aria-label={t("runtime.dismissError", "Dismiss error")}
           >
             <X size={14} />
           </button>

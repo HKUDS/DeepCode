@@ -13,20 +13,32 @@ export type GoalPresentationStatus =
 
 export interface GoalPresentation {
   status: GoalPresentationStatus;
-  label: string;
   linkedTurnCount: number;
   liveTurnId: string | null;
 }
 
-const LABELS: Record<GoalPresentationStatus, string> = {
-  working: "Working",
-  readyToContinue: "Ready to continue",
-  finishing: "Finishing",
-  paused: "Paused",
-  blocked: "Needs input",
-  budget_limited: "Budget reached",
-  complete: "Complete",
-};
+/** A Goal's state, in words. */
+export function goalStatusLabel(
+  status: GoalPresentationStatus,
+  t: TFunction,
+): string {
+  switch (status) {
+    case "working":
+      return t("goal.status.working", "Working");
+    case "readyToContinue":
+      return t("goal.status.readyToContinue", "Ready to continue");
+    case "finishing":
+      return t("goal.status.finishing", "Finishing");
+    case "paused":
+      return t("goal.status.paused", "Paused");
+    case "blocked":
+      return t("goal.status.blocked", "Needs input");
+    case "budget_limited":
+      return t("goal.status.budgetLimited", "Budget reached");
+    case "complete":
+      return t("goal.status.complete", "Complete");
+  }
+}
 
 /** Derive transient Goal UI state without extending the persisted ledger. */
 export function deriveGoalPresentation(
@@ -55,7 +67,6 @@ export function deriveGoalPresentation(
 
   return {
     status,
-    label: LABELS[status],
     linkedTurnCount: linkedTurns.length,
     liveTurnId: liveTurn?.id ?? null,
   };

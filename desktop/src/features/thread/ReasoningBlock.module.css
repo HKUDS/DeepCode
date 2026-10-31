@@ -37,14 +37,12 @@
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
   text-overflow: ellipsis;
-  text-transform: capitalize;
   white-space: nowrap;
 }
 
 .reasoning small {
   color: var(--text-tertiary);
   font: var(--text-micro) var(--font-mono);
-  text-transform: capitalize;
 }
 
 .reasoning[data-active="true"] {

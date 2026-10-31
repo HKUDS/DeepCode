@@ -32,7 +32,13 @@ import type {
 import type { DesktopInspectorTab } from "../../app/useDesktopUi";
 import { ApprovalCard } from "../execution/ApprovalCard";
 import { GoalOutcomeView } from "../goal/GoalOutcomeView";
-import { isWarning, presentItem } from "../execution/itemPresentation";
+import {
+  activityLabel,
+  approvalOutcome,
+  isWarning,
+  itemStatusText,
+  presentItem,
+} from "../execution/itemPresentation";
 import {
   formatTurnDuration,
   goalPrompt,
@@ -146,38 +152,6 @@ function ActivityIcon({
   }
 }
 
-function approvalOutcome(status: Approval["status"], t: TFunction): string {
-  switch (status) {
-    case "approved_once":
-      return t("turn.approval.allowedOnce", "Allowed once");
-    case "approved_session":
-      return t("turn.approval.allowedSession", "Allowed for this Session");
-    case "denied":
-      return t("turn.approval.denied", "Denied");
-    case "cancelled":
-      return t("turn.approval.cancelled", "Cancelled");
-    default:
-      return t("turn.approval.resolved", "Approval resolved");
-  }
-}
-
-function itemStatusText(status: Item["status"], t: TFunction): string {
-  switch (status) {
-    case "pending":
-      return t("turn.itemStatus.pending", "pending");
-    case "in_progress":
-      return t("turn.itemStatus.inProgress", "in progress");
-    case "completed":
-      return t("turn.itemStatus.completed", "completed");
-    case "failed":
-      return t("turn.itemStatus.failed", "failed");
-    case "declined":
-      return t("turn.itemStatus.declined", "declined");
-    default:
-      return String(status).replaceAll("_", " ");
-  }
-}
-
 function useElapsedNow(active: boolean): number {
   const [now, setNow] = useState(Date.now);
 
@@ -279,7 +253,7 @@ function ActivityItem({
         ) : (
           <span className={styles.runApprovalDecision}>
             {t("approval.decision", "Decision: {{status}}", {
-              status: approval.status.replaceAll("_", " "),
+              status: approvalOutcome(approval.status, t),
             })}
           </span>
         )}
@@ -287,7 +261,7 @@ function ActivityItem({
     );
   }
 
-  const presentation = presentItem(item);
+  const presentation = presentItem(item, t);
   const activity = itemActivity(item);
   const warning = isWarning(item);
   const body = presentation.body;
@@ -301,7 +275,7 @@ function ActivityItem({
       )}
       <span className={styles.runStepCopy}>
         <strong>{stepSubject(item, t)}</strong>
-        <small>{activity?.label ?? presentation.label}</small>
+        <small>{activity ? activityLabel(activity, t) : presentation.label}</small>
       </span>
       {warning ? null : (
         <span className={styles.runStepStatus}>
@@ -421,7 +395,7 @@ function stepSubject(item: Item, t: TFunction): string {
   if (item.kind === "reasoning_summary") {
     return t("thread.reasoning.thinking", "Thinking");
   }
-  return itemActivity(item)?.subject || item.summary || presentItem(item).label;
+  return itemActivity(item)?.subject || item.summary || presentItem(item, t).label;
 }
 
 // A run opened on its own shows only its latest steps: a long one is hundreds.
@@ -573,7 +547,7 @@ function WorkGroup({
 
 function AssistantMessage({ item }: { item: Item }) {
   const { t } = useTranslation();
-  const presentation = presentItem(item);
+  const presentation = presentItem(item, t);
   const phase =
     item.payload.phase === "commentary" ? "commentary" : "final_answer";
   return (
@@ -629,7 +603,7 @@ export function TurnBlock({
   const userMessages = group.userMessages.length
     ? group.userMessages.map((item) => ({
         id: item.id,
-        text: presentItem(item).body ?? item.summary,
+        text: presentItem(item, t).body ?? item.summary,
         skills: itemSkills(item),
         goalPrompt: goalPrompt(item),
       }))

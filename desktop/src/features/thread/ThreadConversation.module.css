@@ -609,7 +609,6 @@ div.runStep {
   margin: 5px 0 0 23px;
   color: var(--text-tertiary);
   font: var(--text-micro) var(--font-mono);
-  text-transform: capitalize;
 }
 
 .runError {

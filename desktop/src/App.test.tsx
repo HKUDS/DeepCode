@@ -2190,7 +2190,9 @@ describe("desktop command center", () => {
         "The requested change is implemented and focused tests pass.",
       ),
     ).toBeTruthy();
-    expect(within(rail).getByText(/Deciding Turn/)).toBeTruthy();
+    expect(
+      within(rail).getByText(`Decided in Turn ${decidingTurn.ordinal}`),
+    ).toBeTruthy();
     // The deciding Turn shows the outcome in the conversation too.
     expect(screen.getByRole("region", { name: "Goal complete" })).toBeTruthy();
     fireEvent.click(
@@ -3523,7 +3525,7 @@ describe("desktop command center", () => {
     fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
 
     await waitFor(() =>
-      expect(screen.getByText("Decision: approved once")).toBeTruthy(),
+      expect(screen.getByText("Decision: Allowed once")).toBeTruthy(),
     );
     expect(runtime.calls).toContain("approval/respond");
   });

@@ -21,7 +21,7 @@ import type {
   Turn,
 } from "../../generated/app-server";
 import type { GoalDefinitionInput } from "../../app/useWorkspaceController";
-import { deriveGoalPresentation } from "./goalPresentation";
+import { deriveGoalPresentation, goalStatusLabel } from "./goalPresentation";
 import { GoalOutcomeView } from "./GoalOutcomeView";
 import styles from "./GoalRail.module.css";
 
@@ -82,6 +82,9 @@ export function GoalRail({
         : null,
     [goal, outcome?.decidedByTurnId, turns],
   );
+  const decidingTurn = outcome?.decidedByTurnId
+    ? turns.find((turn) => turn.id === outcome.decidedByTurnId) ?? null
+    : null;
 
   const openEditor = (resume = false) => {
     setResumeAfterSave(resume);
@@ -147,7 +150,7 @@ export function GoalRail({
             <span className={styles.summaryText}>
               <strong>{goal.objective}</strong>
               <small>
-                <span>{presentation?.label}</span>
+                <span>{presentation ? goalStatusLabel(presentation.status, t) : null}</span>
                 <i>·</i>
                 {presentation?.linkedTurnCount ?? 0}{" "}
                 {presentation?.linkedTurnCount === 1 ? t("goal.turn", "Turn") : t("goal.turns", "Turns")}
@@ -231,7 +234,7 @@ export function GoalRail({
           {expanded ? (
             <div className={styles.details}>
               <p>
-                {t("goal.goalDescription", "Goal {{id}} stays attached to this Session. Normal follow-ups steer the work without rewriting the objective.", { id: shortId(goal.id) })}
+                {t("goal.attachedNote", "This Goal stays attached to the Session. Normal follow-ups steer the work without rewriting the objective.")}
               </p>
               <p>
                 {goal.timeUsedSeconds > 0
@@ -244,9 +247,9 @@ export function GoalRail({
               {outcome ? (
                 <section className={styles.outcome} aria-label={t("goal.outcome", "Goal outcome")}>
                   <GoalOutcomeView outcome={outcome} onSelectEvidence={onSelectEvidence} />
-                  {outcome.decidedByTurnId ? (
+                  {decidingTurn ? (
                     <small>
-                      {t("goal.decidingTurn", "Deciding Turn")} <code>{shortId(outcome.decidedByTurnId)}</code>
+                      {t("goal.decidedInTurn", "Decided in Turn {{number}}", { number: decidingTurn.ordinal })}
                     </small>
                   ) : null}
                 </section>

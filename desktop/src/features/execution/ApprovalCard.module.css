@@ -27,7 +27,6 @@
 .operation small {
   color: var(--text-tertiary);
   font-size: var(--text-2xs);
-  text-transform: capitalize;
 }
 
 .card p,
@@ -99,5 +98,4 @@
   margin-top: 10px;
   color: var(--text-tertiary);
   font: var(--text-micro) var(--font-mono);
-  text-transform: capitalize;
 }

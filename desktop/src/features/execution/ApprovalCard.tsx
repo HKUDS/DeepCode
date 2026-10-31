@@ -8,6 +8,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import type { Approval, ApprovalDecision } from "../../generated/app-server";
+import { approvalCategoryLabel, approvalOutcome } from "./itemPresentation";
 import styles from "./ApprovalCard.module.css";
 
 interface ApprovalCardProps {
@@ -78,7 +79,7 @@ export function ApprovalCard({ approval, busy, onRespond }: ApprovalCardProps) {
   if (approval.status !== "pending") {
     return (
       <p className={styles.resolution}>
-        {t("approval.decision", "Decision: {{status}}", { status: approval.status.replaceAll("_", " ") })}
+        {t("approval.decision", "Decision: {{status}}", { status: approvalOutcome(approval.status, t) })}
       </p>
     );
   }
@@ -89,7 +90,7 @@ export function ApprovalCard({ approval, busy, onRespond }: ApprovalCardProps) {
         <CategoryIcon category={approval.category} />
         <span>
           <strong>{requestTool(approval, t)}</strong>
-          <small>{approval.category.replaceAll("_", " ")}</small>
+          <small>{approvalCategoryLabel(approval.category, t)}</small>
         </span>
       </div>
       <p>{requestDetail(approval, t)}</p>
