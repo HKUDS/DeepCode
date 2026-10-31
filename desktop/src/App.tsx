@@ -206,7 +206,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
 
       <section className={styles.workspace} aria-labelledby="thread-title">
         <RuntimeNotice
-          reconnectOnly={runtime.host?.kind === "browser"}
+          browserHost={runtime.host?.kind === "browser"}
           runtime={state.runtime}
           error={state.error}
           busy={state.busy}

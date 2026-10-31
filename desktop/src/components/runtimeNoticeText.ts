@@ -55,16 +55,6 @@ function browserReport(
         t("runtime.buildMismatch", "This page is out of date"),
         t("runtime.buildMismatchHelp", "This page and the service come from different builds. Reload the page or reinstall the complete release."),
       ];
-    case "NO_THREAD":
-      return [
-        t("runtime.noThread", "No Session selected"),
-        t("runtime.noThreadHelp", "Select a trusted workspace before uploading files."),
-      ];
-    case "UPLOAD_TOO_LARGE":
-      return [
-        t("runtime.uploadTooLarge", "Files too large"),
-        t("runtime.uploadTooLargeHelp", "Choose up to 8 files, each at most 10 MiB."),
-      ];
   }
   return null;
 }
@@ -85,13 +75,4 @@ export function runtimeNoticeText(
       serviceMessage,
     ]
   );
-}
-
-/** Why attaching files failed, in words: the browser's upload limits, or the error's message. */
-export function attachmentErrorText(error: unknown, t: TFunction): string {
-  const code = (error as { code?: unknown } | null)?.code;
-  if (code === "NO_THREAD" || code === "UPLOAD_TOO_LARGE") {
-    return browserReport(code, false, t)![1];
-  }
-  return error instanceof Error ? error.message : String(error);
 }

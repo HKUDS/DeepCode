@@ -11,7 +11,7 @@ interface RuntimeNoticeProps {
   busy: boolean;
   onRestart(): void;
   onDismissError(): void;
-  reconnectOnly?: boolean;
+  browserHost?: boolean;
 }
 
 export function RuntimeNotice({
@@ -20,13 +20,13 @@ export function RuntimeNotice({
   busy,
   onRestart,
   onDismissError,
-  reconnectOnly = false,
+  browserHost = false,
 }: RuntimeNoticeProps) {
   const { t } = useTranslation();
   if (!error && runtime.phase !== "crashed" && runtime.phase !== "stopped") return null;
   const serviceOffline = runtime.phase === "crashed" || runtime.phase === "stopped";
   const code = runtime.errorCode ?? error?.code;
-  const authRequired = reconnectOnly && code === "AUTH_REQUIRED";
+  const authRequired = browserHost && code === "AUTH_REQUIRED";
   const serviceMessage =
     (runtime.errorCode ? runtime.message : error?.message) ??
     runtime.message ??
@@ -34,8 +34,7 @@ export function RuntimeNotice({
   const [title, message] = runtimeNoticeText(
     code,
     serviceMessage,
-    // reconnectOnly is the browser host, whose connection reports are its own.
-    { serviceOffline, browser: reconnectOnly },
+    { serviceOffline, browser: browserHost },
     t,
   );
   return (
@@ -59,7 +58,7 @@ export function RuntimeNotice({
         {serviceOffline && !authRequired ? (
           <button type="button" onClick={onRestart} disabled={busy}>
             <RotateCw size={14} />
-            {reconnectOnly || runtime.serverInfo?.serviceInfo?.shutdownScope === "connection"
+            {browserHost || runtime.serverInfo?.serviceInfo?.shutdownScope === "connection"
               ? t("runtime.reconnect", "Reconnect")
               : t("runtime.restart", "Restart service")}
           </button>

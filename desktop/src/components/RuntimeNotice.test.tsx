@@ -31,7 +31,7 @@ it.each(["en", "zh-CN"] as const)(
         runtime={stopped}
         error={null}
         busy={false}
-        reconnectOnly
+        browserHost
         onRestart={vi.fn()}
         onDismissError={vi.fn()}
       />,
@@ -52,7 +52,7 @@ it("keeps reconnection available for network failures", () => {
       runtime={{ ...stopped, errorCode: "CONNECTION_LOST", message: "Network unavailable" }}
       error={null}
       busy={false}
-      reconnectOnly
+      browserHost
       onRestart={reconnect}
       onDismissError={vi.fn()}
     />,
@@ -70,7 +70,7 @@ it("says a request timed out, not that the connection was lost", () => {
       runtime={{ ...stopped, phase: "ready", errorCode: undefined }}
       error={{ code: "RESPONSE_TIMEOUT", message: "timed out", retryable: true }}
       busy={false}
-      reconnectOnly
+      browserHost
       onRestart={vi.fn()}
       onDismissError={vi.fn()}
     />,
@@ -108,7 +108,7 @@ it("says an uncertain request plainly, without the method it was", () => {
         retryable: false,
       }}
       busy={false}
-      reconnectOnly
+      browserHost
       onRestart={vi.fn()}
       onDismissError={vi.fn()}
     />,

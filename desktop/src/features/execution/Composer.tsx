@@ -50,7 +50,7 @@ import {
   type ComposerCommand,
 } from "./commands";
 import styles from "./Composer.module.css";
-import { attachmentErrorText } from "../../components/runtimeNoticeText";
+import { attachmentErrorText } from "./attachmentErrorText";
 import { useDictation } from "./useDictation";
 import { usePromptDraft } from "./usePromptDraft";
 import { ModelPicker } from "./ModelPicker";

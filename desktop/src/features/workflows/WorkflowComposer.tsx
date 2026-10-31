@@ -7,7 +7,7 @@ import type {
   WorkflowRun,
   WorkflowStartParams,
 } from "../../generated/app-server";
-import { attachmentErrorText } from "../../components/runtimeNoticeText";
+import { attachmentErrorText } from "../execution/attachmentErrorText";
 import styles from "./WorkflowComposer.module.css";
 
 type SourceType = WorkflowStartParams["sourceType"];

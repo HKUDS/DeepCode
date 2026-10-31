@@ -2,7 +2,7 @@ import i18n from "i18next";
 import { afterEach, beforeEach, expect, it } from "vitest";
 
 import { __setLocaleForTests, initI18n } from "../app/i18n";
-import { attachmentErrorText, runtimeNoticeText } from "./runtimeNoticeText";
+import { runtimeNoticeText } from "./runtimeNoticeText";
 
 beforeEach(() => {
   initI18n();
@@ -25,8 +25,6 @@ it("words every connection report of the browser runtime in Chinese", () => {
     "CLIENT_BUSY",
     "REQUEST_TOO_LARGE",
     "WEB_BUILD_MISMATCH",
-    "NO_THREAD",
-    "UPLOAD_TOO_LARGE",
   ];
   const texts = codes.flatMap((code) =>
     runtimeNoticeText(code, "service text", { serviceOffline: false, browser: true }, t),
@@ -48,14 +46,4 @@ it("keeps the Desktop service's own message for codes it reuses", () => {
       runtimeNoticeText(code, slow, { serviceOffline: false, browser: false }, t)[1],
     ).toBe(slow);
   }
-});
-
-it("words the browser's upload limits, and keeps any other error's message", () => {
-  __setLocaleForTests("zh-CN");
-  const t = i18n.t.bind(i18n);
-  const tooLarge = Object.assign(new Error("Choose up to 8 files, each at most 10 MiB"), {
-    code: "UPLOAD_TOO_LARGE",
-  });
-  expect(attachmentErrorText(tooLarge, t)).toBe("最多选择 8 个文件，每个不超过 10 MiB。");
-  expect(attachmentErrorText(new Error("disk full"), t)).toBe("disk full");
 });
