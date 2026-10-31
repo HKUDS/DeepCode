@@ -410,9 +410,11 @@
   text-align: right;
 }
 
-/* The controls wrap rather than shrink: squeezed into one line they were cut
-   to "Age… De…" and, on a narrow window, ran under the send button. Each
-   keeps its own maximum width, so a long model name still ends in "…". */
+/* The controls wrap onto another line: on one line they were squeezed to
+   "Age… De…" and, on a narrow window, ran under the send button. A wrapping
+   row moves a control down before it shrinks it; one wider than the whole
+   row (a long model name, the access control on a phone) shrinks to the row
+   and ends in "…". */
 .context {
   display: flex;
   min-width: 0;
@@ -423,7 +425,7 @@
 }
 
 .context > * {
-  flex: 0 0 auto;
+  max-width: 100%;
 }
 
 .attachButton,
@@ -557,6 +559,7 @@
 }
 
 .selector select {
+  min-width: 0;
   max-width: 180px;
   border: 0;
   outline: 0;
