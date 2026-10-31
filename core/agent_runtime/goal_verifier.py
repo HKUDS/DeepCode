@@ -50,10 +50,20 @@ class GoalCompletionRequest:
 
 @dataclass(frozen=True, slots=True)
 class GoalVerdict:
-    """The verifier's answer. ``justification`` always travels to the model."""
+    """The verifier's answer. ``justification`` always travels to the model.
+
+    ``impossible`` marks a rejection that no further work can turn around:
+    the Goal runtime then blocks the Goal at once instead of waiting for
+    more rejected claims.
+    """
 
     confirmed: bool
     justification: str
+    impossible: bool = False
+
+    def __post_init__(self) -> None:
+        if self.confirmed and self.impossible:
+            raise ValueError("a confirmed verdict cannot also be impossible")
 
 
 class GoalCompletionVerifier(Protocol):

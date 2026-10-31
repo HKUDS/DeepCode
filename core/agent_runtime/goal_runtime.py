@@ -77,9 +77,10 @@ class GoalRuntimeRouter:
     :meth:`configure_completion_verifier`), a ``complete`` request is judged
     exactly once, asynchronously, before any durable update. A rejection is
     returned to the model as data — with the verifier's justification — and
-    the goal is not updated. After ``max_rejections`` rejected claims the
-    router moves the goal to ``blocked`` itself, so a model that keeps
-    re-claiming completion cannot burn Turns forever.
+    the goal is not updated. After ``max_rejections`` rejected claims, or at
+    once when the verifier finds the Goal impossible, the router moves the
+    goal to ``blocked`` itself, so a model that keeps re-claiming completion
+    cannot burn Turns forever.
     """
 
     def __init__(self) -> None:
@@ -171,6 +172,8 @@ class GoalRuntimeRouter:
                 )
             if not verdict.confirmed:
                 return self._reject_completion(handler, context, verdict)
+        else:
+            verdict = None
 
         result = handler.update_goal(
             context,
@@ -182,6 +185,14 @@ class GoalRuntimeRouter:
                 raise GoalRuntimeError("Goal Turn changed while recording the decision")
             self._terminal_requested = True
             self._rejections.pop(context.goal_id, None)
+        if verdict is not None:
+            result = {
+                **result,
+                "verdict": {
+                    "confirmed": True,
+                    "justification": verdict.justification,
+                },
+            }
         return result
 
     def _reject_completion(
@@ -198,7 +209,7 @@ class GoalRuntimeRouter:
             count = self._rejections.get(context.goal_id, 0) + 1
             self._rejections[context.goal_id] = count
             max_rejections = self._max_rejections
-            exhausted = count >= max_rejections
+            exhausted = verdict.impossible or count >= max_rejections
 
         rejection: dict[str, Any] = {
             "goalId": context.goal_id,
@@ -220,8 +231,12 @@ class GoalRuntimeRouter:
             context,
             status="blocked",
             reason=(
-                f"Blocked by the completion verifier after {count} rejected "
-                f"completion claims. Last rejection: {verdict.justification}"
+                verdict.justification
+                if verdict.impossible
+                else (
+                    f"Blocked by the completion verifier after {count} rejected "
+                    f"completion claims. Last rejection: {verdict.justification}"
+                )
             )[:_AUTO_BLOCK_REASON_MAX_CHARS],
         )
         with self._lock:

@@ -19,6 +19,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Awaitable, Callable
 import os
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -313,6 +314,44 @@ def _legacy_execution_profile(
     )
 
 
+def _completion_verifier(
+    mode: str,
+    *,
+    workspace: str,
+    execution_profile: ExecutionProfile,
+    security_profile: ExecutionSecurityProfile | None,
+    runtime: DeepCodeRuntime,
+) -> Any:
+    """The Goal completion gate for ``goal.completion_verifier``.
+
+    ``reviewer`` builds each reviewer like this session: same workspace,
+    model and runtime, but read-only and under its own rules.
+    """
+    from core.agent_runtime.goal_verifier import RuleBasedVerifier
+
+    if mode == "rule":
+        return RuleBasedVerifier()
+    from core.harness.agents.goal_reviewer import (
+        AgentReviewVerifier,
+        reviewer_security_profile,
+        session_review_runner,
+    )
+
+    return AgentReviewVerifier(
+        session_review_runner(
+            workspace=workspace,
+            build_session=build_agent_session,
+            session_kwargs={
+                "execution_profile": execution_profile,
+                "execution_security_profile": reviewer_security_profile(
+                    security_profile
+                ),
+                "runtime": runtime,
+            },
+        )
+    )
+
+
 def build_agent_session(
     *,
     workspace: str,
@@ -354,6 +393,9 @@ def build_agent_session(
     # Optional narrowing filter over exposed tool names, composed with the
     # Goal runtime's own filter (both only ever narrow; see AgentRunSpec).
     tool_filter: Any | None = None,
+    # Look, never touch: only read / grep / glob and a bash that cannot write
+    # the workspace (see default_coding_tools), no MCP servers, no code mode.
+    read_only_workspace: bool = False,
 ) -> tuple[AgentSession, str, Any]:
     """Build an :class:`AgentSession` over ``workspace``.
 
@@ -507,17 +549,19 @@ def build_agent_session(
         agent_control=control,
         goal_runtime=goal_runtime,
         execution_security_profile=resolved_security_profile,
+        read_only_workspace=read_only_workspace,
     )
     for extra_tool in extra_tools:
         tool_registry.register(extra_tool)
-    _wire_code_mode(
-        tool_registry,
-        workspace,
-        engine,
-        hooks_engine,
-        resolved_security_profile,
-        approval_callback,
-    )
+    if not read_only_workspace:
+        _wire_code_mode(
+            tool_registry,
+            workspace,
+            engine,
+            hooks_engine,
+            resolved_security_profile,
+            approval_callback,
+        )
     _wire_tool_permissions(tool_registry, engine)
 
     from core.mcp import (
@@ -525,12 +569,17 @@ def build_agent_session(
         McpSessionRuntime,
         create_mcp_oauth_provider,
     )
+    from core.mcp.models import McpRuntimePlan
     from core.mcp.tools import McpToolAdapter
 
-    mcp_plan = McpConfigResolver().resolve(
-        workspace,
-        project_trusted=project_trusted,
-        plugin_servers=plugin_mcp_servers,
+    mcp_plan = (
+        McpRuntimePlan(workspace=Path(workspace), servers=(), revision="read-only")
+        if read_only_workspace
+        else McpConfigResolver().resolve(
+            workspace,
+            project_trusted=project_trusted,
+            plugin_servers=plugin_mcp_servers,
+        )
     )
 
     def _mcp_credential(connection_id: str) -> str | None:
@@ -616,16 +665,21 @@ def build_agent_session(
         # The Goal router outlives agent rebuilds, so every build sets the
         # completion gate from the current config: ``off`` disarms it.
         goal_cfg = getattr(active_runtime.config, "goal", None)
-        if goal_cfg is not None and goal_cfg.completion_verifier == "rule":
-            from core.agent_runtime.goal_verifier import RuleBasedVerifier
-
+        mode = goal_cfg.completion_verifier if goal_cfg is not None else "off"
+        if mode == "off":
+            goal_runtime.configure_completion_verifier(None)
+        else:
             goal_runtime.configure_completion_verifier(
-                RuleBasedVerifier(),
+                _completion_verifier(
+                    mode,
+                    workspace=workspace,
+                    execution_profile=resolved_execution,
+                    security_profile=resolved_security_profile,
+                    runtime=active_runtime,
+                ),
                 max_rejections=goal_cfg.max_rejections,
                 settle=session.settle_events,
             )
-        else:
-            goal_runtime.configure_completion_verifier(None)
     if control is not None:
         # `session.history` is a @property (a list), so it must be wrapped in a
         # callable — passing its value would make fork_turns call a list.

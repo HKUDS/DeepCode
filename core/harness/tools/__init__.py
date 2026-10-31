@@ -58,6 +58,7 @@ def default_coding_tools(
     agent_control=None,
     goal_runtime=None,
     execution_security_profile: ExecutionSecurityProfile | None = None,
+    read_only_workspace: bool = False,
 ):
     """Build a :class:`ToolRegistry` with the native coding tool set.
 
@@ -79,6 +80,10 @@ def default_coding_tools(
     When provided (a top-level session), the ``spawn_agent`` + ``wait_agent``
     delegation tools are registered; a spawned sub-agent gets no control, so
     delegation cannot recurse.
+
+    ``read_only_workspace``: only read / grep / glob, plus a bash whose
+    commands cannot write the workspace where the sandbox can fence writes
+    (none otherwise). Every other argument is ignored.
     """
     from core.agent_runtime.tools.registry import ToolRegistry
     from core.harness.memory import MemoryTool
@@ -95,6 +100,19 @@ def default_coding_tools(
     from core.harness.tools.user_input import RequestUserInputTool
 
     registry = ToolRegistry()
+    if read_only_workspace:
+        from core.harness.sandbox import fences_writes
+
+        read_only_tools = [
+            ReadTool(workspace),
+            GrepTool(workspace),
+            GlobTool(workspace),
+        ]
+        if fences_writes():
+            read_only_tools.append(BashTool(workspace, read_only_workspace=True))
+        for tool in read_only_tools:
+            registry.register(tool)
+        return registry
     allow_outside_workspace = bool(
         execution_security_profile is not None
         and execution_security_profile.filesystem_scope is FilesystemScope.UNRESTRICTED

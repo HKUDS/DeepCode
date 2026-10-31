@@ -145,9 +145,18 @@ def _read_manifest(path: Path) -> str:
 class BashTool(Tool):
     """Run a bash command in the sandboxed workspace and return its output."""
 
-    def __init__(self, workspace: str, *, sandbox_enabled: bool | None = None):
+    def __init__(
+        self,
+        workspace: str,
+        *,
+        sandbox_enabled: bool | None = None,
+        read_only_workspace: bool = False,
+    ):
+        """``read_only_workspace``: commands may read the workspace but never
+        write it. Only offer such a tool where ``fences_writes()`` holds."""
         self._workspace = str(workspace)
         self._sandbox_enabled = sandbox_enabled
+        self._read_only_workspace = read_only_workspace
         self._declared_packages: frozenset[str] | None = None
 
     def _known_packages(self) -> frozenset[str]:
@@ -163,6 +172,13 @@ class BashTool(Tool):
 
     @property
     def description(self) -> str:
+        if self._read_only_workspace:
+            return (
+                "Run a bash command to inspect the workspace. The workspace is "
+                "read-only: commands can read it, run tests and write to the "
+                "temporary directory, but cannot change it. Large output is "
+                "truncated with the full output saved to a file."
+            )
         if self._sandbox_enabled is False:
             return (
                 "Run a bash command with the command sandbox disabled by the "
@@ -200,6 +216,7 @@ class BashTool(Tool):
                 command=command,
                 workspace=self._workspace,
                 enabled=self._sandbox_enabled,
+                read_only=self._read_only_workspace,
             )
         except OSError as exc:  # no bash to run it in (Windows without Git)
             return f"Error: could not run command: {exc}"
@@ -210,7 +227,12 @@ class BashTool(Tool):
                 # Never DeepCode's own model keys or PYTHONPATH; with
                 # DEEPCODE_BASH_SCRUB_ENV=1 no credential-shaped variable
                 # either (see env_sanitize.child_env).
-                env=child_env(),
+                env=child_env(
+                    # A read-only run cannot write bytecode beside the source.
+                    {"PYTHONDONTWRITEBYTECODE": "1"}
+                    if self._read_only_workspace
+                    else None
+                ),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )

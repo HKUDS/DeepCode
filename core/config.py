@@ -427,11 +427,14 @@ class GoalConfig(_Base):
       arms the built-in fail-closed verifier: every ``complete`` claim is judged
       exactly once, asynchronously, against the real objective plus this Turn's
       evidence, and the verifier's justification is returned to the model.
+      ``"reviewer"`` runs the same rule check, then has an independent agent
+      with a read-only view of the workspace check the claim: it reads the
+      changes and re-runs the checks before the Goal is recorded complete.
     - ``max_rejections``: after this many rejected completion claims the Goal is
       moved to ``blocked`` (instead of letting the model burn Turns retrying).
     """
 
-    completion_verifier: Literal["off", "rule"] = "off"
+    completion_verifier: Literal["off", "rule", "reviewer"] = "off"
     max_rejections: int = Field(default=3, ge=1)
 
 

@@ -44,6 +44,27 @@ check its progress, and `/goal resume` lets it continue. Sending a message,
 editing, resuming, or continuing the Goal starts the count again. A Goal with
 a token budget is limited by its budget instead.
 
+## Check completion claims
+
+By default the agent decides when a Goal is complete. To have that claim
+checked, set `goal.completionVerifier` in your
+[configuration](configuration.md):
+
+- `"rule"` turns the claim back while the latest check failed or nothing was
+  done in that Turn.
+- `"reviewer"` runs the same rule, then has a second agent review the work
+  before the Goal is recorded complete. The reviewer has its own context: it
+  sees the Goal, the agent's reason and its latest steps, reads the changes,
+  and re-runs the checks. It cannot change anything. It has no editing tools,
+  and its commands run with a read-only workspace. Where commands cannot be
+  kept read-only (Windows, or Linux without bubblewrap), it only reads files.
+  When it finds something missing, the agent gets the list and keeps
+  working. When it finds the Goal cannot be met at all, for example because a
+  needed key or service is missing, the Goal stops as blocked. A review costs
+  extra tokens and can take a few minutes.
+
+After `goal.maxRejections` (3) rejected claims, the Goal stops as blocked.
+
 ## Work on a Goal from the shell: `deepcode loop`
 
 For the trusted demo workspace from [Getting started](getting-started.md), replace

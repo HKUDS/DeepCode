@@ -221,3 +221,143 @@ def test_off_records_the_claim_without_verifying(monkeypatch, tmp_path) -> None:
 
     assert goal.status.value == "complete"
     assert "verdict" not in provider.goal_results()[0]
+
+
+# -- reviewer -----------------------------------------------------------------
+# One scripted model plays both parts: the reviewer's session starts inside the
+# agent's update_goal call, so its steps come right after that claim.
+
+FIXED = "def add(a, b):\n    return a + b\n"
+
+
+def _verdict(verdict: str, summary: str, *missing: str) -> tuple[str, dict]:
+    return (
+        "submit_result",
+        {"verdict": verdict, "summary": summary, "missing": list(missing)},
+    )
+
+
+def _reviewer_requests(provider: _ScriptedProvider) -> list[dict[str, Any]]:
+    return [
+        request
+        for request in provider.requests
+        if "independent Goal reviewer" in request["messages"][0]["content"]
+    ]
+
+
+def test_reviewer_rejects_then_passes_the_fixed_work(monkeypatch, tmp_path) -> None:
+    goal, _, provider = _run(
+        monkeypatch,
+        tmp_path,
+        [
+            ("read", {"file_path": "calc.py"}),
+            COMPLETE,
+            # reviewer, first claim
+            ("read", {"file_path": "calc.py"}),
+            _verdict("fail", "add subtracts.", "calc.add returns a - b"),
+            "Reviewed.",
+            # agent
+            ("write", {"file_path": "calc.py", "content": FIXED}),
+            COMPLETE,
+            # reviewer, second claim
+            ("read", {"file_path": "calc.py"}),
+            _verdict("pass", "add adds."),
+            "Reviewed.",
+        ],
+        verifier="reviewer",
+    )
+
+    first, second = provider.goal_results()
+    assert first["updated"] is False
+    assert (
+        "did not accept the claim: add subtracts." in first["verdict"]["justification"]
+    )
+    assert "- calc.add returns a - b" in first["verdict"]["justification"]
+    assert second["updated"] is True
+    assert second["verdict"]["justification"].endswith("passed the claim: add adds.")
+    assert goal.status.value == "complete"
+
+
+def test_reviewer_sees_the_claim_and_only_read_only_tools(
+    monkeypatch, tmp_path
+) -> None:
+    goal, _, provider = _run(
+        monkeypatch,
+        tmp_path,
+        [
+            ("read", {"file_path": "calc.py"}),
+            COMPLETE,
+            _verdict("pass", "fine."),
+            "Reviewed.",
+        ],
+        verifier="reviewer",
+    )
+
+    first = _reviewer_requests(provider)[0]
+    task = next(
+        m["content"]
+        for m in first["messages"]
+        if m["role"] == "user" and "Review this completion claim" in str(m["content"])
+    )
+    assert "make calc.add correct" in task
+    assert "calc.add works." in task  # the agent's reason
+    assert "read: calc.py" in task  # its evidence
+    tools = {tool["function"]["name"] for tool in first["tools"]}
+    assert "submit_result" in tools
+    assert tools <= {"read", "grep", "glob", "bash", "submit_result"}
+    assert goal.status.value == "complete"
+
+
+def test_impossible_blocks_the_goal_at_once(monkeypatch, tmp_path) -> None:
+    goal, outcome, provider = _run(
+        monkeypatch,
+        tmp_path,
+        [
+            ("read", {"file_path": "calc.py"}),
+            COMPLETE,
+            _verdict("impossible", "Needs a paid API key.", "API key"),
+            "Reviewed.",
+        ],
+        verifier="reviewer",
+    )
+
+    (result,) = provider.goal_results()
+    assert result["autoBlocked"] is True
+    assert result["rejections"] == 1
+    assert goal.status.value == "blocked"
+    assert outcome.reason.startswith(
+        "An independent review found the Goal cannot be met here: Needs a paid API key."
+    )
+
+
+def test_a_reviewer_without_a_verdict_rejects_the_claim(monkeypatch, tmp_path) -> None:
+    goal, _, provider = _run(
+        monkeypatch,
+        tmp_path,
+        [
+            ("read", {"file_path": "calc.py"}),
+            COMPLETE,
+            "Looks fine to me.",  # reviewer forgets to submit
+            "Stopping here.",
+        ],
+        verifier="reviewer",
+    )
+
+    (result,) = provider.goal_results()
+    assert result["updated"] is False
+    assert "gave no verdict" in result["verdict"]["justification"]
+    assert goal.status.value != "complete"
+
+
+def test_the_rule_check_rejects_before_any_review(monkeypatch, tmp_path) -> None:
+    goal, _, provider = _run(
+        monkeypatch,
+        tmp_path,
+        [("bash", {"command": CHECK}), COMPLETE, "Stopping here."],  # red check
+        verifier="reviewer",
+    )
+
+    (result,) = provider.goal_results()
+    assert "latest check failed" in result["verdict"]["justification"]
+    assert _reviewer_requests(provider) == []
+    assert goal.status.value != "complete"
