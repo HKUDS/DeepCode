@@ -1,29 +1,28 @@
 .picker {
   display: inline-flex;
   min-width: 0;
-  height: 25px;
+  height: 30px;
   align-items: center;
-  gap: 4px;
-  padding: 0 7px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-pill);
+  gap: 5px;
+  padding: 0 9px;
+  border-radius: var(--radius-xs);
   color: var(--text-tertiary);
 }
 
 .picker:hover,
 .picker:focus-within {
-  border-color: var(--border-subtle);
   background: var(--surface-hover);
   color: var(--text-secondary);
 }
 
 .picker select {
+  field-sizing: content;
   max-width: 76px;
   padding: 0;
   border: 0;
   outline: 0;
   background: transparent;
   color: inherit;
-  font: var(--text-2xs) var(--font-ui);
+  font: var(--text-xs) var(--font-ui);
   text-transform: capitalize;
 }

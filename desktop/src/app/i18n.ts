@@ -823,7 +823,6 @@ const ZH_CN: Record<string, string> = {
   "automations.form.save": "保存自动化",
   // Preset picker
   "presets.label": "智能体预设",
-  "presets.agent": "智能体",
   "presets.default": "默认",
   "presets.defaultDescription": "完整工具集与内置提示词。",
   "presets.lockedHint":
@@ -870,7 +869,6 @@ const ZH_CN: Record<string, string> = {
   "composer.access.frozenNote": "进行中和排队的 Turn 会保持各自冻结的模型和权限。",
   "composer.access.newFullAccess": "新提交将使用完全访问",
   "composer.access.newTitle": "新提交的工具权限",
-  "composer.access.newCaption": "新提交",
   "composer.access.newLabel": "新提交的权限",
   "composer.access.default": "默认 · {{access}}",
   "composer.steer": "引导",

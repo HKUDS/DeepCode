@@ -4,13 +4,14 @@
 
 .trigger {
   display: flex;
-  max-width: 270px;
-  min-height: 34px;
+  max-width: 260px;
+  height: 30px;
   align-items: center;
-  gap: 7px;
-  padding: 4px 8px;
-  border-radius: var(--radius-sm);
+  gap: 6px;
+  padding: 0 8px 0 9px;
+  border-radius: var(--radius-xs);
   color: var(--text-tertiary);
+  font-size: var(--text-xs);
   text-align: left;
 }
 
@@ -20,13 +21,7 @@
   color: var(--text-primary);
 }
 
-.trigger > span {
-  display: grid;
-  min-width: 0;
-  gap: 1px;
-}
 
-.trigger small,
 .trigger strong,
 .trigger em {
   overflow: hidden;
@@ -34,20 +29,16 @@
   white-space: nowrap;
 }
 
-.trigger small {
-  color: var(--text-tertiary);
-  font: var(--text-2xs)/1.1 var(--font-ui);
-}
 
 .trigger strong {
-  color: var(--text-secondary);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-semibold);
+  min-width: 0;
+  color: var(--text-primary);
+  font-weight: var(--weight-medium);
 }
 
 .trigger em {
+  flex: 0 0 auto;
   color: var(--text-tertiary);
-  font: var(--text-2xs)/1.1 var(--font-ui);
   font-style: normal;
 }
 

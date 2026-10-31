@@ -197,27 +197,25 @@ export function ModelPicker({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={t("composer.model.label", "Session model")}
-        title={t("composer.model.title", "Connection and model for this Session")}
-      >
-        <Cpu size={12} />
-        <span>
-          <small>
-            {effectiveConnection?.label ??
-              t("composer.model.automatic", "Automatic")}
-          </small>
-          <strong>
-            {effectiveModel ||
-              t("composer.model.configured", "Configured model")}
-          </strong>
-          <em>
-            {effortText(effectiveEffort)} ·{" "}
-            {effectiveContextWindow
+        title={[
+          t("composer.model.title", "Connection and model for this Session"),
+          [
+            effectiveConnection?.label ??
+              t("composer.model.automatic", "Automatic"),
+            effortText(effectiveEffort),
+            effectiveContextWindow
               ? t("composer.model.contextCap", "{{tokens}} context cap", {
                   tokens: formatTokens(effectiveContextWindow),
                 })
-              : t("composer.model.autoContext", "Auto context")}
-          </em>
-        </span>
+              : t("composer.model.autoContext", "Auto context"),
+          ].join(" · "),
+        ].join("\n")}
+      >
+        <Cpu size={13} />
+        <strong>
+          {effectiveModel || t("composer.model.configured", "Configured model")}
+        </strong>
+        <em>{effortText(effectiveEffort)}</em>
         <ChevronDown size={12} />
       </button>
 
