@@ -278,12 +278,19 @@ class GoalRuntimeRouter:
             "rejections": count,
             "maxRejections": max_rejections,
         }
-        if not handler.read_goal(context).get("canUpdate", True):
-            # Paused, or the review used up the token budget: no later claim
-            # in this Turn can be recorded, and nothing is left to block.
+        try:
+            still_open = bool(handler.read_goal(context).get("canUpdate", True))
+        except Exception:  # noqa: BLE001 - the rejection itself must still arrive
+            logger.exception("Goal state could not be read after a rejection")
+            still_open = True
+        if not still_open:
+            # The review used up the token budget, or the Goal was paused or
+            # replaced: no later claim in this Turn can be recorded, and
+            # nothing is left to block.
             rejection["verdict"]["justification"] += (
-                "\nThe Goal is no longer active (its token budget is used up or "
-                "it was paused), so it cannot be claimed complete in this Turn."
+                "\nThis Goal is no longer active (for example, its token "
+                "budget is used up), so it cannot be claimed complete in this "
+                "Turn."
             )
             return rejection
         if not exhausted:
