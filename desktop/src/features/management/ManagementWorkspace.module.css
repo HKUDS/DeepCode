@@ -844,6 +844,12 @@
   color: var(--text-tertiary);
 }
 
+/* Its select draws no outline; the box shows the keyboard focus instead. */
+.compactSelect:has(select:focus-visible) {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 2px var(--signal-soft);
+}
+
 .compactSelect span {
   font-size: var(--text-2xs);
 }

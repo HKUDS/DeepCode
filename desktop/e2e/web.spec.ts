@@ -17,6 +17,8 @@ import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { crossComponentRules } from "./cssLeaks";
+
 const repository = fileURLToPath(new URL("../../", import.meta.url));
 const python =
   process.env.DEEPCODE_TEST_PYTHON ??
@@ -159,6 +161,10 @@ test("packaged browser: project, approval, reconnect, upload, diff and terminal"
   context,
 }, testInfo) => {
   const errors: string[] = [];
+  const leaks = new Set<string>();
+  const checkStyles = async () => {
+    for (const leak of await crossComponentRules(page)) leaks.add(leak);
+  };
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("dialog", (dialog) => dialog.accept());
   await page.goto(link());
@@ -308,6 +314,7 @@ test("packaged browser: project, approval, reconnect, upload, diff and terminal"
   await expect(
     page.getByRole("heading", { name: "Service updates" }),
   ).toBeVisible();
+  await checkStyles();
   await expect(
     page.getByRole("button", { name: "Copy configuration path" }),
   ).toBeVisible();
@@ -335,6 +342,7 @@ test("packaged browser: project, approval, reconnect, upload, diff and terminal"
   await expect(
     page.getByText("example.py", { exact: true }).first(),
   ).toBeVisible();
+  await checkStyles();
   await page
     .getByRole("button", { name: "Open in editor", exact: true })
     .first()
@@ -369,7 +377,13 @@ test("packaged browser: project, approval, reconnect, upload, diff and terminal"
     path: testInfo.outputPath("web-ready.png"),
     fullPage: true,
   });
+  await page.getByRole("button", { name: "Close review panel" }).click().catch(() => {});
+  await checkStyles();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await checkStyles();
   expect(errors).toEqual([]);
+  // No component's styles reach into another's (e2e/cssLeaks.ts).
+  expect([...leaks]).toEqual([]);
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page.getByText(/Signed out/).first()).toBeVisible();
 });

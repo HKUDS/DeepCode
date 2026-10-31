@@ -335,6 +335,11 @@
   font: var(--text-2xs) var(--font-mono);
 }
 
+.menu > footer input:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 2px var(--signal-soft);
+}
+
 .menu > footer button {
   min-height: 34px;
   padding: 0 10px;
