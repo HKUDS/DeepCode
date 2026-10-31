@@ -160,8 +160,9 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
   useEscapeLayer(() => {
     if (reviewFloating) void ui.closeInspector();
   }, inspectorVisible);
+  // A wider window stops it floating without closing it: focus stays put.
   useFocusHandoff(reviewFloating, REVIEW_PANEL_ID, () =>
-    document.getElementById(REVIEW_TOGGLE_ID),
+    inspectorVisible ? null : document.getElementById(REVIEW_TOGGLE_ID),
   );
 
   return (
