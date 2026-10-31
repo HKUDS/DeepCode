@@ -25,6 +25,21 @@
   box-shadow: var(--shadow-soft);
 }
 
+/* Shown only on a narrow window (below), where the sidebar is a drawer. */
+.navigationButton,
+.navigationScrim,
+.reviewScrim {
+  display: none;
+}
+
+/* The dimmed page behind a drawer or a floating panel, like a dialog's. */
+.navigationScrim,
+.reviewScrim {
+  position: fixed;
+  inset: 0;
+  background: rgb(18 22 20 / 32%);
+}
+
 .threadViewport {
   min-height: 0;
   overflow: hidden;
@@ -137,6 +152,12 @@
     grid-template-columns: 248px minmax(0, 1fr);
   }
 
+  /* The review panel floats over the conversation: a click beside it closes it. */
+  .reviewScrim {
+    z-index: 19;
+    display: block;
+  }
+
   .reviewPane {
     position: fixed;
     z-index: 20;
@@ -161,10 +182,41 @@
 
 }
 
+/* Keep in step with NARROW_LAYOUT in src/app/useNavigationDrawer.ts. */
 @media (max-width: 720px) {
+  /* The conversation takes the whole width; the sidebar slides in over it
+     (DesktopSidebar.module.css), opened by the menu button. */
   .shell,
   .shell[data-inspector="true"] {
-    grid-template-columns: 204px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workspace {
+    margin: 8px;
+    padding-top: 44px;
+  }
+
+  .navigationButton {
+    position: absolute;
+    z-index: 2;
+    top: 6px;
+    left: 8px;
+    display: grid;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+  }
+
+  .navigationButton:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+
+  .shell[data-navigation="open"] .navigationScrim {
+    z-index: 29;
+    display: block;
   }
 
   .startState {

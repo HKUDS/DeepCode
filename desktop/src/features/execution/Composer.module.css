@@ -559,7 +559,8 @@
 }
 
 .selector select {
-  min-width: 0;
+  /* Shrinks on a phone, but never so far that the choice disappears. */
+  min-width: 3em;
   max-width: 180px;
   border: 0;
   outline: 0;
@@ -571,6 +572,7 @@
 }
 
 .selectorCaption {
+  white-space: nowrap;
   color: var(--text-tertiary);
   font: var(--text-micro) var(--font-mono);
   letter-spacing: var(--tracking-wide);

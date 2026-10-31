@@ -30,6 +30,8 @@ import { useTranslation } from "react-i18next";
 import styles from "./DesktopSidebar.module.css";
 
 interface DesktopSidebarProps {
+  /** The element id the narrow layout's menu button controls. */
+  id?: string;
   projects: Project[];
   threads: Thread[];
   selectedProjectId: string | null;
@@ -98,6 +100,7 @@ export function DesktopSidebar({
   onRenameThread,
   onArchiveThread,
   onDeleteThread,
+  id,
 }: DesktopSidebarProps) {
   const { t } = useTranslation();
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -179,7 +182,7 @@ export function DesktopSidebar({
   }, [busy, canCreateThread, onCreateThread]);
 
   return (
-    <aside className={styles.sidebar} aria-label={t("sidebar.label", "Projects and Sessions")}>
+    <aside id={id} className={styles.sidebar} aria-label={t("sidebar.label", "Projects and Sessions")}>
       <div className={styles.brandRow}>
         <span className={styles.brandMark} aria-hidden="true">
           {/* Three rules stepping inward: nesting, and so depth. The tile takes

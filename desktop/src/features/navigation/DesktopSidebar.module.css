@@ -396,3 +396,32 @@
     transition: none;
   }
 }
+
+/* On a narrow window the sidebar is a drawer over the conversation, opened by
+   the menu button in App (App.module.css, NARROW_LAYOUT). */
+@media (max-width: 720px) {
+  .sidebar {
+    position: fixed;
+    z-index: 30;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(300px, calc(100vw - 48px));
+    margin: 8px;
+    box-shadow: var(--shadow-float);
+    transform: translateX(calc(-100% - 16px));
+    transition: transform 180ms ease;
+    visibility: hidden;
+  }
+
+  :global([data-navigation="open"]) .sidebar {
+    transform: none;
+    visibility: visible;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transition: none;
+  }
+}

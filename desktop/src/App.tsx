@@ -1,4 +1,4 @@
-import { FolderOpen, MessageSquarePlus, RotateCw } from "lucide-react";
+import { FolderOpen, Menu, MessageSquarePlus, RotateCw } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -6,6 +6,7 @@ import { projectCanExecute } from "./app/projectPresentation";
 import { latestExecutingTurn } from "./app/interactiveTurnRouter";
 import { useAppearance } from "./app/useAppearance";
 import { useDesktopUi } from "./app/useDesktopUi";
+import { useNavigationDrawer } from "./app/useNavigationDrawer";
 import { useComposerCommands } from "./app/useComposerCommands";
 import { useWorkspaceController } from "./app/useWorkspaceController";
 import { RuntimeNotice } from "./components/RuntimeNotice";
@@ -69,12 +70,21 @@ function LoadingSurface({
   );
 }
 
+const NAVIGATION_ID = "app-navigation";
+
 export function App({ runtime }: { runtime: ClientRuntime }) {
   const { t } = useTranslation();
   const controller = useWorkspaceController(runtime);
   // Mounted for its effect: paints saved appearance preferences at startup.
   useAppearance();
   const ui = useDesktopUi();
+  const {
+    open: navigationOpen,
+    buttonRef: navigationButtonRef,
+    toggle: toggleNavigation,
+    dismiss: dismissNavigation,
+    close: closeNavigation,
+  } = useNavigationDrawer(NAVIGATION_ID);
   const transcript = useTranscriptMode();
   const runComposerCommand = useComposerCommands(controller, ui);
   const [composerIntent, setComposerIntent] =
@@ -137,8 +147,13 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
   );
 
   return (
-    <main className={styles.shell} data-inspector={inspectorVisible}>
+    <main
+      className={styles.shell}
+      data-inspector={inspectorVisible}
+      data-navigation={navigationOpen ? "open" : undefined}
+    >
       <DesktopSidebar
+        id={NAVIGATION_ID}
         projects={state.projects}
         threads={state.threads}
         selectedProjectId={state.selectedProjectId}
@@ -149,9 +164,13 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
         destination={ui.destination}
         settingsOpen={ui.settingsOpen}
         onDestination={(destination) => {
+          closeNavigation();
           void ui.navigateTo(destination);
         }}
-        onOpenSettings={ui.openSettings}
+        onOpenSettings={() => {
+          closeNavigation();
+          ui.openSettings();
+        }}
         onQueryChange={ui.setSessionQuery}
         onOpenProject={() => {
           void (async () => {
@@ -169,6 +188,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
           })();
         }}
         onCreateThread={() => {
+          closeNavigation();
           void (async () => {
             if (await ui.confirmDiscardInspectorDraft()) {
               await controller.createThread();
@@ -176,6 +196,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
           })();
         }}
         onSelectThread={(threadId) => {
+          closeNavigation();
           if (threadId === state.selectedThreadId) return;
           void (async () => {
             if (await ui.confirmDiscardInspectorDraft()) {
@@ -204,7 +225,27 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
         }}
       />
 
-      <section className={styles.workspace} aria-labelledby="thread-title">
+      {navigationOpen ? (
+        // A pointer target only: Escape and the menu button close it too.
+        <div className={styles.navigationScrim} aria-hidden="true" onClick={dismissNavigation} />
+      ) : null}
+
+      <section
+        className={styles.workspace}
+        aria-labelledby="thread-title"
+        inert={navigationOpen}
+      >
+        <button
+          ref={navigationButtonRef}
+          className={styles.navigationButton}
+          type="button"
+          aria-controls={NAVIGATION_ID}
+          aria-expanded={navigationOpen}
+          aria-label={t("app.openNavigation", "Projects and Sessions")}
+          onClick={toggleNavigation}
+        >
+          <Menu size={18} />
+        </button>
         <RuntimeNotice
           browserHost={runtime.host?.kind === "browser"}
           runtime={state.runtime}
@@ -486,6 +527,14 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
         {showingThreads && selectedThread ? <ConversationSplitter /> : null}
       </section>
 
+      {inspectorVisible ? (
+        // Below 1180 px the review panel floats over the conversation.
+        <div
+          className={styles.reviewScrim}
+          aria-hidden="true"
+          onClick={() => void ui.closeInspector()}
+        />
+      ) : null}
       {inspectorVisible ? (
         <section
           className={styles.reviewPane}
