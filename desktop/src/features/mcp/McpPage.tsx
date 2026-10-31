@@ -28,6 +28,18 @@ import type {
 import { confirmAction } from "../../platform/confirmAction";
 import type { ClientRuntime } from "../../rpc/contracts";
 import styles from "../management/ManagementWorkspace.module.css";
+import {
+  mcpApprovalLabel,
+  mcpAuthLabel,
+  mcpCategoryLabel,
+  mcpConfigurationLabel,
+  mcpConfigurationText,
+  mcpRuntimeText,
+  mcpSourceLabel,
+  mcpStatus,
+  mcpStatusLabel,
+  mcpTransportLabel,
+} from "./mcpPresentation";
 import { useMcpCatalog } from "./useMcpCatalog";
 
 type Transport = "stdio" | "sse" | "streamableHttp";
@@ -259,21 +271,21 @@ export function McpPage({
             <article className={styles.card} key={`${server.source}:${server.id}`}>
             <header>
               <div>
-                <p className={styles.eyebrow}>{server.source} · {server.transport}</p>
+                <p className={styles.eyebrow}>{mcpSourceLabel(server.source, t)} · {mcpTransportLabel(server.transport, t)}</p>
                 <h2>{server.name}</h2>
               </div>
-              <span className={styles.badge} data-status={serverStatus(server)}>
-                {serverStatus(server)}
+              <span className={styles.badge} data-status={mcpStatus(server)}>
+                {mcpStatusLabel(server, t)}
               </span>
             </header>
-            <p>{server.configurationMessage}</p>
+            <p>{mcpConfigurationText(server, t)}</p>
             <dl className={styles.metadata}>
               <div><dt>{t("mcp.server.endpoint", "Endpoint")}</dt><dd>{server.command ?? server.url}</dd></div>
-              <div><dt>{t("mcp.server.configuration", "Configuration")}</dt><dd>{server.configurationState}</dd></div>
-              <div><dt>{t("mcp.server.authentication", "Authentication")}</dt><dd>{server.authState}</dd></div>
-              <div><dt>{t("mcp.server.lastCheck", "Last check")}</dt><dd>{server.runtimeMessage}</dd></div>
+              <div><dt>{t("mcp.server.configuration", "Configuration")}</dt><dd>{mcpConfigurationLabel(server.configurationState, t)}</dd></div>
+              <div><dt>{t("mcp.server.authentication", "Authentication")}</dt><dd>{mcpAuthLabel(server.authState, t)}</dd></div>
+              <div><dt>{t("mcp.server.lastCheck", "Last check")}</dt><dd>{mcpRuntimeText(server, t)}</dd></div>
               <div><dt>{t("mcp.server.capabilities", "Capabilities")}</dt><dd>{capabilitySummary(t, server.toolCount, server.resourceCount, server.promptCount)}</dd></div>
-              <div><dt>{t("mcp.server.approval", "Approval")}</dt><dd>{server.approvalMode}</dd></div>
+              <div><dt>{t("mcp.server.approval", "Approval")}</dt><dd>{mcpApprovalLabel(server.approvalMode, t)}</dd></div>
               {server.missingEnvKeys.length ? (
                 <div><dt>{t("mcp.server.missingEnvironment", "Missing environment")}</dt><dd>{server.missingEnvKeys.join(", ")}</dd></div>
               ) : null}
@@ -416,7 +428,7 @@ export function McpPage({
             <article className={styles.card} key={preset.id}>
               <header>
                 <div>
-                  <p className={styles.eyebrow}>{preset.category} · {preset.transport}</p>
+                  <p className={styles.eyebrow}>{mcpCategoryLabel(preset.category, t)} · {mcpTransportLabel(preset.transport, t)}</p>
                   <h2>{preset.displayName}</h2>
                 </div>
                 <span className={styles.badge} data-status={preset.configured ? "configured" : "available"}>
@@ -558,11 +570,6 @@ function stringMap(value: string): JsonObject {
 function numberValue(value: string, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function serverStatus(server: McpServerInfo): string {
-  if (!server.enabled) return "disabled";
-  return server.runtimeState;
 }
 
 function capabilitySummary(

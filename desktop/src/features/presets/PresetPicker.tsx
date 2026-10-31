@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import type { AgentPresetEntry } from "../../generated/app-server";
 import styles from "./PresetPicker.module.css";
+import { presetTrustLabel } from "./presetPresentation";
 
 interface PresetPickerProps {
   entries: AgentPresetEntry[];
@@ -133,7 +134,7 @@ export function PresetPicker({
                   <strong>
                     {entry.name}
                     {entry.trust === "system" ? null : (
-                      <small> · {entry.trust}</small>
+                      <small> · {presetTrustLabel(entry.trust, t)}</small>
                     )}
                   </strong>
                   {entry.description ? <em>{entry.description}</em> : null}

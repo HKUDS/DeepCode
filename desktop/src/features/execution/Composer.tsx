@@ -50,6 +50,7 @@ import {
   type ComposerCommand,
 } from "./commands";
 import styles from "./Composer.module.css";
+import { skillOriginLabel } from "../extensions/skillPresentation";
 import { attachmentErrorText } from "./attachmentErrorText";
 import { useDictation } from "./useDictation";
 import { usePromptDraft } from "./usePromptDraft";
@@ -556,7 +557,7 @@ export function Composer({
                           {skill.shortDescription ?? skill.description}
                         </small>
                       </span>
-                      <em>{skill.originLabel}</em>
+                      <em>{skillOriginLabel(skill, t)}</em>
                     </button>
                   );
                 })

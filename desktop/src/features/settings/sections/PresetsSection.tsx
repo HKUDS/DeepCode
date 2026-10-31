@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import type { AgentPresetEntry } from "../../../generated/app-server";
 import type { SettingsSectionProps } from "../settingsSections";
 import styles from "../../management/ManagementWorkspace.module.css";
+import { presetTrustLabel } from "../../presets/presetPresentation";
 
 export function PresetsSection({ runtime, project }: SettingsSectionProps) {
   const { t } = useTranslation();
@@ -80,7 +81,7 @@ export function PresetsSection({ runtime, project }: SettingsSectionProps) {
               <span />
               <div>
                 <strong>
-                  {entry.name} <small>[{entry.trust}]</small>
+                  {entry.name} <small>{presetTrustLabel(entry.trust, t)}</small>
                 </strong>
                 <p>
                   {entry.broken ??

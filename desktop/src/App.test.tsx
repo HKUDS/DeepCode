@@ -2261,7 +2261,7 @@ describe("desktop command center", () => {
       name: "Default for new Sessions",
     });
     await within(dialog).findByRole("option", {
-      name: "Code reader [system]",
+      name: "Code reader · Built in",
     });
     fireEvent.change(picker, { target: { value: "code-reader" } });
     fireEvent.click(
@@ -2594,7 +2594,7 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Settings" });
     expect(
-      await screen.findByText("SQLite integrity check passed"),
+      await screen.findByText("The database integrity check passed."),
     ).toBeTruthy();
     expect(
       runtime.requests.find((request) => request.method === "diagnostics/read")
@@ -2632,7 +2632,7 @@ describe("desktop command center", () => {
 
     fireEvent.click(runChecks);
     expect(
-      await screen.findByText("SQLite integrity check passed"),
+      await screen.findByText("The database integrity check passed."),
     ).toBeTruthy();
     expect(screen.queryByText("Diagnostics are unavailable")).toBeNull();
   });

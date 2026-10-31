@@ -11,6 +11,7 @@ import { confirmAction } from "../../platform/confirmAction";
 import type { ClientRuntime } from "../../rpc/contracts";
 import styles from "../management/ManagementWorkspace.module.css";
 import { MarkdownContent } from "../thread/MarkdownContent";
+import { skillOriginLabel, skillStatusLabel } from "./skillPresentation";
 import { useSkillManagement } from "./useSkillManagement";
 
 interface SkillsPageProps {
@@ -148,8 +149,8 @@ export function SkillsPage({ runtime, project, onCreateSkill }: SkillsPageProps)
                     onClick={() => void catalog.selectSkill(skill.id)}
                   >
                     <span className={styles.skillRowMeta}>
-                      {skill.originLabel}
-                      <em data-status={skill.status}>{skill.status}</em>
+                      {skillOriginLabel(skill, t)}
+                      <em data-status={skill.status}>{skillStatusLabel(skill.status, t)}</em>
                     </span>
                     <strong>
                       {skill.displayName ??
@@ -174,7 +175,7 @@ export function SkillsPage({ runtime, project, onCreateSkill }: SkillsPageProps)
               {catalog.selectedSkill ? (
                 <>
                   <p className={styles.eyebrow}>
-                    {catalog.selectedSkill.originLabel}
+                    {skillOriginLabel(catalog.selectedSkill, t)}
                   </p>
                   <h2>
                     {catalog.selectedSkill.displayName ??
@@ -189,7 +190,7 @@ export function SkillsPage({ runtime, project, onCreateSkill }: SkillsPageProps)
                       className={styles.badge}
                       data-status={catalog.selectedSkill.status}
                     >
-                      {catalog.selectedSkill.status}
+                      {skillStatusLabel(catalog.selectedSkill.status, t)}
                     </span>
                     <button
                       type="button"
