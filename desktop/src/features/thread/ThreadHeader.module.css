@@ -1,11 +1,11 @@
 .header {
   position: relative;
   display: flex;
-  min-height: 66px;
+  min-height: 58px;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 9px 18px 9px 24px;
+  padding: 8px 14px 8px 24px;
   border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 78%, transparent);
   background: var(--surface-overlay);
   backdrop-filter: blur(22px);
@@ -14,7 +14,7 @@
 .identity {
   display: grid;
   min-width: 0;
-  gap: 4px;
+  gap: 2px;
 }
 
 .breadcrumb {
@@ -47,7 +47,7 @@
   color: var(--text-primary);
   font-family: var(--font-display);
   font-size: var(--text-lg);
-  font-weight: var(--weight-display);
+  font-weight: var(--weight-semibold);
   letter-spacing: var(--tracking-display);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -84,33 +84,34 @@
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 5px;
+  gap: 2px;
 }
 
 .actions button,
 .trustState,
 .unavailableState {
   display: inline-flex;
-  min-height: 34px;
+  min-height: 30px;
   align-items: center;
   gap: 6px;
-  padding: 0 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  padding: 0 9px;
+  border-radius: var(--radius-xs);
   color: var(--text-secondary);
   font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
+  font-weight: var(--weight-medium);
 }
 
 .actions button:hover:not(:disabled) {
-  border-color: var(--border-strong);
   background: var(--surface-hover);
   color: var(--text-primary);
 }
 
+/* A status next to the buttons, set off by a thin rule after it. */
 .trustState {
-  border-color: color-mix(in srgb, var(--success) 22%, var(--border-subtle));
-  background: var(--success-soft);
+  margin-right: 6px;
+  padding-right: 12px;
+  border-right: 1px solid var(--border-subtle);
+  border-radius: 0;
   color: var(--success);
 }
 
@@ -119,17 +120,11 @@
 }
 
 .actions .attentionAction {
-  border-color: color-mix(in srgb, var(--attention) 36%, transparent);
   background: var(--attention-soft);
   color: var(--attention);
 }
 
-.reviewAction {
-  margin-left: 2px;
-}
-
-.reviewAction[data-active="true"] {
-  border-color: color-mix(in srgb, var(--signal) 28%, var(--border-strong));
+.actions .reviewAction[data-active="true"] {
   background: var(--signal-soft);
   color: var(--signal-strong);
 }

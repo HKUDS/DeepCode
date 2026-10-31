@@ -29,7 +29,6 @@
   place-items: center;
   border-radius: var(--radius-sm);
   background: var(--text-primary);
-  box-shadow: 0 5px 14px rgb(27 34 30 / 13%);
 }
 
 .brandMark svg {
@@ -61,21 +60,20 @@
 
 .destinations {
   display: grid;
-  gap: 4px;
-  margin: 10px 0 14px;
-  padding-bottom: 13px;
+  gap: 1px;
+  margin: 10px 0 12px;
+  padding-bottom: 12px;
   border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 76%, transparent);
 }
 
 .destinations button {
   position: relative;
   display: grid;
-  min-height: 38px;
-  grid-template-columns: 19px minmax(0, 1fr);
+  min-height: 32px;
+  grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
   gap: 9px;
   padding: 0 10px;
-  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   font-size: var(--text-sm);
@@ -89,39 +87,29 @@
 }
 
 .destinations button[data-active="true"] {
-  border-color: var(--border-subtle);
-  background: var(--surface-raised);
+  background: var(--surface-selected);
   color: var(--text-primary);
-  font-weight: var(--weight-bold);
-  box-shadow: var(--shadow-soft);
-}
-
-.destinations button[data-active="true"]::before {
-  display: none;
 }
 
 .newThread {
   display: grid;
-  min-height: 42px;
+  min-height: 36px;
   grid-template-columns: 18px 1fr auto;
   align-items: center;
   gap: 9px;
-  margin: 10px 0 7px;
-  padding: 0 12px;
+  margin: 10px 0 6px;
+  padding: 0 10px;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: var(--surface-raised);
   color: var(--text-primary);
   font-size: var(--text-sm);
-  font-weight: var(--weight-bold);
+  font-weight: var(--weight-medium);
   text-align: left;
-  box-shadow: var(--shadow-soft);
 }
 
 .newThread:hover:not(:disabled) {
   border-color: var(--border-strong);
-  background: color-mix(in srgb, var(--surface-raised) 74%, var(--surface-hover));
-  transform: translateY(-1px);
 }
 
 .newThread kbd,
@@ -133,12 +121,12 @@
 
 .search {
   display: grid;
-  min-height: 39px;
+  min-height: 34px;
   grid-template-columns: 18px 1fr auto;
   align-items: center;
-  gap: 8px;
-  margin: 0 0 5px;
-  padding: 0 11px;
+  gap: 9px;
+  margin: 0;
+  padding: 0 10px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--surface-inset) 78%, transparent);
@@ -169,11 +157,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1px 5px 8px 9px;
+  padding: 0 5px 6px 10px;
   color: var(--text-tertiary);
-  font: var(--weight-bold) var(--text-2xs) var(--font-ui);
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
+  font: var(--weight-medium) var(--text-2xs) var(--font-ui);
 }
 
 .sectionHeading button {
@@ -206,19 +192,22 @@
 .projectButton {
   display: grid;
   width: 100%;
-  min-height: 38px;
+  min-height: 32px;
   grid-template-columns: 14px 18px minmax(0, 1fr) auto;
   align-items: center;
   gap: 7px;
-  padding: 3px 9px 3px 6px;
+  padding: 0 9px 0 6px;
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   text-align: left;
 }
 
-.projectButton:hover,
-.projectButton[data-active="true"] {
+.projectButton:hover {
   background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.projectButton[data-active="true"] {
   color: var(--text-primary);
 }
 
@@ -226,13 +215,9 @@
   min-width: 0;
   overflow: hidden;
   font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
+  font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.projectButton[data-active="true"] strong {
-  font-weight: var(--weight-bold);
 }
 
 .projectButton[data-static="true"] {
@@ -335,13 +320,12 @@
 
 .footer strong {
   font-size: var(--text-xs);
-  font-weight: var(--weight-bold);
-  text-transform: capitalize;
+  font-weight: var(--weight-medium);
 }
 
 .footer small {
   color: var(--text-tertiary);
-  font-size: var(--text-micro);
+  font-size: var(--text-2xs);
 }
 
 .runtimeDot {
