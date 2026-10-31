@@ -394,7 +394,8 @@ def build_agent_session(
     # Goal runtime's own filter (both only ever narrow; see AgentRunSpec).
     tool_filter: Any | None = None,
     # Look, never touch: only read / grep / glob and a bash that cannot write
-    # the workspace (see default_coding_tools), no MCP servers, no code mode.
+    # the workspace or reach the network (see default_coding_tools), no MCP
+    # servers, no code mode, no hooks.
     read_only_workspace: bool = False,
 ) -> tuple[AgentSession, str, Any]:
     """Build an :class:`AgentSession` over ``workspace``.
@@ -532,12 +533,17 @@ def build_agent_session(
 
     from core.harness.hooks import HooksEngine
 
-    hooks_engine, hook_warnings = HooksEngine.discover(
-        workspace,
-        session_id=uuid.uuid4().hex,
-        model=resolved_model,
-        permission_mode=getattr(engine.mode, "value", str(engine.mode)),
-        project_hook_approval=project_hook_approval,
+    # Hooks run outside the command sandbox, so a read-only session runs none.
+    hooks_engine, hook_warnings = (
+        (None, [])
+        if read_only_workspace
+        else HooksEngine.discover(
+            workspace,
+            session_id=uuid.uuid4().hex,
+            model=resolved_model,
+            permission_mode=getattr(engine.mode, "value", str(engine.mode)),
+            project_hook_approval=project_hook_approval,
+        )
     )
     for warning in hook_warnings:
         logger.warning("hooks config: {}", warning)

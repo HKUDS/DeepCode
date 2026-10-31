@@ -55,13 +55,14 @@ checked, set `goal.completionVerifier` in your
 - `"reviewer"` runs the same rule, then has a second agent review the work
   before the Goal is recorded complete. The reviewer has its own context: it
   sees the Goal, the agent's reason and its latest steps, reads the changes,
-  and re-runs the checks. It cannot change anything. It has no editing tools,
-  and its commands run with a read-only workspace. Where commands cannot be
-  kept read-only (Windows, or Linux without bubblewrap), it only reads files.
+  and re-runs the checks. It cannot change anything: it has no editing tools,
+  runs no hooks, and its commands run with a read-only workspace and no
+  network. Where commands cannot be kept read-only (Windows, or Linux without
+  bubblewrap), it only reads files.
   When it finds something missing, the agent gets the list and keeps
   working. When it finds the Goal cannot be met at all, for example because a
-  needed key or service is missing, the Goal stops as blocked. A review costs
-  extra tokens and can take a few minutes.
+  needed key or service is missing, the Goal stops as blocked. A review can
+  take a few minutes, and its tokens count toward the Goal's token budget.
 
 After `goal.maxRejections` (3) rejected claims, the Goal stops as blocked.
 

@@ -82,8 +82,9 @@ def default_coding_tools(
     delegation cannot recurse.
 
     ``read_only_workspace``: only read / grep / glob, plus a bash whose
-    commands cannot write the workspace where the sandbox can fence writes
-    (none otherwise). Every other argument is ignored.
+    commands cannot write the workspace or reach the network where the
+    sandbox can fence writes (none otherwise). Every other argument is
+    ignored.
     """
     from core.agent_runtime.tools.registry import ToolRegistry
     from core.harness.memory import MemoryTool

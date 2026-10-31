@@ -4,8 +4,8 @@ The agent that did the work says the Goal is complete; a second agent, with
 its own context, checks that claim against the workspace before the Goal is
 recorded complete. The reviewer can look but not touch: it reads files,
 searches, and runs commands (tests, builds, ``git diff``) in a sandbox where
-the workspace is read-only. It cannot edit files, start sub-agents, use MCP
-servers or ask anyone for approval.
+the workspace is read-only and there is no network. It cannot edit files,
+start sub-agents, use MCP servers, run hooks or ask anyone for approval.
 
 The cheap rule check runs first: a claim whose latest check failed is
 rejected without starting the reviewer.
@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import Any
 
 from core.agent_runtime.goal_verifier import (
@@ -87,15 +88,17 @@ How to review:
    alone when you can check it yourself.
 
 You cannot change anything: you have no editing tools, and commands run with a
-read-only workspace (the temporary directory stays writable). If a command
-fails only because it could not write to the workspace ("Read-only file
-system", "Operation not permitted"), that result tells you nothing about the
-work; do not count it against the claim.
+read-only workspace and no network (the temporary directory stays writable).
+If a command fails only because it could not write to the workspace
+("Read-only file system", "Operation not permitted") or reach the network,
+that result tells you nothing about the work; do not count it against the
+claim.
 
 Judge the Goal as written. Do not ask for work beyond it, and do not fail a
 claim over style. Pass only when every requirement is met. Use "impossible"
-only when the Goal cannot be met in this environment at all, for example when
-it needs credentials or a service that is not there, or contradicts itself.
+only when the Goal cannot be met by the agent at all, for example when it
+needs credentials or a service that is not there, or contradicts itself. Your
+own limits (read-only, no network) are never a reason for "impossible".
 """
 
 
@@ -181,16 +184,27 @@ def verdict_from_result(result: dict[str, Any]) -> GoalVerdict:
     )
 
 
-ReviewRunner = Callable[[str, str], Awaitable[dict[str, Any] | None]]
+UsageSink = Callable[[int], None]
+ReviewRunner = Callable[[str, str, UsageSink], Awaitable[dict[str, Any] | None]]
+
+
+class ReviewFailed(RuntimeError):
+    """A review that reached no verdict; ``tokens`` is what it spent anyway."""
+
+    def __init__(self, message: str, *, tokens: int) -> None:
+        super().__init__(message)
+        self.tokens = tokens
 
 
 class AgentReviewVerifier:
     """Rule check first, then an independent read-only reviewer agent.
 
-    ``run_review(system_prompt_section, task)`` runs one reviewer session and
-    returns its structured submission, or ``None`` when it submitted nothing.
-    A reviewer that fails, times out or submits nothing raises: the Goal
-    runtime fails closed and reports the error to the agent as a rejection.
+    ``run_review(system_prompt_section, task, on_usage)`` runs one reviewer
+    session, reports each model response's tokens to ``on_usage``, and returns
+    its structured submission, or ``None`` when it submitted nothing. A review
+    that fails, times out or submits nothing raises :class:`ReviewFailed`: the
+    Goal runtime fails closed and reports the error to the agent as a
+    rejection. Either way the tokens spent travel with the result.
     """
 
     def __init__(
@@ -207,18 +221,47 @@ class AgentReviewVerifier:
         ruled = await self._rule(request)
         if not ruled.confirmed:
             return ruled
+        spent = 0
+
+        def on_usage(tokens: int) -> None:
+            nonlocal spent
+            spent += max(0, tokens)
+
         try:
             result = await asyncio.wait_for(
-                self._run_review(REVIEWER_PROMPT, review_task(request)),
+                self._run_review(REVIEWER_PROMPT, review_task(request), on_usage),
                 timeout=self._timeout_seconds,
             )
         except TimeoutError as exc:
-            raise RuntimeError(
-                f"the independent review took longer than {int(self._timeout_seconds)}s"
+            raise ReviewFailed(
+                "the independent review took longer than "
+                f"{int(self._timeout_seconds)}s",
+                tokens=spent,
+            ) from exc
+        except ReviewFailed:
+            raise
+        except Exception as exc:
+            raise ReviewFailed(
+                f"the independent review failed: {exc}", tokens=spent
             ) from exc
         if result is None:
-            raise RuntimeError("the independent reviewer gave no verdict")
-        return verdict_from_result(result)
+            raise ReviewFailed("the independent reviewer gave no verdict", tokens=spent)
+        try:
+            verdict = verdict_from_result(result)
+        except ValueError as exc:
+            raise ReviewFailed(str(exc), tokens=spent) from exc
+        return replace(verdict, tokens=spent)
+
+
+def _usage_tokens(usage: dict[str, Any]) -> int:
+    total = usage.get("total_tokens")
+    if isinstance(total, int) and not isinstance(total, bool):
+        return max(0, total)
+    return sum(
+        value
+        for key in ("prompt_tokens", "completion_tokens")
+        if isinstance(value := usage.get(key), int) and not isinstance(value, bool)
+    )
 
 
 def session_review_runner(
@@ -233,7 +276,9 @@ def session_review_runner(
     ``session_kwargs`` carry the parent's model and runtime choices.
     """
 
-    async def run(section: str, task: str) -> dict[str, Any] | None:
+    async def run(
+        section: str, task: str, on_usage: UsageSink
+    ) -> dict[str, Any] | None:
         from core.agent_setup import SYSTEM_PROMPT
         from core.events import UserInput
         from core.harness.agents.structured_result import (
@@ -258,12 +303,19 @@ def session_review_runner(
             ),
             **session_kwargs,
         )
+        error = ""
         try:
-            async for _event in session.run_stream(UserInput(text=task)):
-                pass
+            async for event in session.run_stream(UserInput(text=task)):
+                msg = event.msg
+                if msg.type == "model_usage_recorded":
+                    on_usage(_usage_tokens(msg.usage))
+                elif msg.type == "error" and not getattr(msg, "warning", False):
+                    error = str(getattr(msg, "message", "") or "")
         finally:
             await session.aclose()
         rendered = capture.render()
+        if rendered is None and error:
+            raise RuntimeError(error)
         return json.loads(rendered) if rendered is not None else None
 
     return run
@@ -273,6 +325,7 @@ __all__ = [
     "REVIEWER_PROMPT",
     "VERDICT_SCHEMA",
     "AgentReviewVerifier",
+    "ReviewFailed",
     "review_task",
     "reviewer_security_profile",
     "session_review_runner",

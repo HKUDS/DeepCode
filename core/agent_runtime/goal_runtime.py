@@ -54,7 +54,23 @@ class GoalRuntimeHandler(Protocol):
         *,
         status: str,
         reason: str | None,
-    ) -> dict[str, Any]: ...
+        expected_objective: str | None = None,
+    ) -> dict[str, Any]:
+        """Record the decision.
+
+        ``expected_objective``: the objective a verifier judged. When the Goal
+        no longer has it (the user edited it meanwhile), refuse instead of
+        recording a verdict about another objective.
+        """
+        ...
+
+    def record_verification_tokens(
+        self,
+        context: GoalRuntimeContext,
+        tokens: int,
+    ) -> None:
+        """Charge the tokens a completion review spent to the Goal."""
+        ...
 
     def completion_request(
         self,
@@ -156,30 +172,41 @@ class GoalRuntimeRouter:
             verifier = self._verifier
             settle = self._settle
 
+        verdict = None
         if status == "complete" and verifier is not None:
             from core.agent_runtime.goal_verifier import GoalVerdict
 
+            judged_objective = None
             try:
                 if settle is not None:
                     await settle()
-                verdict = await verifier(
-                    handler.completion_request(context, reason=reason)
-                )
+                claim = handler.completion_request(context, reason=reason)
+                judged_objective = claim.objective
+                verdict = await verifier(claim)
             except Exception as exc:  # noqa: BLE001 - fail closed, report to the model
                 verdict = GoalVerdict(
                     confirmed=False,
                     justification=f"Completion verification failed: {exc}",
+                    tokens=getattr(exc, "tokens", 0),
                 )
-            if not verdict.confirmed:
-                return self._reject_completion(handler, context, verdict)
+            try:
+                if not verdict.confirmed:
+                    return self._reject_completion(handler, context, verdict)
+                result = handler.update_goal(
+                    context,
+                    status=status,
+                    reason=reason,
+                    expected_objective=judged_objective,
+                )
+            finally:
+                if verdict.tokens > 0:
+                    handler.record_verification_tokens(context, verdict.tokens)
         else:
-            verdict = None
-
-        result = handler.update_goal(
-            context,
-            status=status,
-            reason=reason,
-        )
+            result = handler.update_goal(
+                context,
+                status=status,
+                reason=reason,
+            )
         with self._lock:
             if self._context != context:
                 raise GoalRuntimeError("Goal Turn changed while recording the decision")

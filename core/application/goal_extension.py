@@ -629,6 +629,7 @@ class GoalExtension(GoalRuntimeHandler):
         *,
         status: str,
         reason: str | None,
+        expected_objective: str | None = None,
     ) -> dict[str, Any]:
         try:
             requested = ThreadGoalStatus(status)
@@ -653,12 +654,25 @@ class GoalExtension(GoalRuntimeHandler):
                 else "Agent reported a persistent blocker."
             ),
         )
+
+        def transform(current: ThreadGoal) -> ThreadGoal:
+            if (
+                expected_objective is not None
+                and current.objective != expected_objective
+            ):
+                raise ValueError(
+                    "The Goal's objective changed while this completion claim "
+                    "was being reviewed. Check the work against the new "
+                    "objective, then claim completion again."
+                )
+            return current.agent_transition(requested)
+
         with self._lock(context.thread_id):
             try:
                 updated = self.store.update(
                     context.thread_id,
                     expected_goal_id=context.goal_id,
-                    transform=lambda current: current.agent_transition(requested),
+                    transform=transform,
                     reason=clean_reason,
                     source="agent",
                     turn_id=context.turn_id,
@@ -685,6 +699,40 @@ class GoalExtension(GoalRuntimeHandler):
                 "goal": thread_goal_view(updated),
                 "updated": True,
             }
+
+    def record_verification_tokens(
+        self,
+        context: GoalRuntimeContext,
+        tokens: int,
+    ) -> None:
+        """Charge a completion review's tokens to the Goal's usage and budget.
+
+        Best effort: a Goal that changed or went away meanwhile is left as is.
+        """
+
+        if tokens <= 0:
+            return
+        with self._lock(context.thread_id):
+            try:
+                updated = self.store.update(
+                    context.thread_id,
+                    expected_goal_id=context.goal_id,
+                    transform=lambda current: current.add_usage(
+                        tokens=tokens, elapsed_seconds=0
+                    ),
+                    reason="completion review",
+                    source="runtime",
+                    # No turn id: a runtime entry with one settles that Turn,
+                    # and the Turn's own usage must still be charged.
+                )
+            except (ThreadGoalConflictError, ValueError) as exc:
+                logger.info(
+                    "Completion review tokens were not charged to Goal %s: %s",
+                    context.goal_id,
+                    exc,
+                )
+                return
+            self._notify(context.thread_id, updated)
 
     def completion_request(
         self,

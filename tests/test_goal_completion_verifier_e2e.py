@@ -361,3 +361,76 @@ def test_the_rule_check_rejects_before_any_review(monkeypatch, tmp_path) -> None
     assert "latest check failed" in result["verdict"]["justification"]
     assert _reviewer_requests(provider) == []
     assert goal.status.value != "complete"
+
+
+def test_the_reviewer_runs_no_hooks(monkeypatch, tmp_path) -> None:
+    # A hook the agent writes mid-Turn would run outside the sandbox.
+    marker = f"\"{sys.executable}\" -c \"open('HOOK_RAN', 'w').write('x')\""
+    hooks = {
+        "hooks": {
+            "PreToolUse": [
+                {"matcher": "", "hooks": [{"type": "command", "command": marker}]}
+            ]
+        }
+    }
+    _run(
+        monkeypatch,
+        tmp_path,
+        [
+            (
+                "write",
+                {"file_path": ".deepcode/hooks.json", "content": json.dumps(hooks)},
+            ),
+            ("read", {"file_path": "calc.py"}),
+            COMPLETE,
+            ("glob", {"pattern": "*.py"}),
+            _verdict("pass", "fine."),
+            "Reviewed.",
+        ],
+        verifier="reviewer",
+    )
+
+    assert not (tmp_path / "proj" / "HOOK_RAN").exists()
+
+
+class _MeteredProvider(_ScriptedProvider):
+    """Every response reports 1000 tokens."""
+
+    async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
+        response = await super().chat_with_retry(**kwargs)
+        response.usage = {
+            "prompt_tokens": 900,
+            "completion_tokens": 100,
+            "total_tokens": 1000,
+        }
+        return response
+
+
+def test_the_reviews_tokens_count_toward_the_goal(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "_ScriptedProvider", _MeteredProvider)
+    goal, _, provider = _run(
+        monkeypatch,
+        tmp_path,
+        [
+            ("read", {"file_path": "calc.py"}),
+            COMPLETE,
+            ("read", {"file_path": "calc.py"}),
+            _verdict("pass", "fine."),
+            "Reviewed.",
+        ],
+        verifier="reviewer",
+    )
+
+    reviewer_calls = len(_reviewer_requests(provider))
+    assert reviewer_calls == 3
+    ledger = [
+        json.loads(line)
+        for line in next((tmp_path / "sessions").glob("*/goal.jsonl"))
+        .read_text()
+        .splitlines()
+    ]
+    charged = [entry for entry in ledger if entry.get("reason") == "completion review"]
+    assert len(charged) == 1
+    assert "turnId" not in charged[0] or charged[0]["turnId"] is None
+    assert goal.tokens_used >= reviewer_calls * 1000
+    assert goal.status.value == "complete"

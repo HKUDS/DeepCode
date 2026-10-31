@@ -28,6 +28,7 @@ class FakeGoalHandler:
         self.requests: list[dict[str, object]] = []
         self.objective = objective
         self.events: list[str] = []
+        self.charged: list[int] = []
 
     def read_goal(self, context: GoalRuntimeContext):
         return {"goalId": context.goal_id, "objective": self.objective}
@@ -38,11 +39,17 @@ class FakeGoalHandler:
         *,
         status: str,
         reason: str | None,
+        expected_objective: str | None = None,
     ):
+        if expected_objective is not None and expected_objective != self.objective:
+            raise ValueError("objective changed")
         self.requests.append(
             {"turnId": context.turn_id, "status": status, "reason": reason}
         )
         return {"goalId": context.goal_id, "status": status}
+
+    def record_verification_tokens(self, context: GoalRuntimeContext, tokens: int):
+        self.charged.append(tokens)
 
     def completion_request(
         self,
@@ -454,3 +461,51 @@ async def test_rule_setting_arms_the_router_and_off_disarms_it_on_rebuild(
     assert accepted["status"] == "complete"
     for session in sessions:
         await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_reviews_tokens_are_charged_whatever_the_verdict() -> None:
+    from core.harness.agents.goal_reviewer import ReviewFailed
+
+    class Costly:
+        def __init__(self, outcome):
+            self.outcome = outcome
+
+        async def __call__(self, request: GoalCompletionRequest) -> GoalVerdict:
+            if isinstance(self.outcome, Exception):
+                raise self.outcome
+            return self.outcome
+
+    for outcome, charged in (
+        (GoalVerdict(confirmed=True, justification="ok", tokens=300), [300]),
+        (GoalVerdict(confirmed=False, justification="no", tokens=200), [200]),
+        (ReviewFailed("provider down", tokens=50), [50]),
+        (GoalVerdict(confirmed=True, justification="rule only"), []),
+    ):
+        runtime = GoalRuntimeRouter()
+        handler = FakeGoalHandler()
+        runtime.configure(handler)
+        runtime.configure_completion_verifier(Costly(outcome))
+        runtime.activate(_context())
+        await runtime.request(status="complete", reason="Done.")
+        assert handler.charged == charged, outcome
+
+
+@pytest.mark.asyncio
+async def test_an_objective_edited_during_the_review_is_not_marked_complete() -> None:
+    runtime = GoalRuntimeRouter()
+    handler = FakeGoalHandler(objective="Ship the feature.")
+
+    class EditDuringReview:
+        async def __call__(self, request: GoalCompletionRequest) -> GoalVerdict:
+            handler.objective = "Ship the feature and its docs."
+            return GoalVerdict(confirmed=True, justification="ok", tokens=10)
+
+    runtime.configure(handler)
+    runtime.configure_completion_verifier(EditDuringReview())
+    runtime.activate(_context())
+
+    with pytest.raises(ValueError, match="objective changed"):
+        await runtime.request(status="complete", reason="Done.")
+    assert handler.requests == []
+    assert handler.charged == [10]  # the review still cost what it cost

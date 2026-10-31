@@ -18,6 +18,7 @@ from core.domain.execution_security import (
 )
 from core.harness.agents.goal_reviewer import (
     AgentReviewVerifier,
+    ReviewFailed,
     review_task,
     reviewer_security_profile,
     verdict_from_result,
@@ -99,8 +100,9 @@ def test_a_confirmed_verdict_cannot_be_impossible():
 def test_the_rule_check_runs_first_and_spares_the_review():
     calls = []
 
-    async def run(section, task):
+    async def run(section, task, on_usage):
         calls.append(task)
+        on_usage(120)
         return {"verdict": "pass", "summary": "ok"}
 
     verifier = AgentReviewVerifier(run)
@@ -109,18 +111,51 @@ def test_the_rule_check_runs_first_and_spares_the_review():
     )
     verdict = asyncio.run(verifier(_request(failed)))
     assert not verdict.confirmed and calls == []
-    assert asyncio.run(verifier(_request(WORK))).confirmed
+    passed = asyncio.run(verifier(_request(WORK)))
+    assert passed.confirmed and passed.tokens == 120
     assert len(calls) == 1
 
 
 def test_a_slow_or_silent_review_fails_closed():
-    async def slow(section, task):
+    async def slow(section, task, on_usage):
+        on_usage(40)
         await asyncio.sleep(1)
 
-    async def silent(section, task):
+    async def silent(section, task, on_usage):
+        on_usage(7)
         return None
 
-    with pytest.raises(RuntimeError, match="longer than"):
+    with pytest.raises(ReviewFailed, match="longer than") as slow_failure:
         asyncio.run(AgentReviewVerifier(slow, timeout_seconds=0.01)(_request(WORK)))
-    with pytest.raises(RuntimeError, match="no verdict"):
+    assert slow_failure.value.tokens == 40
+    with pytest.raises(ReviewFailed, match="no verdict") as silent_failure:
         asyncio.run(AgentReviewVerifier(silent)(_request(WORK)))
+    assert silent_failure.value.tokens == 7
+
+
+def test_an_unknown_verdict_fails_closed_with_its_cost():
+    async def odd(section, task, on_usage):
+        on_usage(9)
+        return {"verdict": "maybe", "summary": "?"}
+
+    with pytest.raises(ReviewFailed, match="unknown verdict") as failure:
+        asyncio.run(AgentReviewVerifier(odd)(_request(WORK)))
+    assert failure.value.tokens == 9
+
+
+def test_read_only_commands_get_no_network(monkeypatch, tmp_path):
+    from core.harness.tools import shell
+
+    seen = {}
+
+    def capture(**kwargs):
+        seen.update(kwargs)
+        raise OSError("stop here")
+
+    monkeypatch.setattr(shell, "build_exec_command", capture)
+    asyncio.run(
+        shell.BashTool(str(tmp_path), read_only_workspace=True).execute(command="true")
+    )
+    assert seen["read_only"] is True and seen["allow_network"] is False
+    asyncio.run(shell.BashTool(str(tmp_path)).execute(command="true"))
+    assert seen["read_only"] is False and seen["allow_network"] is True
