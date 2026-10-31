@@ -64,7 +64,7 @@ VERDICT_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "requirement": {"type": "string"},
+                    "requirement": {"type": "string", "minLength": 1},
                     "met": {"type": "boolean"},
                     "evidence": {
                         "type": "string",
