@@ -47,6 +47,8 @@ interface TurnView {
   transcriptMode?: TranscriptMode;
   status?: Turn["status"];
   errorMessage?: string;
+  errorCode?: string;
+  stopReason?: string;
   selectedItemId?: string | null;
   following?: boolean;
   goalOutcome?: GoalOutcome | null;
@@ -61,6 +63,8 @@ function turnBlock(items: Item[], view: TurnView = {}) {
         ...turn,
         status: view.status ?? turn.status,
         errorMessage: view.errorMessage ?? turn.errorMessage,
+        errorCode: view.errorCode ?? turn.errorCode,
+        stopReason: view.stopReason ?? turn.stopReason,
       },
     ],
     items,
@@ -371,6 +375,30 @@ describe("TurnBlock", () => {
 
     expect(screen.getAllByText("The API key is missing.")).toHaveLength(1);
     expect(screen.getByRole("region", { name: "Goal blocked" })).toBeTruthy();
+  });
+
+  it("says why the agent stopped instead of its raw stop reason", () => {
+    renderTurn([], {
+      status: "failed",
+      errorCode: "AGENT_TURN_FAILED",
+      stopReason: "empty_final_response",
+      errorMessage: "agent stopped with reason: empty_final_response",
+    });
+
+    expect(screen.getByText("The model returned an empty answer.")).toBeTruthy();
+    expect(screen.queryByText(/agent stopped with reason/)).toBeNull();
+  });
+
+  it("names DeepCode's own tool by what it does, once", () => {
+    renderTurn([
+      item("goal", 1, "tool_call", "get_goal", {
+        name: "get_goal",
+        activity: { kind: "other", label: "Get Goal", subject: "" },
+      }),
+    ]);
+
+    expect(screen.getAllByText("Check Goal")).toHaveLength(1);
+    expect(screen.queryByText("get_goal")).toBeNull();
   });
 
   it("waits for the deciding Turn to finish before showing the outcome", () => {

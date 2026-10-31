@@ -28,12 +28,14 @@ import type {
   ApprovalDecision,
   GoalOutcome,
   Item,
+  Turn,
 } from "../../generated/app-server";
 import type { DesktopInspectorTab } from "../../app/useDesktopUi";
 import { ApprovalCard } from "../execution/ApprovalCard";
 import { GoalOutcomeView } from "../goal/GoalOutcomeView";
 import {
   activityLabel,
+  approvalCategoryLabel,
   approvalOutcome,
   isWarning,
   itemStatusText,
@@ -241,7 +243,7 @@ function ActivityItem({
                 ? t("approval.label", "Approval required")
                 : approvalOutcome(approval.status, t)}
             </strong>
-            <small>{item.summary}</small>
+            <small>{approvalCategoryLabel(approval.category, t)}</small>
           </span>
         </div>
         {pending ? (
@@ -250,13 +252,7 @@ function ActivityItem({
             busy={busy}
             onRespond={onRespondToApproval}
           />
-        ) : (
-          <span className={styles.runApprovalDecision}>
-            {t("approval.decision", "Decision: {{status}}", {
-              status: approvalOutcome(approval.status, t),
-            })}
-          </span>
-        )}
+        ) : null}
       </section>
     );
   }
@@ -266,6 +262,8 @@ function ActivityItem({
   const warning = isWarning(item);
   const body = presentation.body;
   const hasBody = Boolean(body && body.trim() && body.trim() !== item.summary.trim());
+  const subject = stepSubject(item, t);
+  const label = stepLabel(item, t);
   const heading = (
     <>
       {warning ? (
@@ -274,8 +272,8 @@ function ActivityItem({
         <ActivityIcon kind={item.kind} activityKind={activity?.kind} />
       )}
       <span className={styles.runStepCopy}>
-        <strong>{stepSubject(item, t)}</strong>
-        <small>{activity ? activityLabel(activity, t) : presentation.label}</small>
+        <strong>{subject}</strong>
+        {label !== subject ? <small>{label}</small> : null}
       </span>
       {warning ? null : (
         <span className={styles.runStepStatus}>
@@ -390,12 +388,63 @@ const tallyLabels: Record<WorkTally, [key: string, fallback: string]> = {
   tools: ["turn.work.tools", "Tools {{count}}"],
 };
 
+/**
+ * Why a Turn failed, in words. The agent's own stops have a fixed reason;
+ * any other failure keeps the service's message.
+ */
+function turnErrorText(turn: Turn, t: TFunction): string | null {
+  if (turn.errorCode !== "AGENT_TURN_FAILED") return turn.errorMessage;
+  switch (turn.stopReason) {
+    case "error":
+      return t("turn.failed.error", "The agent stopped because of an error.");
+    case "empty_final_response":
+      return t("turn.failed.empty", "The model returned an empty answer.");
+    case "busy":
+      return t("turn.failed.busy", "The Session was busy with another Turn.");
+    case "invalid_skill":
+      return t("turn.failed.invalidSkill", "A selected skill could not be loaded.");
+    default:
+      return turn.errorMessage;
+  }
+}
+
+/** How a skill came into a Turn, in words; its revision hash is not for people. */
+function skillInvocationText(
+  invocation: string | undefined,
+  t: TFunction,
+): string | undefined {
+  switch (invocation) {
+    case "explicit":
+      return t("turn.skill.explicit", "Selected for this Turn");
+    case "text_mention":
+      return t("turn.skill.mentioned", "Mentioned in the message");
+    case "implicit":
+      return t("turn.skill.implicit", "Loaded by the agent");
+    case "dependency":
+      return t("turn.skill.dependency", "Needed by another skill");
+    default:
+      return undefined;
+  }
+}
+
 /** What a step is about, for its row and for a group's live title. */
 function stepSubject(item: Item, t: TFunction): string {
   if (item.kind === "reasoning_summary") {
     return t("thread.reasoning.thinking", "Thinking");
   }
-  return itemActivity(item)?.subject || item.summary || presentItem(item, t).label;
+  const subject = itemActivity(item)?.subject;
+  if (subject) return subject;
+  // A step with nothing more to say is summarised by its tool's raw name.
+  const named = item.summary && item.summary !== item.payload.name;
+  return named ? item.summary : stepLabel(item, t);
+}
+
+/** What kind of step this is, in words. */
+function stepLabel(item: Item, t: TFunction): string {
+  const activity = itemActivity(item);
+  if (!activity) return presentItem(item, t).label;
+  const name = typeof item.payload.name === "string" ? item.payload.name : undefined;
+  return activityLabel(activity, t, name);
 }
 
 // A run opened on its own shows only its latest steps: a long one is hundreds.
@@ -632,7 +681,9 @@ export function TurnBlock({
           "turn.restarted",
           "The previous process stopped. Retry from the same prompt.",
         )
-      : group.turn?.errorMessage;
+      : group.turn
+        ? turnErrorText(group.turn, t)
+        : null;
 
   const live = activeTurnStatuses.has(group.turn?.status ?? "");
   const goalOutcomeHeading = useId();
@@ -688,7 +739,7 @@ export function TurnBlock({
               {message.skills.map((skill) => (
                 <span
                   key={skill.skillId}
-                  title={[skill.invocation, skill.revision].filter(Boolean).join(" · ")}
+                  title={skillInvocationText(skill.invocation, t)}
                 >
                   <Sparkles size={12} />
                   {skill.name}

@@ -26,22 +26,40 @@ export function RuntimeNotice({
   const serviceOffline = runtime.phase === "crashed" || runtime.phase === "stopped";
   const code = runtime.errorCode ?? error?.code;
   const authRequired = reconnectOnly && code === "AUTH_REQUIRED";
-  const message = authRequired
-    ? t("runtime.browserAuthHelp", "Run deepcode web in your terminal to open a new browser access link. No DeepCode account is needed.")
-    : (runtime.errorCode ? runtime.message : error?.message) ?? runtime.message ?? t("runtime.offline", "The local App Server is unavailable.");
+  const serviceMessage =
+    (runtime.errorCode ? runtime.message : error?.message) ??
+    runtime.message ??
+    t("runtime.offline", "The local App Server is unavailable.");
+  // What the browser's own connection reports is said here, in the user's
+  // language; anything else is the service's own message.
+  const [title, message] = authRequired
+    ? [
+        t("runtime.browserAuthRequired", "Browser access required"),
+        t("runtime.browserAuthHelp", "Run deepcode web in your terminal to open a new browser access link. No DeepCode account is needed."),
+      ]
+    : code === "RESPONSE_TIMEOUT"
+      ? [
+          t("runtime.responseTimeout", "No response from DeepCode"),
+          t("runtime.responseTimeoutHelp", "The response timed out; the task may still be running."),
+        ]
+      : code === "CONNECTION_LOST"
+        ? [
+            t("runtime.connectionLost", "Connection to DeepCode lost"),
+            serviceOffline
+              ? t("runtime.connectionLostOffline", "The service is unavailable. Reconnect when it is ready.")
+              : t("runtime.connectionLostHelp", "Connection lost; the service may still be running."),
+          ]
+        : [
+            serviceOffline
+              ? t("runtime.serviceUnavailable", "Local service unavailable")
+              : t("runtime.requestFailed", "Request failed"),
+            serviceMessage,
+          ];
   return (
     <div className={styles.notice} role="alert">
       <AlertTriangle size={18} aria-hidden="true" />
       <div className={styles.copy}>
-        <strong>
-          {authRequired
-            ? t("runtime.browserAuthRequired", "Browser access required")
-            : code === "CONNECTION_LOST"
-              ? t("runtime.connectionLost", "Connection to DeepCode lost")
-              : serviceOffline
-                ? t("runtime.serviceUnavailable", "Local service unavailable")
-                : t("runtime.requestFailed", "Request failed")}
-        </strong>
+        <strong>{title}</strong>
         <span>{message}</span>
       </div>
       <div className={styles.actions}>

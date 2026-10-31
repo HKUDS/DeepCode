@@ -122,9 +122,34 @@ export function presentItem(item: Item, t: TFunction): ItemPresentation {
 
 /**
  * What a tool step did, in words. Built-in tools are named by their kind of
- * activity; any other tool keeps its own name, as the service gives it.
+ * activity or, for DeepCode's own tools, by name; any other tool keeps the
+ * name the service gives it.
  */
-export function activityLabel(activity: { kind: string; label: string }, t: TFunction): string {
+export function activityLabel(
+  activity: { kind: string; label: string },
+  t: TFunction,
+  toolName?: string,
+): string {
+  switch (toolName) {
+    case "get_goal":
+      return t("tool.getGoal", "Check Goal");
+    case "update_goal":
+      return t("tool.updateGoal", "Update Goal");
+    case "spawn_agent":
+      return t("tool.spawnAgent", "Start agent");
+    case "wait_agent":
+      return t("tool.waitAgent", "Wait for agent");
+    case "list_agents":
+      return t("tool.listAgents", "List agents");
+    case "interrupt_agent":
+      return t("tool.interruptAgent", "Interrupt agent");
+    case "send_message":
+      return t("tool.sendMessage", "Message agent");
+    case "request_user_input":
+      return t("tool.requestUserInput", "Ask you");
+    case "web_fetch":
+      return t("tool.webFetch", "Fetch web page");
+  }
   switch (activity.kind) {
     case "read":
       return t("activity.read", "Read");

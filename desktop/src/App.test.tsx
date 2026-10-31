@@ -2183,15 +2183,19 @@ describe("desktop command center", () => {
     render(<App runtime={runtime} />);
 
     await screen.findByText("Complete");
+    // One Turn, said in the singular.
+    expect(screen.getByText("Ship version one").closest("button")!.textContent).toContain(
+      "1 Turn",
+    );
+    expect(
+      screen.getByText("Ship version one").closest("button")!.textContent,
+    ).not.toContain("1 Turns");
     fireEvent.click(screen.getByText("Ship version one").closest("button")!);
     const rail = screen.getByRole("region", { name: "Goal outcome" });
     expect(
       within(rail).getByText(
         "The requested change is implemented and focused tests pass.",
       ),
-    ).toBeTruthy();
-    expect(
-      within(rail).getByText(`Decided in Turn ${decidingTurn.ordinal}`),
     ).toBeTruthy();
     // The deciding Turn shows the outcome in the conversation too.
     expect(screen.getByRole("region", { name: "Goal complete" })).toBeTruthy();
@@ -3524,9 +3528,8 @@ describe("desktop command center", () => {
     expect(screen.getByText(/pytest -q/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
 
-    await waitFor(() =>
-      expect(screen.getByText("Decision: Allowed once")).toBeTruthy(),
-    );
+    // The resolved approval says what was decided, once.
+    await waitFor(() => expect(screen.getAllByText("Allowed once")).toHaveLength(1));
     expect(runtime.calls).toContain("approval/respond");
   });
 

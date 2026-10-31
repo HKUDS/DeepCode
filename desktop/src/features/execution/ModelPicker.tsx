@@ -19,6 +19,7 @@ import type {
 import { Dialog } from "../../components/Dialog";
 import type { ClientRuntime } from "../../rpc/contracts";
 import { useConnectionCatalog } from "../settings/useConnectionCatalog";
+import { effortLabel } from "./effortLabel";
 import styles from "./ModelPicker.module.css";
 
 interface ModelPickerProps {
@@ -81,9 +82,7 @@ export function ModelPicker({
     () => reasoningOptions(selectedModel),
     [selectedModel],
   );
-  const validReasoningEffort = effortOptions.some(
-    (option) => option.value === reasoningEffort,
-  )
+  const validReasoningEffort = effortOptions.includes(reasoningEffort)
     ? reasoningEffort
     : "auto";
   const effectiveEffort =
@@ -147,12 +146,7 @@ export function ModelPicker({
         !modelError,
     );
 
-  const effortText = (value: string) =>
-    value === "auto"
-      ? t("composer.model.effortAuto", "Auto")
-      : value === "none"
-        ? t("composer.model.effortOff", "Off")
-        : effortLabel(value);
+  const effortText = (value: string) => effortLabel(value, t);
 
   const apply = () => {
     if (!selectedConnectionId || !modelId) return;
@@ -366,15 +360,15 @@ export function ModelPicker({
               role="radiogroup"
               aria-label={t("composer.model.effortLevel", "Thinking effort level")}
             >
-              {effortOptions.map((option) => (
+              {effortOptions.map((effort) => (
                 <button
                   type="button"
                   role="radio"
-                  aria-checked={validReasoningEffort === option.value}
-                  key={option.value}
-                  onClick={() => setReasoningEffort(option.value)}
+                  aria-checked={validReasoningEffort === effort}
+                  key={effort}
+                  onClick={() => setReasoningEffort(effort)}
                 >
-                  {effortText(option.value)}
+                  {effortText(effort)}
                 </button>
               ))}
             </div>
@@ -488,23 +482,15 @@ function agentDefaults(
   return { connection, model, reasoningEffort };
 }
 
-function reasoningOptions(
-  model: CatalogModel | null,
-): Array<{ value: string; label: string }> {
+/** The efforts a model offers: always "auto", then "none" when it may skip. */
+function reasoningOptions(model: CatalogModel | null): string[] {
   const capabilities = model?.reasoning;
-  const options = [{ value: "auto", label: "Auto" }];
-  if (!capabilities) return options;
-  if (!capabilities.mandatory) options.push({ value: "none", label: "Off" });
-  for (const effort of capabilities.supportedEfforts) {
-    options.push({ value: effort, label: effortLabel(effort) });
-  }
-  return options;
-}
-
-function effortLabel(value: string): string {
-  if (value === "auto") return "Auto";
-  if (value === "none") return "Off";
-  return value.charAt(0).toLocaleUpperCase() + value.slice(1);
+  if (!capabilities) return ["auto"];
+  return [
+    "auto",
+    ...(capabilities.mandatory ? [] : ["none"]),
+    ...capabilities.supportedEfforts,
+  ];
 }
 
 function resolveConnection(

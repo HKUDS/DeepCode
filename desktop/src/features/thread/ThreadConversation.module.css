@@ -604,13 +604,6 @@ div.runStep {
   font-size: var(--text-2xs);
 }
 
-.runApprovalDecision {
-  display: block;
-  margin: 5px 0 0 23px;
-  color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
-}
-
 .runError {
   margin: 7px 7px 7px 0;
   padding: 9px 11px;

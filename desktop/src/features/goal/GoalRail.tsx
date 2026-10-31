@@ -82,9 +82,6 @@ export function GoalRail({
         : null,
     [goal, outcome?.decidedByTurnId, turns],
   );
-  const decidingTurn = outcome?.decidedByTurnId
-    ? turns.find((turn) => turn.id === outcome.decidedByTurnId) ?? null
-    : null;
 
   const openEditor = (resume = false) => {
     setResumeAfterSave(resume);
@@ -152,8 +149,11 @@ export function GoalRail({
               <small>
                 <span>{presentation ? goalStatusLabel(presentation.status, t) : null}</span>
                 <i>·</i>
-                {presentation?.linkedTurnCount ?? 0}{" "}
-                {presentation?.linkedTurnCount === 1 ? t("goal.turn", "Turn") : t("goal.turns", "Turns")}
+                {t("goal.turnCount", {
+                  count: presentation?.linkedTurnCount ?? 0,
+                  defaultValue_one: "{{count}} Turn",
+                  defaultValue_other: "{{count}} Turns",
+                })}
                 {goal.tokensUsed > 0 ? (
                   <>
                     <i>·</i>
@@ -166,7 +166,10 @@ export function GoalRail({
               <progress
                 max={goal.tokenBudget}
                 value={Math.min(goal.tokensUsed, goal.tokenBudget)}
-                aria-label={`${goal.tokensUsed} of ${goal.tokenBudget} Goal tokens`}
+                aria-label={t("goal.tokenProgress", "{{used}} of {{budget}} Goal tokens", {
+                  used: goal.tokensUsed,
+                  budget: goal.tokenBudget,
+                })}
               />
             ) : (
               <span />
@@ -247,11 +250,6 @@ export function GoalRail({
               {outcome ? (
                 <section className={styles.outcome} aria-label={t("goal.outcome", "Goal outcome")}>
                   <GoalOutcomeView outcome={outcome} onSelectEvidence={onSelectEvidence} />
-                  {decidingTurn ? (
-                    <small>
-                      {t("goal.decidedInTurn", "Decided in Turn {{number}}", { number: decidingTurn.ordinal })}
-                    </small>
-                  ) : null}
                 </section>
               ) : null}
               {goal.skillIds.length ? (
@@ -261,7 +259,7 @@ export function GoalRail({
                     return (
                       <li key={skillId}>
                         <Check size={12} />
-                        {skill?.name ?? shortId(skillId)}
+                        {skill?.name ?? t("goal.skillUnavailable", "A skill that is no longer available")}
                       </li>
                     );
                   })}
@@ -413,8 +411,4 @@ function formatDuration(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m`;
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-}
-
-function shortId(value: string): string {
-  return value.length > 14 ? `${value.slice(0, 11)}…` : value;
 }

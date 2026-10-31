@@ -13,6 +13,7 @@ import {
   goalStatusLabel,
   type GoalPresentationStatus,
 } from "../goal/goalPresentation";
+import { effortLabel } from "./effortLabel";
 import {
   activityLabel,
   approvalCategoryLabel,
@@ -100,6 +101,7 @@ afterEach(() => {
 
 describe("labels in zh-CN", () => {
   beforeEach(() => __setLocaleForTests("zh-CN"));
+  // Bound per call: the locale is switched before each test.
   const t = () => i18n.t.bind(i18n);
 
   it.each(ITEM_KINDS)("names a %s item in Chinese", (kind) => {
@@ -116,6 +118,21 @@ describe("labels in zh-CN", () => {
       ...GOAL_STATUSES.map((status) => goalStatusLabel(status, t())),
       ...["read", "search", "list", "run", "edit", "plan"].map((kind) =>
         activityLabel({ kind, label: "Built-in" }, t()),
+      ),
+      // DeepCode's own tools outside those kinds (core/harness/tools).
+      ...[
+        "get_goal",
+        "update_goal",
+        "spawn_agent",
+        "wait_agent",
+        "list_agents",
+        "interrupt_agent",
+        "send_message",
+        "request_user_input",
+        "web_fetch",
+      ].map((name) => activityLabel({ kind: "other", label: name }, t(), name)),
+      ...["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"].map(
+        (effort) => effortLabel(effort, t()),
       ),
     ];
     expect(labels.filter((label) => englishWords(label).length)).toEqual([]);
@@ -139,6 +156,12 @@ it("reads approval outcomes as sentences in English, not raw values", () => {
 it("keeps the name of a tool that is not built in", () => {
   __setLocaleForTests("zh-CN");
   const t = i18n.t.bind(i18n);
-  expect(activityLabel({ kind: "other", label: "Get Goal" }, t)).toBe("Get Goal");
-  expect(activityLabel({ kind: "run", label: "Run" }, t)).toBe("运行");
+  expect(
+    activityLabel({ kind: "other", label: "Browser Navigate" }, t, "browser_navigate"),
+  ).toBe("Browser Navigate");
+  expect(activityLabel({ kind: "run", label: "Run" }, t, "bash")).toBe("运行");
+});
+
+it("names a provider's unknown effort level as the provider does", () => {
+  expect(effortLabel("turbo", i18n.t.bind(i18n))).toBe("Turbo");
 });

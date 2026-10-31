@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { decodeReasoningPayload } from "../../app/reasoningPayload";
 import type { Item } from "../../generated/app-server";
+import { effortLabel } from "../execution/effortLabel";
 import { MarkdownContent } from "./MarkdownContent";
 import type { TranscriptMode } from "./transcriptMode";
 import styles from "./ReasoningBlock.module.css";
@@ -64,7 +65,7 @@ export function ReasoningBlock({ item, mode }: ReasoningBlockProps) {
   const title = active
     ? [
         t("thread.reasoning.thinking", "Thinking"),
-        effort !== "auto" ? effort : null,
+        effort !== "auto" ? effortLabel(effort, t) : null,
         durationLabel,
       ]
         .filter(Boolean)
@@ -103,7 +104,7 @@ export function ReasoningBlock({ item, mode }: ReasoningBlockProps) {
                 : effort === "auto"
                   ? t("thread.reasoning.label", "Reasoning")
                   : t("thread.reasoning.withEffort", "Reasoning · {{effort}}", {
-                      effort,
+                      effort: effortLabel(effort, t),
                     })}
           </small>
         </span>

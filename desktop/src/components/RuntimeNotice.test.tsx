@@ -59,7 +59,24 @@ it("keeps reconnection available for network failures", () => {
   );
   fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
   expect(reconnect).toHaveBeenCalledOnce();
-  expect(screen.getByRole("alert").textContent).toContain("Network unavailable");
+  expect(screen.getByRole("alert").textContent).toContain(
+    "The service is unavailable. Reconnect when it is ready.",
+  );
+});
+
+it("says a request timed out, not that the connection was lost", () => {
+  render(
+    <RuntimeNotice
+      runtime={{ ...stopped, phase: "ready", errorCode: undefined }}
+      error={{ code: "RESPONSE_TIMEOUT", message: "timed out", retryable: true }}
+      busy={false}
+      onRestart={vi.fn()}
+      onDismissError={vi.fn()}
+    />,
+  );
+  const alert = screen.getByRole("alert").textContent ?? "";
+  expect(alert).toContain("No response from DeepCode");
+  expect(alert).not.toContain("lost");
 });
 
 it("keeps native restart and ordinary application error dismissal", () => {

@@ -384,7 +384,7 @@ export class BrowserRuntime implements ClientRuntime {
           this.pending.delete(id);
           reject(
             new BrowserRuntimeError(
-              "CONNECTION_LOST",
+              "RESPONSE_TIMEOUT",
               "The response timed out; the task may still be running",
               true,
             ),
@@ -450,9 +450,11 @@ export class BrowserRuntime implements ClientRuntime {
         }
         return await this.send(method, original);
       } catch (error) {
+        // A timed-out response closes the socket too: either way the
+        // request may or may not have been applied.
         const lost =
           error instanceof BrowserRuntimeError &&
-          error.code === "CONNECTION_LOST";
+          (error.code === "CONNECTION_LOST" || error.code === "RESPONSE_TIMEOUT");
         const pending =
           error instanceof BrowserRuntimeError &&
           error.code === "INPUT_DELIVERY_PENDING";
