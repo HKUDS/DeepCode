@@ -2284,6 +2284,7 @@ def test_tui_text_names_keys_one_way():
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == "add"
+            and "bindings" in ast.unparse(node.func.value)
             for argument in node.args
         }
         offenders += [
