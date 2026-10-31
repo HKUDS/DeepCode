@@ -71,7 +71,9 @@
 .toolbar {
   display: flex;
   min-height: 45px;
-  align-items: center;
+  /* When the controls wrap onto a second line, the send button stays at the
+     end of the last one. */
+  align-items: flex-end;
   justify-content: space-between;
   gap: 12px;
   padding: 5px 9px 8px 14px;
@@ -408,12 +410,20 @@
   text-align: right;
 }
 
+/* The controls wrap rather than shrink: squeezed into one line they were cut
+   to "Age… De…" and, on a narrow window, ran under the send button. Each
+   keeps its own maximum width, so a long model name still ends in "…". */
 .context {
   display: flex;
   min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   overflow: visible;
+}
+
+.context > * {
+  flex: 0 0 auto;
 }
 
 .attachButton,
@@ -645,10 +655,6 @@
 @media (max-width: 680px) {
   .region {
     padding-inline: 10px;
-  }
-
-  .context > :nth-child(n + 3) {
-    display: none;
   }
 
   .accessStatusRail {
