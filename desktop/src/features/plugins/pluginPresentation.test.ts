@@ -16,6 +16,8 @@ const COMPONENT_STATUSES = Object.keys({ ready: 1, unsupported: 1, invalid: 1 } 
   Component["status"],
   1
 >) as Component["status"][];
+type Severity = PluginInfo["diagnostics"][number]["severity"];
+const SEVERITIES = Object.keys({ warning: 1, error: 1 } satisfies Record<Severity, 1>) as Severity[];
 
 beforeEach(() => {
   initI18n();
@@ -32,8 +34,7 @@ it("says every plugin and component state in Chinese", () => {
     ...KINDS.flatMap((kind) =>
       COMPONENT_STATUSES.map((status) => pluginComponentLabel({ kind, status } as Component, t)),
     ),
-    pluginSeverityLabel("warning", t),
-    pluginSeverityLabel("error", t),
+    ...SEVERITIES.map((severity) => pluginSeverityLabel(severity, t)),
   ];
   expect(labels.filter((label) => (label.match(/[A-Za-z]{2,}/g) ?? []).some((w) => w !== "MCP"))).toEqual([]);
 });
