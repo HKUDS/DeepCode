@@ -23,6 +23,7 @@ import { ConversationSplitter } from "./features/thread/ConversationSplitter";
 import { ThreadHeader } from "./features/thread/ThreadHeader";
 import { TrustFolderDialog } from "./features/thread/TrustFolderDialog";
 import { useTranscriptMode } from "./features/thread/transcriptMode";
+import { SessionFolderContext } from "./features/thread/sessionFolder";
 import type { ClientRuntime } from "./rpc/contracts";
 import { initI18n } from "./app/i18n";
 import styles from "./App.module.css";
@@ -406,27 +407,29 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
                     </LoadingSurface>
                   }
                 >
-                  <ThreadConversation
-                    key={selectedThread.id}
-                    turns={state.turns}
-                    items={state.items}
-                    approvals={state.approvals}
-                    plansByTurnId={state.plansByTurnId}
-                    goalOutcome={state.goalOutcome}
-                    historyLoaded={state.historyLoaded}
-                    selectedItemId={state.selectedItemId}
-                    transcriptMode={transcript.mode}
-                    busy={state.busy}
-                    onSelectItem={controller.selectItem}
-                    onOpenInspector={ui.openInspector}
-                    onRespondToApproval={(approvalId, decision) =>
-                      void controller.respondToApproval(approvalId, decision)
-                    }
-                    onRetryTurn={(turnId) => void controller.retryTurn(turnId)}
-                    onCancelQueuedTurn={(turnId) =>
-                      void controller.interruptTurn(turnId)
-                    }
-                  />
+                  <SessionFolderContext.Provider value={selectedThread.workspacePath}>
+                    <ThreadConversation
+                      key={selectedThread.id}
+                      turns={state.turns}
+                      items={state.items}
+                      approvals={state.approvals}
+                      plansByTurnId={state.plansByTurnId}
+                      goalOutcome={state.goalOutcome}
+                      historyLoaded={state.historyLoaded}
+                      selectedItemId={state.selectedItemId}
+                      transcriptMode={transcript.mode}
+                      busy={state.busy}
+                      onSelectItem={controller.selectItem}
+                      onOpenInspector={ui.openInspector}
+                      onRespondToApproval={(approvalId, decision) =>
+                        void controller.respondToApproval(approvalId, decision)
+                      }
+                      onRetryTurn={(turnId) => void controller.retryTurn(turnId)}
+                      onCancelQueuedTurn={(turnId) =>
+                        void controller.interruptTurn(turnId)
+                      }
+                    />
+                  </SessionFolderContext.Provider>
                 </Suspense>
               )}
             </section>
@@ -452,63 +455,65 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
                 />
               </Suspense>
             ) : selectedThread ? (
-              <Composer
-                key={selectedThread.id}
-                editable={composerEditable}
-                canExecute={agentExecutionEnabled}
-                busy={state.busy}
-                conversationStarted={state.turns.some(
-                  (turn) => turn.threadId === selectedThread.id,
-                )}
-                executingTurn={activeTurn}
-                queuedTurns={queuedTurns}
-                runtime={runtime}
-                project={selectedProject}
-                thread={selectedThread}
-                settings={state.settings}
-                goal={state.goal}
-                goalOutcome={state.goalOutcome}
-                goalTurns={
-                  state.goal
-                    ? state.turns.filter(
-                        (turn) => turn.goalId === state.goal?.id,
-                      )
-                    : []
-                }
-                disabledReason={disabledReason}
-                transcriptMode={transcript.mode}
-                onTranscriptModeChange={transcript.selectMode}
-                onModelChange={(
-                  connectionId,
-                  model,
-                  reasoningEffort,
-                  contextWindow,
-                ) =>
-                  void controller.setThreadExecution(
+              <SessionFolderContext.Provider value={selectedThread.workspacePath}>
+                <Composer
+                  key={selectedThread.id}
+                  editable={composerEditable}
+                  canExecute={agentExecutionEnabled}
+                  busy={state.busy}
+                  conversationStarted={state.turns.some(
+                    (turn) => turn.threadId === selectedThread.id,
+                  )}
+                  executingTurn={activeTurn}
+                  queuedTurns={queuedTurns}
+                  runtime={runtime}
+                  project={selectedProject}
+                  thread={selectedThread}
+                  settings={state.settings}
+                  goal={state.goal}
+                  goalOutcome={state.goalOutcome}
+                  goalTurns={
+                    state.goal
+                      ? state.turns.filter(
+                          (turn) => turn.goalId === state.goal?.id,
+                        )
+                      : []
+                  }
+                  disabledReason={disabledReason}
+                  transcriptMode={transcript.mode}
+                  onTranscriptModeChange={transcript.selectMode}
+                  onModelChange={(
                     connectionId,
                     model,
                     reasoningEffort,
                     contextWindow,
-                  )
-                }
-                onAccessPresetChange={controller.setAccessPreset}
-                onSetGoal={controller.setGoal}
-                onPauseGoal={controller.pauseGoal}
-                onResumeGoal={controller.resumeGoal}
-                onContinueGoal={controller.continueGoal}
-                onClearGoal={controller.clearGoal}
-                onSelectGoalEvidence={(itemId) => {
-                  controller.selectItem(itemId);
-                  ui.openInspector("details");
-                }}
-                onPickContextFiles={controller.pickContextFiles}
-                onCommand={runComposerCommand}
-                onSend={controller.sendTurn}
-                onQueue={controller.queueTurn}
-                onInterrupt={() => void controller.interrupt()}
-                launchIntent={composerIntent}
-                onLaunchIntentConsumed={() => setComposerIntent(null)}
-              />
+                  ) =>
+                    void controller.setThreadExecution(
+                      connectionId,
+                      model,
+                      reasoningEffort,
+                      contextWindow,
+                    )
+                  }
+                  onAccessPresetChange={controller.setAccessPreset}
+                  onSetGoal={controller.setGoal}
+                  onPauseGoal={controller.pauseGoal}
+                  onResumeGoal={controller.resumeGoal}
+                  onContinueGoal={controller.continueGoal}
+                  onClearGoal={controller.clearGoal}
+                  onSelectGoalEvidence={(itemId) => {
+                    controller.selectItem(itemId);
+                    ui.openInspector("details");
+                  }}
+                  onPickContextFiles={controller.pickContextFiles}
+                  onCommand={runComposerCommand}
+                  onSend={controller.sendTurn}
+                  onQueue={controller.queueTurn}
+                  onInterrupt={() => void controller.interrupt()}
+                  launchIntent={composerIntent}
+                  onLaunchIntentConsumed={() => setComposerIntent(null)}
+                />
+              </SessionFolderContext.Provider>
             ) : null}
           </>
         ) : (

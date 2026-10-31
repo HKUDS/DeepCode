@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import type { GoalOutcome } from "../../generated/app-server";
 import { MarkdownContent } from "../thread/MarkdownContent";
+import { readableCommand, useSessionFolder } from "../thread/sessionFolder";
 import styles from "./GoalOutcomeView.module.css";
 import { formatOutcomeTime, outcomeDecider } from "./goalPresentation";
 
@@ -23,6 +24,7 @@ export function GoalOutcomeView({
   onSelectEvidence(itemId: string): void;
 }) {
   const { t } = useTranslation();
+  const folder = useSessionFolder();
   const complete = outcome.status === "complete";
   return (
     <div className={styles.outcome} data-status={outcome.status}>
@@ -52,7 +54,7 @@ export function GoalOutcomeView({
                   type="button"
                   onClick={() => onSelectEvidence(evidence.itemId)}
                 >
-                  <span>{evidence.summary}</span>
+                  <span>{readableCommand(evidence.summary, folder)}</span>
                   <ChevronRight size={13} aria-hidden="true" />
                 </button>
               </li>
