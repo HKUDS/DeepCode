@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
-import { focusableWithin } from "../components/dialogStack";
 import { useEscapeLayer } from "./escapeLayer";
 import { NARROW_LAYOUT } from "./layout";
+import { useFocusHandoff } from "./useFocusHandoff";
 import { useMediaQuery } from "./useMediaQuery";
 
 /**
@@ -10,11 +10,8 @@ import { useMediaQuery } from "./useMediaQuery";
  *
  * It is open only while the window is narrow, and a wider window ends the
  * request, so a drawer left open can neither hide anything nor come back by
- * itself. Opening moves focus into it, unless something in it already took
- * focus (the search field, for Cmd+K). Whenever it closes with focus left in
- * it or on nothing, focus goes to the menu button; the button sits in content
- * that is inert while the drawer is open, so this waits for the drawer to
- * close.
+ * itself. Focus moves into it and back to the menu button (useFocusHandoff);
+ * Cmd+K's search field may take focus first.
  */
 export function useNavigationDrawer(drawerId: string) {
   const narrow = useMediaQuery(NARROW_LAYOUT);
@@ -24,31 +21,11 @@ export function useNavigationDrawer(drawerId: string) {
   const open = narrow && requested;
   const buttonRef = useRef<HTMLButtonElement | null>(null);
 
-  const wasOpen = useRef(false);
-
   const close = useCallback(() => setRequested(false), []);
+  const reveal = useCallback(() => setRequested(true), []);
   useEscapeLayer(close, open);
+  useFocusHandoff(open, drawerId, () => buttonRef.current);
 
-  useEffect(() => {
-    const opened = open && !wasOpen.current;
-    const closed = !open && wasOpen.current;
-    wasOpen.current = open;
-    const drawer = document.getElementById(drawerId);
-    if (!drawer) return;
-    const active = document.activeElement;
-    if (opened && !drawer.contains(active)) {
-      focusableWithin(drawer)[0]?.focus();
-    } else if (closed && (!active || active === document.body || drawer.contains(active))) {
-      buttonRef.current?.focus();
-    }
-  }, [drawerId, open]);
-
-  return {
-    narrow,
-    open,
-    buttonRef,
-    toggle: () => setRequested((value) => !value),
-    reveal: () => setRequested(true),
-    close,
-  };
+  // The menu button is inert while the drawer is open, so it only reveals.
+  return { narrow, open, buttonRef, reveal, close };
 }

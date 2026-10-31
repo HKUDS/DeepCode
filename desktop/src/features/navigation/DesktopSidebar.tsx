@@ -184,6 +184,8 @@ export function DesktopSidebar({
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      // Behind a panel that holds the keyboard, the sidebar takes no shortcut.
+      if (inert) return;
       if (event.key.toLocaleLowerCase() === "k") {
         event.preventDefault();
         if (drawer === "closed") {
@@ -205,7 +207,7 @@ export function DesktopSidebar({
     };
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [busy, canCreateThread, drawer, onCreateThread, onRevealDrawer]);
+  }, [busy, canCreateThread, drawer, inert, onCreateThread, onRevealDrawer]);
 
   return (
     <aside

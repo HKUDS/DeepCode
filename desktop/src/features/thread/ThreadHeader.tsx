@@ -26,6 +26,8 @@ interface ThreadHeaderProps {
   onForkThread(): void;
   onCreatePaperThread(): void;
   onToggleInspector(): void;
+  /** Focus returns here when the floating review panel closes. */
+  reviewButtonId?: string;
 }
 
 function workspaceLabel(thread: Thread | null, project: Project | null, t: (key: string, defaultValue: string) => string): string {
@@ -47,6 +49,7 @@ export function ThreadHeader({
   onForkThread,
   onCreatePaperThread,
   onToggleInspector,
+  reviewButtonId,
 }: ThreadHeaderProps) {
   const { t } = useTranslation();
   const recoveredHistory = isRecoveredHistoryProject(project);
@@ -138,6 +141,7 @@ export function ThreadHeader({
           <button
             className={styles.reviewAction}
             type="button"
+            id={reviewButtonId}
             data-active={inspectorOpen}
             onClick={onToggleInspector}
             aria-pressed={inspectorOpen}

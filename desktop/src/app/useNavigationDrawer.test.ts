@@ -39,7 +39,7 @@ describe("useNavigationDrawer", () => {
     installWindowWidth(false);
     const { result } = renderHook(() => useNavigationDrawer("nav"));
 
-    act(() => result.current.toggle());
+    act(() => result.current.reveal());
 
     expect(result.current.open).toBe(false);
   });
@@ -48,7 +48,7 @@ describe("useNavigationDrawer", () => {
     installWindowWidth(true);
     const { result } = renderHook(() => useNavigationDrawer("nav"));
 
-    act(() => result.current.toggle());
+    act(() => result.current.reveal());
     expect(result.current.open).toBe(true);
 
     act(() => result.current.close());
@@ -58,7 +58,7 @@ describe("useNavigationDrawer", () => {
   it("closes itself when the window widens, so nothing stays hidden", () => {
     const width = installWindowWidth(true);
     const { result } = renderHook(() => useNavigationDrawer("nav"));
-    act(() => result.current.toggle());
+    act(() => result.current.reveal());
 
     act(() => width.resize(false));
     expect(result.current.open).toBe(false);
@@ -86,7 +86,7 @@ describe("useNavigationDrawer focus and Escape", () => {
     result.current.buttonRef.current = dom.button;
     expect(document.activeElement).toBe(document.body);
 
-    act(() => result.current.toggle());
+    act(() => result.current.reveal());
     expect(document.activeElement?.textContent).toBe("New Session");
 
     act(() => result.current.close());
@@ -99,7 +99,7 @@ describe("useNavigationDrawer focus and Escape", () => {
     installWindowWidth(true);
     const dom = mountDrawer();
     const { result } = renderHook(() => useNavigationDrawer("nav"));
-    act(() => result.current.toggle());
+    act(() => result.current.reveal());
     const closeMenu = vi.fn();
     const menu = renderHook(() => useEscapeLayer(closeMenu, true));
 

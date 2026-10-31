@@ -8,6 +8,7 @@ import { useAppearance } from "./app/useAppearance";
 import { useDesktopUi } from "./app/useDesktopUi";
 import { useEscapeLayer } from "./app/escapeLayer";
 import { FLOATING_REVIEW } from "./app/layout";
+import { useFocusHandoff } from "./app/useFocusHandoff";
 import { useMediaQuery } from "./app/useMediaQuery";
 import { useNavigationDrawer } from "./app/useNavigationDrawer";
 import { useComposerCommands } from "./app/useComposerCommands";
@@ -74,6 +75,8 @@ function LoadingSurface({
 }
 
 const NAVIGATION_ID = "app-navigation";
+const REVIEW_PANEL_ID = "review-panel";
+const REVIEW_TOGGLE_ID = "review-toggle";
 
 export function App({ runtime }: { runtime: ClientRuntime }) {
   const { t } = useTranslation();
@@ -85,7 +88,6 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
     narrow,
     open: navigationOpen,
     buttonRef: navigationButtonRef,
-    toggle: toggleNavigation,
     reveal: revealNavigation,
     close: closeNavigation,
   } = useNavigationDrawer(NAVIGATION_ID);
@@ -151,9 +153,16 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
     showingThreads && selectedThread && ui.inspectorOpen,
   );
   // On a narrower window the review panel floats over the page: it holds the
-  // keyboard and Escape until it is closed, like a dialog.
+  // keyboard and Escape until it is closed, like a dialog. Its Escape layer
+  // exists while the panel is open, so a dialog opened later stays above it
+  // even if the window then narrows.
   const reviewFloating = inspectorVisible && floatingReviewWidth;
-  useEscapeLayer(() => void ui.closeInspector(), reviewFloating);
+  useEscapeLayer(() => {
+    if (reviewFloating) void ui.closeInspector();
+  }, inspectorVisible);
+  useFocusHandoff(reviewFloating, REVIEW_PANEL_ID, () =>
+    document.getElementById(REVIEW_TOGGLE_ID),
+  );
 
   return (
     <main
@@ -256,7 +265,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
           aria-controls={NAVIGATION_ID}
           aria-expanded={navigationOpen}
           aria-label={t("sidebar.label", "Projects and Sessions")}
-          onClick={toggleNavigation}
+          onClick={revealNavigation}
         >
           <Menu size={18} />
         </button>
@@ -293,6 +302,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
                 })();
               }}
               onToggleInspector={() => void ui.toggleInspector()}
+              reviewButtonId={REVIEW_TOGGLE_ID}
             />
 
             <section className={styles.threadViewport}>
@@ -550,6 +560,8 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
       ) : null}
       {inspectorVisible ? (
         <section
+          id={REVIEW_PANEL_ID}
+          tabIndex={-1}
           className={styles.reviewPane}
           aria-label={t("app.reviewPanel", "Review panel")}
         >
