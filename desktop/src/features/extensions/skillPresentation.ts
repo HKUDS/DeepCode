@@ -1,5 +1,6 @@
 import type { TFunction } from "i18next";
 
+import { configScopeLabel } from "../../app/configScope";
 import type { SkillInfo } from "../../generated/app-server";
 
 const SOURCE_FOLDERS: Record<SkillInfo["sourceRoot"], string> = {
@@ -21,11 +22,9 @@ export function skillOriginLabel(skill: SkillInfo, t: TFunction): string {
       return skill.originLabel;
     case "local": {
       const scope =
-        skill.scope === "project"
-          ? t("skills.origin.project", "This project")
-          : skill.scope === "user"
-            ? t("skills.origin.user", "User settings")
-            : t("skills.origin.system", "System");
+        skill.scope === "system"
+          ? t("skills.origin.system", "System")
+          : configScopeLabel(skill.scope, t);
       const folder = SOURCE_FOLDERS[skill.sourceRoot];
       return folder ? `${scope} · ${folder}` : scope;
     }

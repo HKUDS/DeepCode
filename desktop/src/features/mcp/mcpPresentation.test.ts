@@ -27,7 +27,7 @@ const AUTH = Object.keys({
 } satisfies Record<Server["authState"], 1>) as Server["authState"][];
 const APPROVALS = Object.keys({ auto: 1, prompt: 1, writes: 1, approve: 1 } satisfies Record<Server["approvalMode"], 1>) as Server["approvalMode"][];
 const RUNTIME = Object.keys({
-  stopped: 1, connecting: 1, tested: 1, connected: 1, failed: 1,
+  stopped: 1, connecting: 1, deferred: 1, tested: 1, connected: 1, failed: 1,
 } satisfies Record<Server["runtimeState"], 1>) as Server["runtimeState"][];
 
 function server(overrides: Partial<Server>): Server {
@@ -43,7 +43,7 @@ function server(overrides: Partial<Server>): Server {
 }
 
 // Names and protocols stay as they are.
-const KEPT = new Set(["HTTP", "SSE", "API", "DeepCode"]);
+const KEPT = new Set(["HTTP", "SSE", "API", "MCP", "DeepCode"]);
 const english = (text: string) => (text.match(/[A-Za-z]{2,}/g) ?? []).filter((w) => !KEPT.has(w));
 
 beforeEach(() => {
@@ -66,7 +66,7 @@ it("says every MCP state in Chinese, not as its raw value", () => {
     ...RUNTIME.filter((value) => value !== "failed").map((value) =>
       mcpRuntimeText(server({ runtimeState: value }), t),
     ),
-    ...["configured", "disabled", "missing_credentials"].map((value) =>
+    ...["configured", "disabled", "blocked", "missing_credentials"].map((value) =>
       mcpConfigurationText(server({ configurationState: value as Server["configurationState"] }), t),
     ),
     ...["browser", "docs", "web", "api", "design", "productivity", "code", "database"].map(
@@ -83,6 +83,15 @@ it("keeps the service's words where they name the problem", () => {
     "Configured command is not on PATH",
   );
   expect(mcpCategoryLabel("robotics", t)).toBe("robotics");
+  // An invalid configuration can name a transport that does not exist.
+  expect(mcpTransportLabel("http", t)).toBe("http");
+});
+
+it("shows a runtime state the protocol does not know instead of nothing", () => {
+  const t = i18n.t.bind(i18n);
+  const unknown = server({ runtimeState: "warming" as Server["runtimeState"], runtimeMessage: "Warming" });
+  expect(mcpStatusLabel(unknown, t)).toBe("warming");
+  expect(mcpRuntimeText(unknown, t)).toBe("Warming");
 });
 
 it("says that auto and approve add no checks over the Session's access", () => {

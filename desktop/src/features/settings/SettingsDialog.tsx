@@ -16,6 +16,7 @@ import type {
   Project,
   SettingsSnapshot,
 } from "../../generated/app-server";
+import { configScopeLabel } from "../../app/configScope";
 import { Dialog } from "../../components/Dialog";
 import type { ClientRuntime } from "../../rpc/contracts";
 import {
@@ -114,9 +115,9 @@ export function SettingsDialog({
                 setScope(event.target.value as ConfigScope)
               }
             >
-              <option value="user">{t("settings.scope.user", "User config")}</option>
+              <option value="user">{configScopeLabel("user", t)}</option>
               <option value="project" disabled={!canWriteProject}>
-                {t("settings.scope.project", "Selected project")}
+                {configScopeLabel("project", t)}
               </option>
             </select>
           </label>

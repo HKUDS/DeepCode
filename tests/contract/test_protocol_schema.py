@@ -382,3 +382,39 @@ def test_automation_transport_contract_exposes_p0_run_identity() -> None:
     assert "offset?: number;" in generated
     assert "hasMore: boolean;" in generated
     assert "nextOffset: number | null;" in generated
+
+
+def test_every_mcp_runtime_state_the_service_reports_is_in_the_schema() -> None:
+    """The service maps a few runtime states and passes the rest through.
+
+    "deferred" (a server that starts on first use) was passed through without
+    being in the schema, so typed clients showed nothing for it.
+    """
+    from types import SimpleNamespace
+
+    from core.application.mcp_service import McpService
+    from core.mcp.runtime import McpServerRuntimeStatus
+
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    declared = set(
+        schema["$defs"]["McpServerInfo"]["properties"]["runtimeState"]["enum"]
+    )
+    reported = []
+    service = SimpleNamespace(
+        _set_runtime=lambda _root, _id, snapshot, publish: reported.append(
+            snapshot.state
+        ),
+        _publish_change=lambda: None,
+    )
+    # Every state core/mcp/runtime.py publishes.
+    runtime_states = ["configured", "starting", "deferred", "ready", "failed", "closed"]
+    McpService.publish_runtime_status(
+        service,
+        "/tmp/workspace",
+        [
+            McpServerRuntimeStatus("s", "s", "user", state, 0)
+            for state in runtime_states
+        ],
+    )
+
+    assert set(reported) <= declared

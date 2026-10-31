@@ -103,7 +103,7 @@ export function DiagnosticsCard({
               value={`${diagnostics.diagnostics.sessionCount} · ${diagnostics.diagnostics.sessionStorePath}`}
             />
             <Diagnostic
-              label={t("settings.diagnostics.database", "Desktop DB")}
+              label={t("settings.diagnostics.database", "Database")}
               value={t(
                 "settings.diagnostics.schema",
                 "schema {{version}} · {{path}}",

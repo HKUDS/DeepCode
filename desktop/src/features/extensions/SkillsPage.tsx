@@ -11,6 +11,7 @@ import { confirmAction } from "../../platform/confirmAction";
 import type { ClientRuntime } from "../../rpc/contracts";
 import styles from "../management/ManagementWorkspace.module.css";
 import { MarkdownContent } from "../thread/MarkdownContent";
+import { configScopeLabel } from "../../app/configScope";
 import { skillOriginLabel, skillStatusLabel } from "./skillPresentation";
 import { useSkillManagement } from "./useSkillManagement";
 
@@ -77,9 +78,9 @@ export function SkillsPage({ runtime, project, onCreateSkill }: SkillsPageProps)
               onChange={(event) => setScope(event.target.value as ConfigScope)}
             >
               <option value="project">
-                {t("skills.scopeProject", "This project")}
+                {configScopeLabel("project", t)}
               </option>
-              <option value="user">{t("skills.scopeUser", "User settings")}</option>
+              <option value="user">{configScopeLabel("user", t)}</option>
             </select>
           </label>
           <button

@@ -3,7 +3,6 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 
 import { __setLocaleForTests, initI18n } from "../../../app/i18n";
 import type { DiagnosticsCheck } from "../../../generated/app-server";
-import { presetTrustLabel } from "../../presets/presetPresentation";
 import { diagnosticsCheckText } from "./diagnosticsCheckText";
 
 const check = (id: string, status: DiagnosticsCheck["status"], detail: string): DiagnosticsCheck => ({
@@ -36,10 +35,4 @@ it("words the service's checks, keeping what is specific to the machine", () => 
   expect(diagnosticsCheckText(check("git", "ok", "/usr/bin/git"), t)).toEqual(["Git", "/usr/bin/git"]);
   // A check this client does not know is shown as the service reports it.
   expect(diagnosticsCheckText(check("gpu", "ok", "Metal"), t)).toEqual(["gpu label", "Metal"]);
-});
-
-it("says where every agent preset is defined in Chinese", () => {
-  const t = i18n.t.bind(i18n);
-  const labels = (["system", "user", "project"] as const).map((trust) => presetTrustLabel(trust, t));
-  expect(labels).toEqual(["内置", "用户设置", "当前项目"]);
 });

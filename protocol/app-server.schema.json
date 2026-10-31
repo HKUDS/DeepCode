@@ -3401,6 +3401,7 @@
           "enum": [
             "stopped",
             "connecting",
+            "deferred",
             "tested",
             "connected",
             "failed"

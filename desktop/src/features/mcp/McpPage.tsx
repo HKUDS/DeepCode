@@ -25,6 +25,7 @@ import type {
   McpServerInfo,
   Project,
 } from "../../generated/app-server";
+import { configScopeLabel } from "../../app/configScope";
 import { confirmAction } from "../../platform/confirmAction";
 import type { ClientRuntime } from "../../rpc/contracts";
 import styles from "../management/ManagementWorkspace.module.css";
@@ -195,7 +196,9 @@ export function McpPage({
       urlParamEnv: mapLines(server.envUrlParams),
       enabledTools: server.enabledTools?.join(", ") ?? "",
       disabledTools: server.disabledTools.join(", "),
-      approvalMode: server.approvalMode,
+      // "approve" adds no checks, exactly like "auto" (core/harness/permissions.py);
+      // the editor offers the one name for both.
+      approvalMode: server.approvalMode === "approve" ? "auto" : server.approvalMode,
       startupTimeout: String(server.startupTimeoutSeconds),
       toolTimeout: String(server.toolTimeoutSeconds),
       required: server.required,
@@ -487,9 +490,9 @@ export function McpPage({
         </header>
         <div className={styles.formGrid}>
           <Field label={t("mcp.form.name", "Name")}><input value={draft.name} onChange={(event) => update(setDraft, "name", event.target.value)} /></Field>
-          <Field label={t("mcp.form.scope", "Scope")}><select value={draft.scope} onChange={(event) => update(setDraft, "scope", event.target.value as ConfigScope)}><option value="user">{t("mcp.form.scopeUser", "User")}</option><option value="project" disabled={!canUseProjectScope}>{t("mcp.form.scopeProject", "This project")}</option></select></Field>
-          <Field label={t("mcp.form.transport", "Transport")}><select value={draft.transport} onChange={(event) => update(setDraft, "transport", event.target.value as Transport)}><option value="stdio">{t("mcp.form.transportStdio", "Local stdio")}</option><option value="streamableHttp">Streamable HTTP</option><option value="sse">SSE</option></select></Field>
-          <Field label={t("mcp.form.approval", "Approval")}><select value={draft.approvalMode} onChange={(event) => update(setDraft, "approvalMode", event.target.value as Draft["approvalMode"])}><option value="writes">{t("mcp.form.approvalWrites", "Ask for writes")}</option><option value="prompt">{t("mcp.form.approvalPrompt", "Always ask")}</option><option value="auto">{t("mcp.form.approvalAuto", "Use global policy")}</option><option value="approve">{t("mcp.form.approvalApprove", "Approved when globally allowed")}</option></select></Field>
+          <Field label={t("mcp.form.scope", "Scope")}><select value={draft.scope} onChange={(event) => update(setDraft, "scope", event.target.value as ConfigScope)}><option value="user">{configScopeLabel("user", t)}</option><option value="project" disabled={!canUseProjectScope}>{configScopeLabel("project", t)}</option></select></Field>
+          <Field label={t("mcp.form.transport", "Transport")}><select value={draft.transport} onChange={(event) => update(setDraft, "transport", event.target.value as Transport)}><option value="stdio">{mcpTransportLabel("stdio", t)}</option><option value="streamableHttp">{mcpTransportLabel("streamableHttp", t)}</option><option value="sse">{mcpTransportLabel("sse", t)}</option></select></Field>
+          <Field label={t("mcp.form.approval", "Approval")}><select value={draft.approvalMode} onChange={(event) => update(setDraft, "approvalMode", event.target.value as Draft["approvalMode"])}><option value="writes">{mcpApprovalLabel("writes", t)}</option><option value="prompt">{mcpApprovalLabel("prompt", t)}</option><option value="auto">{mcpApprovalLabel("auto", t)}</option></select></Field>
           {draft.transport === "stdio" ? (
             <>
               <Field label={t("mcp.form.command", "Command")} wide><input value={draft.command} onChange={(event) => update(setDraft, "command", event.target.value)} placeholder={t("mcp.form.commandPlaceholder", "Executable or absolute path")} /></Field>
