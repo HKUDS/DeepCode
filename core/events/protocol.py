@@ -364,18 +364,32 @@ class ToolCompleted:
     call_id: str
     name: str
     is_error: bool
-    # A short preview of the tool's result (first lines, truncated), so a
-    # frontend can show "what came back" on an expandable card without the
-    # full — possibly huge — payload. Empty when the result was empty.
+    # A short preview of the tool's result (its start and its end, see
+    # ``summarize_result``), so a frontend can show "what came back" on an
+    # expandable card without the full — possibly huge — payload. Empty when
+    # the result was empty.
     result_preview: str = ""
+    # The runner refused it before it ran: a permission decision (a rule, a
+    # PermissionRequest hook, the user, or no approver in a non-interactive
+    # run), a PreToolUse hook, or a tool outside this turn's set. It is an
+    # error for the model (``is_error`` stays true), but no failure.
+    denied: bool = False
     type: str = field(default="tool_completed", init=False)
+
+
+# The line that stands for the middle a long result preview leaves out.
+RESULT_ELISION = "…"
 
 
 def summarize_result(result: Any, limit: int = 400) -> str:
     """A compact, single-block preview of a tool result for display.
 
-    Collapses to the leading ``limit`` characters with an elision marker.
-    Pure and defensive: any value becomes a string, never raises.
+    A result longer than ``limit`` characters keeps its start and its end,
+    joined by a line holding only ``…``: a command's summary or its error is
+    usually at the end. Each end is cut at a line break when one is near;
+    where it is cut mid-line it says so with ``…`` there too, so a preview
+    is at most ``limit + 5`` characters. Pure and defensive: any value
+    becomes a string, never raises.
     """
     if isinstance(result, str):
         text = result
@@ -389,9 +403,20 @@ def summarize_result(result: Any, limit: int = 400) -> str:
     else:
         text = str(result)
     text = text.strip()
-    if len(text) > limit:
-        return text[:limit].rstrip() + " …"
-    return text
+    if len(text) <= limit:
+        return text
+    head_size = limit * 3 // 5
+    tail_size = limit - head_size
+    head = text[:head_size]
+    if text[head_size] != "\n":
+        cut = head.rfind("\n")
+        head = head[:cut] if cut > head_size // 2 else head.rstrip() + RESULT_ELISION
+    tail_start = len(text) - tail_size
+    tail = text[tail_start:]
+    if text[tail_start - 1] != "\n":
+        cut = tail.find("\n")
+        tail = tail[cut + 1 :] if 0 <= cut < tail_size // 2 else RESULT_ELISION + tail
+    return f"{head.rstrip()}\n{RESULT_ELISION}\n{tail}"
 
 
 @dataclass(frozen=True)

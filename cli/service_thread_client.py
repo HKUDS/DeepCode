@@ -23,6 +23,7 @@ from cli.service_events import ServiceEventRenderer
 from cli.service_turns import ServiceTurns
 from cli.thread_client import ThreadListing, TurnDelivery, turn_access_summary
 from core.application.errors import ProjectNotTrustedError
+from core.application.views import approval_view
 from core.application.interactive_turn_router import InteractiveTurnRouter
 from core.domain.approval import Approval, ApprovalStatus
 from core.domain.common import new_id
@@ -76,6 +77,11 @@ class ServiceThreadClient:
         self._event_sink = event_sink
         self._domain_task = None
         self._renderer = ServiceEventRenderer()
+        # What a running Turn had shown before this client selected its
+        # Session, rendered before anything newer: its events, then the
+        # approvals it waits on.
+        self._joined = []
+        self._joined_approvals = []
         self._domain_sink = None
         self._selection_generation = 0
         self._sequence = 0
@@ -215,11 +221,32 @@ class ServiceThreadClient:
         sequence = self.rpc.call("event/replay", {"threadId": thread.id, "limit": 1})[
             "headSequence"
         ]
-        renderer = self._fresh_renderer(thread.id)
+        # Read after the head: an event between the two is replayed, and the
+        # renderer skips what the snapshot already showed.
+        running = self._running_turn(thread.id)
+        renderer = ServiceEventRenderer()
+        joined, approvals = [], []
+        if running is not None:
+            joined = renderer.join(running.turn.id, running.items)
+            approvals = [
+                DomainEvent(
+                    sequence=max(1, sequence),
+                    type="approval.requested",
+                    thread_id=thread.id,
+                    turn_id=running.turn.id,
+                    payload={"approval": approval_view(approval)},
+                )
+                for approval in running.approvals
+                if approval.status is ApprovalStatus.PENDING
+            ]
+        # Everything that can fail is done: switch in one step.
         self.thread, self.project = thread, project
         self.execution_profile, self._security = execution, security
         self._sequence, self._renderer = sequence, renderer
+        self._joined, self._joined_approvals = joined, approvals
         self._selection_generation += 1
+        if running is not None:
+            self._hand_to_pump(_REPLAY)  # wakes the pump to show it now
 
     def access_summary(self):
         override = self.thread.access_preset_override
@@ -495,20 +522,31 @@ class ServiceThreadClient:
                 resynced = True
             self._sequence = event.sequence
 
-    def _fresh_renderer(self, thread_id):
-        """A renderer that follows whatever Turn is running right now."""
+    def _running_turn(self, thread_id):
+        """The Session's running Turn as it stands now, or None."""
 
-        renderer = ServiceEventRenderer()
         try:
             active = self.turns.executing_for_thread(thread_id)
-            if active:
-                renderer.seed(self.turns.read(active.id).items, turn_id=active.id)
+            return self.turns.read(active.id) if active else None
         except (RuntimeError, OSError):
-            logger.exception("could not read the running Turn while resyncing")
-        return renderer
+            logger.exception("could not read the running Turn")
+            return None
+
+    def _show_joined(self):
+        joined, approvals = self._joined, self._joined_approvals
+        self._joined, self._joined_approvals = [], []
+        self._emit(joined)
+        for approval in approvals:
+            if self._domain_sink:
+                self._domain_sink(approval)
 
     def _resync(self, reason, *, announce=True):
-        self._renderer = self._fresh_renderer(self.thread.id)
+        # The screen already has the running Turn's text so far: follow it
+        # from here without showing that again.
+        self._renderer = ServiceEventRenderer()
+        running = self._running_turn(self.thread.id)
+        if running is not None:
+            self._renderer.seed(running.items, turn_id=running.turn.id)
         if announce:
             self._notify_connection(
                 f"The display was resynchronized with the service: {reason}."
@@ -521,6 +559,7 @@ class ServiceThreadClient:
     def drain_events(self):
         """Render what happened since the last call (for callers without the pump)."""
 
+        self._show_joined()
         through = None
         while True:
             params = {"threadId": self.thread.id, "after": self._sequence, "limit": 100}
@@ -538,6 +577,7 @@ class ServiceThreadClient:
                 self._emit(self._renderer.convert_streamed(items))
 
     async def drain_events_async(self):
+        self._show_joined()
         through = None
         generation = self._selection_generation
         while True:
@@ -608,6 +648,7 @@ class ServiceThreadClient:
     def _render_pushed(self, pushed):
         """Render pushes in order; returns the Turns whose stream missed a delta."""
 
+        self._show_joined()
         gaps = set()
         for value in pushed:
             if "eventId" in value:

@@ -9,6 +9,7 @@ item it has shown.
 from __future__ import annotations
 
 from cli.rpc_models import from_view
+from core.application.views import item_view
 from core.domain.event import DomainEvent
 from core.events import (
     AgentMessage,
@@ -66,6 +67,22 @@ class ServiceEventRenderer:
             # Followed from here on: what streamed before is not shown again.
             for channel, text in _channel_texts(item.kind.value, item.payload):
                 self._shown[item.id, channel] = len(text.encode())
+
+    def join(self, turn_id, items):
+        """Follow a Turn that was running before this client attached.
+
+        Unlike :meth:`seed`, nothing of it is on screen yet: the Turn starts,
+        and each item still in progress is shown as it stands (the text
+        streamed so far, a running tool), so live deltas continue it rather
+        than its completion printing the whole text again.
+        """
+
+        self._started.add(turn_id)
+        messages = [TurnStarted()]
+        for item in items:
+            if item.status.value in {"in_progress", "pending"}:
+                messages += self._item_messages(turn_id, item_view(item), created=True)
+        return _events(f"join:{turn_id}", messages)
 
     def _remember(self, item_id, kind, message_id, turn_id):
         if len(self._items) >= 2048 and item_id not in self._items:
@@ -211,13 +228,23 @@ class ServiceEventRenderer:
             return []
         if event.type not in {"item.created", "item.updated"}:
             return []
-        item = payload["item"]
+        return self._item_messages(
+            event.turn_id, payload["item"], created=event.type == "item.created"
+        )
+
+    def _item_messages(self, turn_id, item, *, created):
+        """What one item's creation or update shows; ``item`` is its view."""
+
+        if created and item["id"] in self._items:
+            # Already followed from a snapshot read after this event (join or
+            # seed): what it carried is on screen, and resetting what was
+            # shown would print the text again.
+            return []
         kind, data = item["kind"], item["payload"]
         identity = data.get("messageId") or item["id"]
         running = item["status"] in {"in_progress", "pending"}
-        created = event.type == "item.created"
         if running:
-            self._remember(item["id"], kind, identity, event.turn_id)
+            self._remember(item["id"], kind, identity, turn_id)
             if created:
                 # Its text so far is rendered below; live deltas continue it.
                 for channel, text in _channel_texts(kind, data):
@@ -229,7 +256,7 @@ class ServiceEventRenderer:
             for value in data.get("skills", []):
                 if not isinstance(value, dict):
                     continue
-                key = (event.turn_id, value["skillId"])
+                key = (turn_id, value["skillId"])
                 if key not in self._skills:
                     self._skills.add(key)
                     loaded.append(
@@ -315,6 +342,8 @@ class ServiceEventRenderer:
                         data["name"],
                         data.get("isError", item["status"] != "completed"),
                         preview,
+                        # Only a refusal declines a tool item.
+                        denied=item["status"] == "declined",
                     )
                 ]
         if kind == "error":
@@ -322,8 +351,8 @@ class ServiceEventRenderer:
             if data.get("severity") == "warning":
                 # Not the Turn's failure: its reason must still be shown.
                 return [ErrorEvent(message, warning=True)]
-            if event.turn_id is not None:
-                self._turns_with_error_items.add(event.turn_id)
+            if turn_id is not None:
+                self._turns_with_error_items.add(turn_id)
             return [ErrorEvent(message)]
         return []
 

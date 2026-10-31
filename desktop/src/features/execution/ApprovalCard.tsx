@@ -8,9 +8,11 @@ import {
 import { useTranslation } from "react-i18next";
 
 import type { Approval, ApprovalDecision } from "../../generated/app-server";
+import { approvalCategoryLabel } from "./itemPresentation";
 import styles from "./ApprovalCard.module.css";
 
 interface ApprovalCardProps {
+  /** A pending approval: once answered, its row says the outcome. */
   approval: Approval;
   busy: boolean;
   onRespond(approvalId: string, decision: ApprovalDecision): void;
@@ -31,7 +33,7 @@ function sessionLabel(approval: Approval, t: (key: string, defaultValue: string,
   const target =
     typeof scope === "object" && scope !== null && !Array.isArray(scope) ? scope.target : undefined;
   if (typeof target === "string" && target) {
-    return t("approval.allowSessionScope", "Always allow {{target}} this session", { target });
+    return t("approval.allowSessionScope", "Always allow {{target}} this Session", { target });
   }
   return t("approval.allowSession", "Allow for Session");
 }
@@ -75,13 +77,6 @@ function CategoryIcon({ category }: { category: Approval["category"] }) {
 
 export function ApprovalCard({ approval, busy, onRespond }: ApprovalCardProps) {
   const { t } = useTranslation();
-  if (approval.status !== "pending") {
-    return (
-      <p className={styles.resolution}>
-        {t("approval.decision", "Decision: {{status}}", { status: approval.status.replaceAll("_", " ") })}
-      </p>
-    );
-  }
   const argumentsPreview = requestArguments(approval);
   return (
     <div className={styles.card} aria-label={t("approval.label", "Approval required")}>
@@ -89,7 +84,7 @@ export function ApprovalCard({ approval, busy, onRespond }: ApprovalCardProps) {
         <CategoryIcon category={approval.category} />
         <span>
           <strong>{requestTool(approval, t)}</strong>
-          <small>{approval.category.replaceAll("_", " ")}</small>
+          <small>{approvalCategoryLabel(approval.category, t)}</small>
         </span>
       </div>
       <p>{requestDetail(approval, t)}</p>

@@ -67,9 +67,10 @@
   color: var(--text-tertiary);
 }
 
-@media (max-width: 720px) {
-  .notice {
-    right: 8px;
-    width: calc(100vw - 16px);
-  }
+/* In the narrow layout the notice spans the workspace, below the top band
+   that holds the menu button. */
+:global([data-layout="narrow"]) .notice {
+  top: 52px;
+  right: 8px;
+  width: calc(100vw - 16px);
 }

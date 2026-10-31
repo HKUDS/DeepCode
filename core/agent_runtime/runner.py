@@ -49,7 +49,7 @@ from core.agent_runtime.evidence_ledger import (
     DEFAULT_NO_PROGRESS_THRESHOLD,
     EvidenceLedger,
 )
-from core.agent_runtime.hook import AgentHook, AgentHookContext
+from core.agent_runtime.hook import AgentHook, AgentHookContext, ToolEvent
 from core.agent_runtime.microcompact import (
     MicrocompactPolicy,
     apply_microcompact as _apply_microcompact,
@@ -69,6 +69,7 @@ from core.agent_runtime.runtime import (
     repeated_external_lookup_error,
 )
 from core.agent_runtime.tools.base import ToolResult
+from core.agent_runtime.tools.model_notes import ERROR_HINT, with_hook_context
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.agent_runtime.tools.semantic_hint import build_miss_message
 from core.providers.base import (
@@ -142,6 +143,19 @@ def _build_precompact_checkpoint(
     if not parts:
         return None
     return prefix + "\n".join(parts)
+
+
+@dataclass(frozen=True, slots=True)
+class _Refusal:
+    """Why a tool call may not run.
+
+    ``errored`` when the permission check or the approval request itself
+    broke: the call is refused all the same (fail-closed), but that is a
+    fault, not a decision.
+    """
+
+    reason: str
+    errored: bool = False
 
 
 @dataclass(slots=True)
@@ -335,7 +349,7 @@ class AgentRunResult:
     usage: dict[str, int] = field(default_factory=dict)
     stop_reason: str = "completed"
     error: str | None = None
-    tool_events: list[dict[str, str]] = field(default_factory=list)
+    tool_events: list[ToolEvent] = field(default_factory=list)
     had_injections: bool = False
 
 
@@ -518,7 +532,7 @@ class AgentRunner:
         usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}
         error: str | None = None
         stop_reason = "completed"
-        tool_events: list[dict[str, str]] = []
+        tool_events: list[ToolEvent] = []
         external_lookup_counts: dict[str, int] = {}
         repeat_tracker = (
             RepeatCallTracker(spec.repeat_call_thresholds)
@@ -1223,9 +1237,9 @@ class AgentRunner:
         spec: AgentRunSpec,
         tool_calls: list[ToolCallRequest],
         external_lookup_counts: dict[str, int],
-    ) -> tuple[list[Any], list[dict[str, str]], BaseException | None]:
+    ) -> tuple[list[Any], list[ToolEvent], BaseException | None]:
         batches = self._partition_tool_batches(spec, tool_calls)
-        tool_results: list[tuple[Any, dict[str, str], BaseException | None]] = []
+        tool_results: list[tuple[Any, ToolEvent, BaseException | None]] = []
         for batch in batches:
             if spec.concurrent_tools and len(batch) > 1:
                 tool_results.extend(
@@ -1243,7 +1257,7 @@ class AgentRunner:
                     )
 
         results: list[Any] = []
-        events: list[dict[str, str]] = []
+        events: list[ToolEvent] = []
         fatal_error: BaseException | None = None
         for result, event, error in tool_results:
             results.append(result)
@@ -1257,8 +1271,7 @@ class AgentRunner:
         spec: AgentRunSpec,
         tool_call: ToolCallRequest,
         external_lookup_counts: dict[str, int],
-    ) -> tuple[Any, dict[str, str], BaseException | None]:
-        _HINT = "\n\n[Analyze the error above and try a different approach.]"
+    ) -> tuple[Any, ToolEvent, BaseException | None]:
         allowed = spec.allowed_tool_names()
         if allowed is not None and tool_call.name not in allowed:
             visible = [
@@ -1277,7 +1290,7 @@ class AgentRunner:
                     f"Available: {available}"
                 )
                 return (
-                    message + _HINT,
+                    message + ERROR_HINT,
                     {
                         "name": tool_call.name,
                         "status": "error",
@@ -1294,7 +1307,7 @@ class AgentRunner:
                 f"Available: {available}"
             )
             return (
-                message + _HINT,
+                message + ERROR_HINT,
                 {
                     "name": tool_call.name,
                     "status": "denied",
@@ -1314,8 +1327,8 @@ class AgentRunner:
                 "detail": "repeated external lookup blocked",
             }
             if spec.fail_on_tool_error:
-                return lookup_error + _HINT, event, RuntimeError(lookup_error)
-            return lookup_error + _HINT, event, None
+                return lookup_error + ERROR_HINT, event, RuntimeError(lookup_error)
+            return lookup_error + ERROR_HINT, event, None
 
         # PreToolUse hook (C3). Fires before the permission gate — it may block
         # the call (errors-as-data, tool never runs), rewrite its arguments, or
@@ -1334,7 +1347,7 @@ class AgentRunner:
                         "detail": reason.replace("\n", " ").strip()[:120],
                     }
                     return (
-                        f"Error: blocked by PreToolUse hook: {reason}" + _HINT,
+                        f"Error: blocked by PreToolUse hook: {reason}" + ERROR_HINT,
                         event,
                         None,
                     )
@@ -1346,15 +1359,18 @@ class AgentRunner:
         # Permission gate (P1 security base). Denials and unresolved asks
         # become errors-as-data results the model can read and react to,
         # never exceptions — a blocked tool must not abort the run.
-        denial = await self._check_permission(spec, tool_call)
-        if denial is not None:
+        refusal = await self._check_permission(spec, tool_call)
+        if refusal is not None:
             event = {
                 "name": tool_call.name,
-                "status": "denied",
-                "detail": denial.replace("\n", " ").strip()[:120],
+                # A check that broke is a fault to see, not a decision.
+                "status": "error" if refusal.errored else "denied",
+                "detail": refusal.reason.replace("\n", " ").strip()[:120],
             }
             result = self._compose_hook_context(
-                f"Error: permission denied: {denial}" + _HINT, pre_contexts
+                f"Error: permission denied: {refusal.reason}" + ERROR_HINT,
+                pre_contexts,
+                event,
             )
             return result, event, None
 
@@ -1375,7 +1391,9 @@ class AgentRunner:
             }
             # Tool never ran (bad args) — surface pre-hook context, no PostToolUse.
             return (
-                self._compose_hook_context(prep_error + _HINT, pre_contexts),
+                self._compose_hook_context(
+                    prep_error + ERROR_HINT, pre_contexts, event
+                ),
                 event,
                 RuntimeError(prep_error) if spec.fail_on_tool_error else None,
             )
@@ -1419,7 +1437,7 @@ class AgentRunner:
                         spec,
                         tool_call,
                         ToolResult(
-                            message + _HINT,
+                            message + ERROR_HINT,
                             is_error=True,
                             metadata={
                                 "error_code": "TOOL_TIMEOUT",
@@ -1461,7 +1479,7 @@ class AgentRunner:
             return await self._finish_tool(
                 spec,
                 tool_call,
-                result + _HINT,
+                result + ERROR_HINT,
                 event,
                 RuntimeError(result) if spec.fail_on_tool_error else None,
                 pre_contexts,
@@ -1499,10 +1517,10 @@ class AgentRunner:
         spec: AgentRunSpec,
         tool_call: ToolCallRequest,
         result: Any,
-        event: dict[str, str],
+        event: ToolEvent,
         error: BaseException | None,
         pre_contexts: list[str],
-    ) -> tuple[Any, dict[str, str], BaseException | None]:
+    ) -> tuple[Any, ToolEvent, BaseException | None]:
         """Apply PostToolUse (the tool ran) and fold hook context into the result."""
         contexts = list(pre_contexts)
         if spec.post_tool_hook is not None:
@@ -1515,7 +1533,7 @@ class AgentRunner:
                     reason = getattr(post, "block_reason", None)
                     if reason:
                         contexts.append(f"PostToolUse hook feedback: {reason}")
-        return self._compose_hook_context(result, contexts), event, error
+        return self._compose_hook_context(result, contexts, event), event, error
 
     @staticmethod
     async def _call_tool_hook(hook: Any, *args: Any) -> Any:
@@ -1547,12 +1565,35 @@ class AgentRunner:
         return None
 
     @staticmethod
-    def _compose_hook_context(result: Any, contexts: list[str]) -> Any:
-        """Append accumulated hook context to a tool result the model will read."""
+    def _compose_hook_context(
+        result: Any, contexts: list[str], event: ToolEvent
+    ) -> Any:
+        """Append accumulated hook context to a tool result the model will read.
+
+        A structured value is first the JSON the model reads anyway, and a list
+        of content blocks gets the context as one more text block. For text,
+        ``event`` records where the result ends, so a display can leave the
+        context out without searching the text for it.
+        """
         if not contexts:
             return result
-        joined = "\n\n".join(f"[hook] {c}" for c in contexts)
-        content = f"{result}\n\n{joined}"
+        # What the model would read without the context: never "None". An
+        # empty ToolResult keeps its wrapper, and with it is_error.
+        filled = ensure_nonempty_tool_result(
+            event["name"], encode_structured_tool_result(result)
+        )
+        if isinstance(result, ToolResult) and not isinstance(filled, ToolResult):
+            filled = result.with_content(filled)
+        result = filled
+        if isinstance(result, dict):  # one content block
+            result = [result]
+        if isinstance(result, list):
+            event["hook_context_at"] = len(result)
+            context = with_hook_context("", contexts).lstrip()
+            return [*result, {"type": "text", "text": context}]
+        text = str(result)
+        event["hook_context_at"] = len(text)
+        content = with_hook_context(text, contexts)
         if isinstance(result, ToolResult):
             return result.with_content(content)
         return content
@@ -1565,8 +1606,8 @@ class AgentRunner:
         self,
         spec: AgentRunSpec,
         tool_call: ToolCallRequest,
-    ) -> str | None:
-        """Return a denial reason, or ``None`` if the call is permitted.
+    ) -> _Refusal | None:
+        """Return why the call may not run, or ``None`` if it is permitted.
 
         ``allow`` → ``None``. ``deny`` → its reason. ``ask`` → resolved via
         ``approval_callback`` (approved → ``None``, rejected → reason);
@@ -1586,13 +1627,13 @@ class AgentRunner:
                 "permission_checker failed for {}; denying by default",
                 tool_call.name,
             )
-            return "permission check errored (fail-closed)"
+            return _Refusal("permission check errored (fail-closed)", errored=True)
 
         value = self._decision_value(decision)
         if value == "allow":
             return None
         if value == "deny":
-            return reason or "denied by policy"
+            return _Refusal(reason or "denied by policy")
 
         # ask — a PermissionRequest hook may resolve it before the human is
         # prompted: a hook "deny" blocks, "allow" permits, no verdict falls
@@ -1603,7 +1644,7 @@ class AgentRunner:
             )
             if verdict is not None:
                 if getattr(verdict, "decision", None) == "deny":
-                    return (
+                    return _Refusal(
                         getattr(verdict, "message", None) or reason or "denied by hook"
                     )
                 if getattr(verdict, "decision", None) == "allow":
@@ -1611,7 +1652,7 @@ class AgentRunner:
 
         approver = spec.approval_callback
         if approver is None:
-            return (
+            return _Refusal(
                 (reason or "requires confirmation")
                 + " — no approver attached (non-interactive run), so this "
                 "action is blocked. Choose a path/command inside the allowed "
@@ -1623,10 +1664,10 @@ class AgentRunner:
                 approved = await approved
         except Exception:
             logger.exception("approval_callback failed for {}", tool_call.name)
-            return "approval request errored (fail-closed)"
+            return _Refusal("approval request errored (fail-closed)", errored=True)
         if approved:
             return None
-        return f"user rejected: {reason or 'action not approved'}"
+        return _Refusal(f"user rejected: {reason or 'action not approved'}")
 
     async def _emit_checkpoint(
         self,

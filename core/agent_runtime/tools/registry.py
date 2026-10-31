@@ -7,6 +7,7 @@ from typing import Any
 
 from core.agent_runtime.tools.base import Tool
 from core.agent_runtime.tools.semantic_hint import build_miss_message
+from core.agent_runtime.tools.model_notes import ERROR_HINT
 
 
 class ToolRegistry:
@@ -107,19 +108,18 @@ class ToolRegistry:
         return tool, cast_params, None
 
     async def execute(self, name: str, params: dict[str, Any]) -> Any:
-        _HINT = "\n\n[Analyze the error above and try a different approach.]"
         tool, params, error = self.prepare_call(name, params)
         if error:
-            return error + _HINT
+            return error + ERROR_HINT
 
         try:
             assert tool is not None
             result = await tool.execute(**params)
             if isinstance(result, str) and result.startswith("Error"):
-                return result + _HINT
+                return result + ERROR_HINT
             return result
         except Exception as e:
-            return f"Error executing {name}: {str(e)}" + _HINT
+            return f"Error executing {name}: {str(e)}" + ERROR_HINT
 
     @property
     def tool_names(self) -> list[str]:

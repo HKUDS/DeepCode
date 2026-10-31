@@ -6,6 +6,7 @@ import {
   type AnchorHTMLAttributes,
   type ReactNode,
 } from "react";
+import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -23,6 +24,7 @@ interface CodeBlockProps {
 }
 
 function CodeBlock({ code, language }: CodeBlockProps) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const darkMode = useSystemDarkMode();
 
@@ -42,9 +44,9 @@ function CodeBlock({ code, language }: CodeBlockProps) {
     <figure className={styles.codeBlock}>
       <figcaption>
         <span>{language || "text"}</span>
-        <button type="button" onClick={() => void copy()} aria-label="Copy code">
+        <button type="button" onClick={() => void copy()} aria-label={t("markdown.copyCode", "Copy code")}>
           {copied ? <Check size={14} /> : <Copy size={14} />}
-          {copied ? "Copied" : "Copy"}
+          {copied ? t("markdown.copied", "Copied") : t("markdown.copy", "Copy")}
         </button>
       </figcaption>
       <Highlight

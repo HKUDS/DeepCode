@@ -71,7 +71,9 @@
 .toolbar {
   display: flex;
   min-height: 45px;
-  align-items: center;
+  /* When the controls wrap onto a second line, the send button stays at the
+     end of the last one. */
+  align-items: flex-end;
   justify-content: space-between;
   gap: 12px;
   padding: 5px 9px 8px 14px;
@@ -408,12 +410,22 @@
   text-align: right;
 }
 
+/* The controls wrap onto another line: on one line they were squeezed to
+   "Age… De…" and, on a narrow window, ran under the send button. A wrapping
+   row moves a control down before it shrinks it; one wider than the whole
+   row (a long model name, the access control on a phone) shrinks to the row
+   and ends in "…". */
 .context {
   display: flex;
   min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   overflow: visible;
+}
+
+.context > * {
+  max-width: 100%;
 }
 
 .attachButton,
@@ -547,6 +559,8 @@
 }
 
 .selector select {
+  /* Shrinks on a phone, but never so far that the choice disappears. */
+  min-width: 3em;
   max-width: 180px;
   border: 0;
   outline: 0;
@@ -558,6 +572,7 @@
 }
 
 .selectorCaption {
+  white-space: nowrap;
   color: var(--text-tertiary);
   font: var(--text-micro) var(--font-mono);
   letter-spacing: var(--tracking-wide);
@@ -645,10 +660,6 @@
 @media (max-width: 680px) {
   .region {
     padding-inline: 10px;
-  }
-
-  .context > :nth-child(n + 3) {
-    display: none;
   }
 
   .accessStatusRail {

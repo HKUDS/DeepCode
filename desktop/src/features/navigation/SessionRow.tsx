@@ -14,6 +14,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 
+import { useEscapeLayer } from "../../app/escapeLayer";
 import { Dialog } from "../../components/Dialog";
 import type { Thread } from "../../generated/app-server";
 import styles from "./SessionRow.module.css";
@@ -69,14 +70,9 @@ export function SessionRow({
     return () => document.removeEventListener("pointerdown", closeOnOutsidePress);
   }, [mode]);
 
-  useEffect(() => {
-    if (mode !== "menu" && mode !== "rename") return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMode("closed");
-    };
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [mode]);
+  // On the shared Escape stack, so Escape closes this menu and not also the
+  // drawer or dialog around it.
+  useEscapeLayer(() => setMode("closed"), mode === "menu" || mode === "rename");
 
   const submitRename = async (event: FormEvent) => {
     event.preventDefault();

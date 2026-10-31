@@ -10,13 +10,40 @@
   height: 100%;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scroll-behavior: smooth;
+  /* No smooth scroll-behavior: following the end must land there at once
+     (see ThreadConversation), or its own scroll reads as the user's. */
+}
+
+.conversationScroller:focus-visible {
+  outline: 3px solid var(--signal-soft);
+  outline-offset: -3px;
 }
 
 .conversation {
   width: var(--conversation-width);
   margin: 0 auto;
   padding: 42px 30px calc(var(--composer-clearance, 160px) + 42px);
+}
+
+/* Quiet controls that reveal more of the transcript. */
+.earlierTurns,
+.workGroupAll {
+  color: var(--text-tertiary);
+  font: var(--text-micro) var(--font-mono);
+}
+
+.earlierTurns:hover,
+.workGroupAll:hover {
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+}
+
+.earlierTurns {
+  display: block;
+  margin: 0 auto 28px;
+  padding: 5px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
 }
 
 .turnBlock {
@@ -49,6 +76,61 @@
 .userMessage[data-queued="true"] .userBubble {
   border-style: dashed;
   color: var(--text-secondary);
+}
+
+/* A Goal prompt sits where the user's message would, but quietly:
+   the model's instruction is there for whoever wants to read it. */
+.goalPrompt {
+  max-width: min(660px, 82%);
+  color: var(--text-tertiary);
+}
+
+.goalPrompt > summary {
+  display: flex;
+  width: fit-content;
+  min-height: 26px;
+  margin-left: auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  list-style: none;
+}
+
+.goalPrompt > summary::-webkit-details-marker {
+  display: none;
+}
+
+.goalPrompt > summary:hover {
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+}
+
+.goalPrompt > summary > svg:last-child {
+  transition: transform 150ms ease;
+}
+
+.goalPrompt[open] > summary > svg:last-child {
+  transform: rotate(180deg);
+}
+
+.goalPromptText {
+  margin-top: 8px;
+  padding: 10px 14px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.goalPromptText > small {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-tertiary);
+  font: var(--text-micro) var(--font-mono);
 }
 
 .userSkills {
@@ -343,14 +425,14 @@ div.runStep {
   color: var(--text-primary);
 }
 
-.activityGroup {
+.workGroup {
   overflow: hidden;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--surface-raised) 66%, transparent);
 }
 
-.activityGroup > summary {
+.workGroup > summary {
   display: grid;
   min-height: 42px;
   grid-template-columns: 18px minmax(0, 1fr) 16px;
@@ -362,24 +444,25 @@ div.runStep {
   list-style: none;
 }
 
-.activityGroup > summary::-webkit-details-marker {
+.workGroup > summary::-webkit-details-marker {
   display: none;
 }
 
-.activityGroup > summary:hover {
+.workGroup > summary:hover {
   background: var(--surface-hover);
   color: var(--text-secondary);
 }
 
-.activityGroup > summary > span {
+.workGroup > summary > span {
   display: flex;
   min-width: 0;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
+  gap: 2px 12px;
 }
 
-.activityGroup > summary strong {
+.workGroup > summary strong {
   overflow: hidden;
   color: var(--text-secondary);
   font-size: var(--text-xs);
@@ -388,21 +471,33 @@ div.runStep {
   white-space: nowrap;
 }
 
-.activityGroup > summary small {
-  flex: 0 0 auto;
+.workGroup[data-status="in_progress"] > summary strong {
+  color: var(--text-primary);
+}
+
+.workTallies {
+  display: flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  gap: 2px 10px;
   color: var(--text-tertiary);
   font: var(--text-micro) var(--font-mono);
 }
 
-.activityGroup > summary > svg:last-child {
+.workTallies > [data-failed="true"] {
+  color: var(--danger);
+}
+
+.workGroup > summary > svg:last-child {
   transition: transform 150ms ease;
 }
 
-.activityGroup[open] > summary > svg:last-child {
+.workGroup[open] > summary > svg:last-child {
   transform: rotate(180deg);
 }
 
-.activityGroupItems {
+.workGroupItems {
   position: relative;
   display: grid;
   gap: 2px;
@@ -411,7 +506,29 @@ div.runStep {
   background: color-mix(in srgb, var(--surface-canvas) 64%, transparent);
 }
 
-.activityGroupItems::before {
+/* A Goal's outcome closes the Turn that decided it. */
+.goalOutcome {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--success);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--success-soft) 55%, var(--surface-raised));
+}
+
+.goalOutcome[data-status="blocked"] {
+  border-left-color: var(--attention);
+  background: color-mix(in srgb, var(--attention-soft) 55%, var(--surface-raised));
+}
+
+.workGroupAll {
+  justify-self: start;
+  margin: 2px 0 4px;
+  padding: 3px 8px;
+  border-radius: var(--radius-xs);
+}
+
+.workGroupItems::before {
   position: absolute;
   top: 14px;
   bottom: 14px;
@@ -421,7 +538,7 @@ div.runStep {
   content: "";
 }
 
-.activityGroupItems .runStep::before {
+.workGroupItems .runStep::before {
   left: -16px;
 }
 
@@ -487,14 +604,6 @@ div.runStep {
   font-size: var(--text-2xs);
 }
 
-.runApprovalDecision {
-  display: block;
-  margin: 5px 0 0 23px;
-  color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
-  text-transform: capitalize;
-}
-
 .runError {
   margin: 7px 7px 7px 0;
   padding: 9px 11px;
@@ -541,7 +650,7 @@ div.runStep {
 }
 
 .assistantMessage[data-phase="commentary"] + .activityEntry,
-.assistantMessage[data-phase="commentary"] + .activityGroup {
+.assistantMessage[data-phase="commentary"] + .workGroup {
   margin-top: 1px;
 }
 
@@ -606,10 +715,6 @@ div.runStep {
 
 .conversationFrame[data-plan-active="true"] .jumpToLatest {
   bottom: calc(var(--composer-clearance, 148px) + 50px);
-}
-
-.conversationEnd {
-  height: 1px;
 }
 
 .srOnly {

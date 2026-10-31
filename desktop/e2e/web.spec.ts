@@ -186,7 +186,7 @@ test("packaged browser: project, approval, reconnect, upload, diff and terminal"
   ).toBeVisible();
   // Source-controlled labels make this independent of generated CSS names.
   await page
-    .getByRole("button", { name: /New (thread|session|task)/i })
+    .getByRole("button", { name: /New (session|task)/i })
     .first()
     .click();
   const composer = page
@@ -214,7 +214,7 @@ test("packaged browser: project, approval, reconnect, upload, diff and terminal"
     );
     await composer.press("Enter");
     if (live) {
-      await expect(page.getByLabel("Thread conversation")).toContainText(
+      await expect(page.getByLabel("Conversation")).toContainText(
         "Create arithmetic.py",
       );
       await page.reload();

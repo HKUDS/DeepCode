@@ -1,4 +1,6 @@
-import type { Goal, Turn } from "../../generated/app-server";
+import type { TFunction } from "i18next";
+
+import type { Goal, GoalOutcome, Turn } from "../../generated/app-server";
 
 export type GoalPresentationStatus =
   | "working"
@@ -11,20 +13,32 @@ export type GoalPresentationStatus =
 
 export interface GoalPresentation {
   status: GoalPresentationStatus;
-  label: string;
   linkedTurnCount: number;
   liveTurnId: string | null;
 }
 
-const LABELS: Record<GoalPresentationStatus, string> = {
-  working: "Working",
-  readyToContinue: "Ready to continue",
-  finishing: "Finishing",
-  paused: "Paused",
-  blocked: "Needs input",
-  budget_limited: "Budget reached",
-  complete: "Complete",
-};
+/** A Goal's state, in words. */
+export function goalStatusLabel(
+  status: GoalPresentationStatus,
+  t: TFunction,
+): string {
+  switch (status) {
+    case "working":
+      return t("goal.status.working", "Working");
+    case "readyToContinue":
+      return t("goal.status.readyToContinue", "Ready to continue");
+    case "finishing":
+      return t("goal.status.finishing", "Finishing");
+    case "paused":
+      return t("goal.status.paused", "Paused");
+    case "blocked":
+      return t("goal.status.blocked", "Needs input");
+    case "budget_limited":
+      return t("goal.status.budgetLimited", "Budget reached");
+    case "complete":
+      return t("goal.status.complete", "Complete");
+  }
+}
 
 /** Derive transient Goal UI state without extending the persisted ledger. */
 export function deriveGoalPresentation(
@@ -53,7 +67,6 @@ export function deriveGoalPresentation(
 
   return {
     status,
-    label: LABELS[status],
     linkedTurnCount: linkedTurns.length,
     liveTurnId: liveTurn?.id ?? null,
   };
@@ -65,4 +78,30 @@ function isTerminal(status: Turn["status"]): boolean {
     status === "failed" ||
     status === "interrupted"
   );
+}
+
+/** Who decided a Goal's outcome, as the user reads it. */
+export function outcomeDecider(
+  source: GoalOutcome["source"],
+  t: TFunction,
+): string {
+  switch (source) {
+    case "user":
+      return t("goal.decidedBy.user", "Decided by you");
+    case "agent":
+      return t("goal.decidedBy.agent", "Decided by the agent");
+    case "runtime":
+      return t("goal.decidedBy.runtime", "Decided by DeepCode");
+    case "migration":
+      return t("goal.decidedBy.migration", "Carried over from an earlier version");
+  }
+}
+
+export function formatOutcomeTime(value: string): string {
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return value;
+  return timestamp.toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }

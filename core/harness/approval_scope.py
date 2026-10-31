@@ -1,9 +1,9 @@
-"""What an "always allow this session" answer covers.
+"""What an "always allow this Session" answer covers.
 
 An approval answered with ``approved_session`` used to cover the whole tool:
 approving ``ls`` once meant ``rm -rf`` never asked again. A session approval
 now covers the same *kind* of call only, and every client shows the same
-sentence for it ("Always allow `git status …` this session"), because the
+sentence for it ("Always allow `git status …` this Session"), because the
 scope is computed here, once, when the approval is requested.
 
 A scope is a set of keys. A later call is covered when every one of its keys
@@ -251,7 +251,7 @@ class SessionScope:
 
     @property
     def label(self) -> str:
-        return f"Always allow {self.target} this session"
+        return f"Always allow {self.target} this Session"
 
     def to_payload(self) -> dict[str, object]:
         return {"keys": list(self.keys), "target": self.target, "label": self.label}

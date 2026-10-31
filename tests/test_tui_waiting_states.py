@@ -21,7 +21,15 @@ from cli.tui.commands import route_title
 from cli.tui.renderer import EventRenderer
 from core.domain.approval import ApprovalStatus
 from core.domain.event import DomainEvent
-from core.events import Event, TaskComplete, ToolCompleted, ToolStarted, TurnStarted
+from core.events import (
+    Event,
+    TaskComplete,
+    ToolActivity,
+    ToolActivityKind,
+    ToolCompleted,
+    ToolStarted,
+    TurnStarted,
+)
 
 THREAD = "thread-1"
 TURN = "turn_" + "a" * 26
@@ -41,7 +49,7 @@ def _approval(tool="bash", arguments=None, *, target="`rm …` and `echo …`"):
             "sessionScope": {
                 "keys": ["cmd:rm", "cmd:echo"],
                 "target": target,
-                "label": f"Always allow {target} this session",
+                "label": f"Always allow {target} this Session",
             },
         },
     }
@@ -73,7 +81,7 @@ def test_a_command_approval_shows_the_whole_command_where_it_runs_and_the_keys(
     # Wrapped, never cut: the whole command and directory are on screen.
     assert f"in{tmp_path}" in "".join(text.split())
     assert (
-        "y allow once · a always allow `rm …` and `echo …` this session · n deny"
+        "y allow once · a always allow `rm …` and `echo …` this Session · n deny"
         in " ".join(text.split())
     )
     assert "mutating" not in text
@@ -94,7 +102,7 @@ def test_an_edit_approval_shows_the_change_as_a_diff(tmp_path) -> None:
     assert "Approval needed · Edit app.py" in text
     assert "-b = 2" in text and "+b = 20" in text
     assert " a = 1" in text  # context
-    assert "always allow edits in this workspace this session" in text
+    assert "always allow edits in this workspace this Session" in text
 
 
 def test_a_new_file_shows_its_content_and_a_long_one_is_cut(tmp_path) -> None:
@@ -163,7 +171,7 @@ def test_an_approval_from_an_older_service_still_offers_its_keys() -> None:
     approval = _approval()
     del approval["request"]["sessionScope"]
     assert approval_view.answer_hint(approval) == (
-        "y allow once · a always allow this tool this session · n deny"
+        "y allow once · a always allow this tool this Session · n deny"
     )
 
 
@@ -171,7 +179,7 @@ def test_outcomes_say_what_was_allowed() -> None:
     approval = _approval(target="`git status …`")
     assert approval_view.outcome_text("approved_once", approval) == "Allowed once."
     assert approval_view.outcome_text("approved_session", approval) == (
-        "Allowed `git status …` for the rest of this session."
+        "Allowed `git status …` for the rest of this Session."
     )
     assert approval_view.outcome_text("denied", approval) == "Denied."
 
@@ -370,7 +378,7 @@ def test_answering_always_says_what_it_covers() -> None:
 
     status = app._respond_to_pending_approval("a")
 
-    assert status == "Allowed `rm …` and `echo …` for the rest of this session."
+    assert status == "Allowed `rm …` and `echo …` for the rest of this Session."
     assert app.renderer.approval_hint is None
 
 
@@ -427,10 +435,10 @@ def test_a_turn_queued_behind_this_sessions_turn_is_shown_then_waits(
     clock[0] = 15.0
     assert app.renderer.is_working()
     app.renderer.set_queue_reason(
-        "waiting for another session in this workspace to finish"
+        "waiting for another Session in this workspace to finish"
     )
     assert app.renderer.status_line() == (
-        " Queued · 5s · waiting for another session in this workspace to finish "
+        " Queued · 5s · waiting for another Session in this workspace to finish "
     )
 
     app._on_domain_event(
@@ -507,11 +515,11 @@ def _service_status(monkeypatch) -> None:
     [
         (
             _QueueClient(own="turn"),
-            "waiting for the current Turn in this session to finish",
+            "waiting for the current Turn in this Session to finish",
         ),
         (
             _QueueClient(others=("other-thread",), running=1),
-            "waiting for another session in this workspace to finish",
+            "waiting for another Session in this workspace to finish",
         ),
         (
             # In its own worktree, another session's work does not hold it.
@@ -553,30 +561,41 @@ def test_the_queue_reason_is_found_while_the_turn_waits(monkeypatch) -> None:
 # -- denied by the user -------------------------------------------------------
 
 
-def _elbow(preview: str, *, is_error: bool = True) -> str:
+def _elbow(preview: str, *, is_error: bool = True, denied: bool = False) -> str:
     output = io.StringIO()
     renderer = EventRenderer(Console(file=output, color_system=None, width=100))
     renderer.on_event(Event("1", TurnStarted()))
     renderer.on_event(Event("2", ToolStarted("call-1", "bash", "rm -rf build")))
-    renderer.on_event(Event("3", ToolCompleted("call-1", "bash", is_error, preview)))
+    renderer.on_event(
+        Event("3", ToolCompleted("call-1", "bash", is_error, preview, denied=denied))
+    )
     return output.getvalue()
 
 
 def test_a_call_the_user_denied_reads_denied_by_you() -> None:
     text = _elbow(
-        "Error: permission denied: user rejected: Running a command needs your approval."
+        "Error: permission denied: user rejected: Running a command needs your approval.",
+        denied=True,
     )
     assert "⎿ Denied by you" in text
     assert "failed" not in text
     assert "needs your approval" not in text
 
 
-def test_other_failures_still_read_as_failures() -> None:
+def test_a_call_a_rule_refused_reads_declined_with_its_reason() -> None:
     text = _elbow(
-        "Error: permission denied: Blocked by your permission rule `bash rm *`."
+        "Error: permission denied: Blocked by your permission rule `bash rm *`.",
+        denied=True,
     )
+    assert "⊘ bash declined · Blocked by your permission rule" in text
+    assert "Error" not in text
+    assert "failed" not in text
+
+
+def test_a_call_that_ran_and_failed_reads_as_a_failure() -> None:
+    text = _elbow("[exit 1] rm: build: Permission denied")
     assert "bash failed" in text
-    assert "Denied by you" not in text
+    assert "declined" not in text
 
 
 # -- first run ----------------------------------------------------------------
@@ -761,3 +780,79 @@ def test_approval_status_answers_are_unchanged() -> None:
     assert tui_app._APPROVAL_ANSWERS["a"] is ApprovalStatus.APPROVED_SESSION
     assert tui_app._APPROVAL_ANSWERS["y"] is ApprovalStatus.APPROVED_ONCE
     assert tui_app._APPROVAL_ANSWERS["n"] is ApprovalStatus.DENIED
+
+
+def test_ctrl_o_says_which_transcript_mode_it_chose_while_work_runs(
+    monkeypatch,
+) -> None:
+    clock = [10.0]
+    monkeypatch.setattr(renderer_module, "monotonic", lambda: clock[0])
+    renderer = EventRenderer(Console(file=io.StringIO(), color_system=None, width=120))
+    renderer.on_event(Event("1", TurnStarted()))
+    long_command = "pytest -q " + "tests/test_module.py " * 6
+    renderer.on_event(
+        Event(
+            "2",
+            ToolStarted(
+                "call-1",
+                "bash",
+                activity=ToolActivity(ToolActivityKind.RUN, "Run", long_command),
+            ),
+        )
+    )
+
+    renderer.cycle_transcript_mode()
+    notice = "Transcript: verbose from here on"
+    # It stands in for the detail, so a normal-width line shows it.
+    assert notice in renderer.status_line()[:80]
+    fragments = "".join(text for _style, text in renderer.status_fragments())
+    assert notice in fragments[:80]
+
+    clock[0] = 14.0
+    assert "Transcript" not in renderer.status_line()
+    fragments = "".join(text for _style, text in renderer.status_fragments())
+    assert "Transcript" not in fragments
+
+
+def test_ctrl_o_answers_during_an_approval_and_clears_itself(monkeypatch) -> None:
+    clock = [10.0]
+    monkeypatch.setattr(renderer_module, "monotonic", lambda: clock[0])
+    renderer = EventRenderer(Console(file=io.StringIO(), color_system=None, width=120))
+    renderer.on_event(Event("1", TurnStarted()))
+    renderer.approval_requested("approval-1", "y allow once · n deny")
+
+    def fragments() -> str:
+        return "".join(text for _style, text in renderer.status_fragments())
+
+    renderer.cycle_transcript_mode()
+    assert "Transcript: verbose from here on" in renderer.status_line()
+    assert "Transcript: verbose from here on" in fragments()
+    # Nothing else moves while an approval waits; the notice keeps the line
+    # repainting until it has gone.
+    assert renderer.is_working()
+
+    clock[0] = 14.0
+    assert "y allow once" in renderer.status_line()
+    assert "y allow once" in fragments()
+    assert not renderer.is_working()
+
+
+def test_ctrl_o_while_idle_leaves_the_idle_line_to_say_the_mode() -> None:
+    renderer = EventRenderer(Console(file=io.StringIO(), color_system=None, width=120))
+
+    renderer.cycle_transcript_mode()
+
+    assert "Transcript: verbose ·" in renderer.status_line()
+    assert "from here on" not in renderer.status_line()
+
+
+def test_a_long_tool_name_leaves_room_on_the_status_line() -> None:
+    renderer = EventRenderer(Console(file=io.StringIO(), color_system=None, width=120))
+    renderer.on_event(Event("1", TurnStarted()))
+    renderer.on_event(
+        Event("2", ToolStarted("call-1", "mcp__github__create_pull_request_review"))
+    )
+
+    renderer.cycle_transcript_mode()
+
+    assert "Transcript: verbose from here on" in renderer.status_line()[:80]

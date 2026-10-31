@@ -573,7 +573,7 @@ async def test_interrupting_a_turn_settles_the_animated_status_line(
         await asyncio.sleep(0.1)
         assert "Working" in app.renderer.status_line()
 
-        assert app.stop_turn() == "Interrupted the turn."
+        assert app.stop_turn() == "Interrupted the Turn."
         # No terminal event will ever arrive; the status must settle anyway.
         for _ in range(25):
             await asyncio.sleep(0.02)

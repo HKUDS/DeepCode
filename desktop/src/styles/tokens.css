@@ -3,6 +3,9 @@
   background: #e4e9e5;
   color-scheme: light dark;
 
+  /* The dimmed page behind a dialog, a drawer or a floating panel. */
+  --scrim: rgb(18 22 20 / 32%);
+
   /* Appearance preferences (src/app/appearance.ts) override the four
      variables below on the root element. They are declared here so the app
      works untouched when nothing has been customised, and so the defaults

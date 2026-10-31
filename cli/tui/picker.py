@@ -44,6 +44,9 @@ class PickerItem:
     title: str
     detail: str = ""
     disabled_reason: str | None = None
+    # Text a row is also found by, though not shown: what the user would type
+    # for it (an effort titled "Extra high" is found by "xhigh").
+    keywords: str = ""
     # Shift+Tab cycles these on the highlighted row (dsh's model/effort
     # pairing); empty means the item has no cycled dimension.
     variants: tuple[PickerVariant, ...] = ()
@@ -51,7 +54,10 @@ class PickerItem:
 
     def matches(self, query: str) -> bool:
         needle = query.casefold()
-        return needle in self.title.casefold() or needle in self.detail.casefold()
+        return any(
+            needle in text.casefold()
+            for text in (self.title, self.detail, self.keywords)
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,12 +197,12 @@ class Picker:
         return visible + details + pager
 
     def _hint_fragments(self) -> StyleAndTextTuples:
-        parts = ["type to filter", "↑/↓ move", "enter select"]
+        parts = ["type to filter", "↑/↓ move", "Enter select"]
         if len(self._scopes) > 1:
-            parts.append("tab scope")
+            parts.append("Tab scope")
         if any(item.variants for scope in self._scopes for item in scope.items):
-            parts.append(f"shift+tab {self._variant_hint}")
-        parts.append("esc cancel")
+            parts.append(f"Shift+Tab {self._variant_hint}")
+        parts.append("Esc cancel")
         return [("", " " + " · ".join(parts))]
 
     # -- keys ----------------------------------------------------------------

@@ -21,4 +21,4 @@ pydantic-settings>=2.14.2
 pypdf>=6.19.0
 PyYAML>=6.0
 reportlab>=3.5.0
-rich>=13.0.0
+rich>=13.4.0

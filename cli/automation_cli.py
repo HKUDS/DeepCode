@@ -349,7 +349,7 @@ def _print_result(command: str, result: dict[str, Any], *, as_json: bool) -> Non
             f"{automation['scheduleKind']}"
         )
         print(f"id: {automation['id']}")
-        print(f"thread: {automation['threadId']}")
+        print(f"session: {automation['threadId']}")
         if command == "create" and automation["scheduleKind"] == "interval":
             print(
                 "Interval schedules run while the DeepCode background service is running."
@@ -360,7 +360,7 @@ def _print_result(command: str, result: dict[str, Any], *, as_json: bool) -> Non
     if command == "run":
         run = result["run"]
         print(f"Run {run['id']} · {run['status']}")
-        print(f"thread: {run['threadId']}")
+        print(f"session: {run['threadId']}")
         if run["goalId"] is not None:
             print(f"goal: {run['goalId']}")
         if run["turnId"] is not None:

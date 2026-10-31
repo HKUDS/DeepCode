@@ -56,14 +56,17 @@ from cli.tui.goal_controller import TuiGoalController
 from cli.tui.input import InputInterrupted, InputReader, expand_file_refs
 from cli.tui.renderer import EventRenderer
 from cli.tui.session_bridge import SessionBridge
+from cli.tui.text import effort_label
 from core.application.errors import ApplicationError
 from core.config import ConfigError
 from core.domain.approval import ApprovalStatus
 from core.domain.event import DomainEvent
 from core.domain.execution_security import ExecutionAccessPreset
+from core.domain.message_provenance import GoalPrompt, goal_prompt
 from core.domain.project import Project, TrustState
 from core.file_lock import FileLease
 from core.providers.reasoning import normalize_reasoning_effort
+from core.sessions.transcript import is_compaction_checkpoint, is_context_note
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +81,13 @@ _COMPLETION_WAIT_SECONDS = 0.15
 _RESUME_TAIL_MESSAGES = 4  # messages replayed on /resume
 _RESUME_TAIL_LINES = 3  # lines shown per replayed message
 _QUEUE_PROBE_SECONDS = 2.0  # how often a queued Turn's reason is re-read
+
+
+# How a replayed Goal instruction reads, in place of its text.
+_GOAL_PROMPT_LABELS = {
+    GoalPrompt.AUTOMATIC: "Goal continued automatically",
+    GoalPrompt.REQUESTED: "Working toward the Goal",
+}
 
 
 class TuiApp:
@@ -189,7 +199,7 @@ class TuiApp:
             return
         lease = self.bridge.store.acquire_activity_lease(session_id)
         if lease is None:
-            raise ValueError(f"no such session: {session_id}")
+            raise ValueError(f"no such Session: {session_id}")
         previous = self._session_activity
         self._session_activity = lease
         self._leased_session_id = session_id
@@ -225,10 +235,14 @@ class TuiApp:
         stored = self.bridge.store.get_session(self.thread_client.session_id)
         if stored is None:
             return
+        # Notes and compaction checkpoints are user-role records nobody said.
         visible = [
             message
             for message in stored.messages
-            if message.role in ("user", "assistant") and message.content
+            if message.role in ("user", "assistant")
+            and message.content
+            and not is_context_note(message)
+            and not is_compaction_checkpoint(message)
         ]
         if not visible:
             return
@@ -241,6 +255,17 @@ class TuiApp:
                 highlight=False,
             )
         for message in tail:
+            kind = (
+                goal_prompt(message.metadata or {}) if message.role == "user" else None
+            )
+            if kind is not None:
+                # The Goal runtime's instruction to the model, not the user's words.
+                self.console.print(
+                    f"[{theme.META_STYLE}]{theme.GOAL_PROMPT_MARK} "
+                    f"{_GOAL_PROMPT_LABELS[kind]}[/]",
+                    highlight=False,
+                )
+                continue
             lines = [
                 line for line in message.content.strip().splitlines() if line.strip()
             ]
@@ -347,7 +372,7 @@ class TuiApp:
         profile = self.thread_client.execution_profile
         current = (
             f"connection: {profile.connection_id} · model: {self.model} · "
-            f"effort: {self.requested_reasoning_effort} · "
+            f"effort: {effort_label(self.requested_reasoning_effort)} · "
             f"context: {self.requested_context_window}"
         )
         views = [
@@ -499,7 +524,7 @@ class TuiApp:
         return (
             f"Compacted: {report['messages_before']} → "
             f"{report['messages_after']} messages "
-            f"(~{saved:,} chars of older turns replaced by a summary)."
+            f"(~{saved:,} chars of older Turns replaced by a summary)."
         )
 
     def agent_preset_overview(self) -> str:
@@ -558,9 +583,9 @@ class TuiApp:
             return f"Skill {skill.name} is {skill.status} and cannot be selected"
         if skill.id not in self.selected_skill_ids:
             if len(self.selected_skill_ids) >= 8:
-                return "a turn may select at most 8 Skills"
+                return "a Turn may select at most 8 Skills"
             self.selected_skill_ids.append(skill.id)
-        return f"selected {skill.name} for the next turn"
+        return f"selected {skill.name} for the next Turn"
 
     def remove_skill(self, identifier: str) -> str:
         try:
@@ -582,7 +607,7 @@ class TuiApp:
             return f"Skill name is ambiguous: {identifier}; remove it by ID"
         skill = matches[0]
         self.selected_skill_ids.remove(skill.id)
-        return f"removed {skill.name} from the next turn"
+        return f"removed {skill.name} from the next Turn"
 
     def completion_candidates(self, key: str, load: Callable[[], object]):
         """A service-backed completion source that never holds the prompt.
@@ -651,7 +676,7 @@ class TuiApp:
 
     def clear_skills(self) -> str:
         self.selected_skill_ids.clear()
-        return "cleared next-turn Skills"
+        return "cleared next-Turn Skills"
 
     def list_plugins(self) -> str:
         try:
@@ -873,13 +898,13 @@ class TuiApp:
             return ""
         if delivery.kind == "queued":
             self.selected_skill_ids.clear()
-            return "Queued — runs after the active turn."
+            return "Queued — runs after the active Turn."
         suffix = (
             " Selected next-Turn Skills remain selected."
             if self.selected_skill_ids
             else ""
         )
-        return f"Steered the active turn.{suffix}"
+        return f"Steered the active Turn.{suffix}"
 
     def queue_turn(self, text: str) -> str:
         # Read busyness BEFORE enqueueing: an idle Session starts the
@@ -892,14 +917,14 @@ class TuiApp:
         )
         self.selected_skill_ids.clear()
         return (
-            "Queued — runs after the active turn." if busy else "Queued — starting now."
+            "Queued — runs after the active Turn." if busy else "Queued — starting now."
         )
 
     def stop_turn(self) -> str:
         try:
             result = self.thread_client.interrupt()
         except (RuntimeError, OSError) as exc:  # ApplicationError included
-            return f"Could not stop the turn: {_error_text(exc)}"
+            return f"Could not stop the Turn: {_error_text(exc)}"
         return self._settle_interrupt(result)
 
     async def stop_turn_async(self) -> str:
@@ -910,7 +935,7 @@ class TuiApp:
         try:
             result = await asyncio.to_thread(self.thread_client.interrupt)
         except (RuntimeError, OSError) as exc:  # ApplicationError included
-            return f"Could not stop the turn: {_error_text(exc)}"
+            return f"Could not stop the Turn: {_error_text(exc)}"
         return self._settle_interrupt(result)
 
     def _settle_interrupt(self, result) -> str:
@@ -924,7 +949,7 @@ class TuiApp:
         # that learns the truth.
         if turn.status.is_terminal:
             self.renderer.settle_turn()
-        return "Interrupted the turn." if accepted else "The turn had already stopped."
+        return "Interrupted the Turn." if accepted else "The Turn had already stopped."
 
     def _respond_to_pending_approval(self, text: str) -> str | None:
         decision = _APPROVAL_ANSWERS.get(text.strip().casefold())
@@ -1041,6 +1066,8 @@ class TuiApp:
         if not isinstance(approval, dict):
             return
         approval_id = approval.get("id")
+        if approval_id in self._shown_approvals:
+            return  # shown on joining the Turn, then replayed
         if isinstance(approval_id, str):
             self._prompted_approval_ids.add(approval_id)
             self._shown_approvals[approval_id] = approval
@@ -1104,7 +1131,7 @@ class TuiApp:
         """
         client = self.thread_client
         if client.turns.executing_for_thread(client.session_id) is not None:
-            return "waiting for the current Turn in this session to finish"
+            return "waiting for the current Turn in this Session to finish"
         if not getattr(client.thread, "worktree_path", None):
             threads = client.rpc.call(
                 "thread/list", {"projectId": client.project.id, "limit": 100}
@@ -1116,7 +1143,7 @@ class TuiApp:
                     and thread.get("status") in {"running", "waiting"}
                     and client.turns.executing_for_thread(thread["id"]) is not None
                 ):
-                    return "waiting for another session in this workspace to finish"
+                    return "waiting for another Session in this workspace to finish"
         from app_server.service_client import ServiceClient
 
         # The service's own status (not a Session RPC) counts running Turns.
@@ -1163,10 +1190,10 @@ class TuiApp:
             highlight=False,
         )
         self.console.print(
-            f" [{theme.META_STYLE}]session {escape(self.bridge.session_id)} · "
+            f" [{theme.META_STYLE}]Session {escape(self.bridge.session_id)} · "
             f"runtime {self.thread_client.runtime_mode} · "
             f"access {escape(self.thread_client.access_summary())} · "
-            f"effort {escape(self.requested_reasoning_effort)}[/]",
+            f"effort {escape(effort_label(self.requested_reasoning_effort))}[/]",
             soft_wrap=True,
             highlight=False,
         )
@@ -1430,7 +1457,7 @@ def main(argv: list[str] | None = None, *, shared_service: bool = True) -> int:
     add_reasoning_effort_argument(parser)
     add_access_preset_argument(parser)
     add_workspace_trust_argument(parser)
-    parser.add_argument("--resume", "-r", default=None, help="Session id to resume.")
+    parser.add_argument("--resume", "-r", default=None, help="Session ID to resume.")
     parser.set_defaults(max_iterations=None)
     if not shared_service:
         parser.add_argument(

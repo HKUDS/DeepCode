@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -27,7 +27,12 @@ from core.application.errors import (
 from core.application.goal_turn_port import GoalTurnAssociation, GoalTurnPort
 from core.application.views import thread_goal_view
 from core.domain.item import Item, ItemKind, ItemStatus
-from core.domain.message_provenance import ClientSurface, TurnInputSource
+from core.domain.message_provenance import (
+    ClientSurface,
+    GoalPrompt,
+    TurnInputSource,
+    goal_prompt,
+)
 from core.domain.thread_goal import (
     GOAL_OBJECTIVE_INPUT_MAX_CHARS,
     GOAL_OUTCOME_EVIDENCE_MAX_ITEMS,
@@ -79,6 +84,25 @@ GoalContinuationGuard = Callable[[ThreadGoal], None]
 def _is_goal_bookkeeping(item: Item) -> bool:
     name = str(item.payload.get("name") or "").strip().lower()
     return item.kind is ItemKind.TOOL_CALL and name in GOAL_TOOL_NAMES
+
+
+def _goal_work(items: Iterable[Item]) -> list[Item]:
+    """A Turn's work that can back a Goal decision, oldest first.
+
+    Items of the evidence kinds, without the Goal tools' own calls: reading
+    or updating the Goal is bookkeeping, not work.
+    """
+    return [
+        item
+        for item in sorted(items, key=lambda candidate: candidate.ordinal)
+        if item.kind in _EVIDENCE_KINDS and not _is_goal_bookkeeping(item)
+    ]
+
+
+def _evidence_summary(item: Item) -> str:
+    return (item.summary.strip() or item.kind.value.replace("_", " "))[
+        :GOAL_OUTCOME_EVIDENCE_SUMMARY_MAX_CHARS
+    ]
 
 
 class GoalContinueDisposition(StrEnum):
@@ -208,19 +232,23 @@ class GoalExtension(GoalRuntimeHandler):
                 exc,
             )
             return outcome
+        # The deciding Turn's latest settled work, chosen as the completion
+        # check chooses (see ``completion_request``).
+        settled = [
+            item
+            for item in _goal_work(snapshot.items)
+            if item.status in _SETTLED_STATUSES
+        ]
         evidence = tuple(
             GoalEvidenceRef(
                 item_id=item.id,
                 turn_id=item.turn_id,
                 kind=item.kind.value,
                 status=item.status.value,
-                summary=(item.summary.strip() or item.kind.value.replace("_", " "))[
-                    :GOAL_OUTCOME_EVIDENCE_SUMMARY_MAX_CHARS
-                ],
+                summary=_evidence_summary(item),
             )
-            for item in sorted(snapshot.items, key=lambda candidate: candidate.ordinal)
-            if item.kind in _EVIDENCE_KINDS
-        )[:GOAL_OUTCOME_EVIDENCE_MAX_ITEMS]
+            for item in settled[-GOAL_OUTCOME_EVIDENCE_MAX_ITEMS:]
+        )
         return replace(outcome, evidence_refs=evidence)
 
     def read_guarded(self, thread_id: str, directory: Path) -> ThreadGoal | None:
@@ -698,17 +726,11 @@ class GoalExtension(GoalRuntimeHandler):
             return GoalEvidenceItem(
                 kind=item.kind.value,
                 status=item.status.value,
-                summary=(item.summary.strip() or item.kind.value.replace("_", " "))[
-                    :GOAL_OUTCOME_EVIDENCE_SUMMARY_MAX_CHARS
-                ],
+                summary=_evidence_summary(item),
                 name=str(item.payload.get("name") or ""),
             )
 
-        items = [
-            item
-            for item in sorted(snapshot.items, key=lambda candidate: candidate.ordinal)
-            if item.kind in _EVIDENCE_KINDS and not _is_goal_bookkeeping(item)
-        ]
+        items = _goal_work(snapshot.items)
         settled = [view(item) for item in items if item.status in _SETTLED_STATUSES]
         pending = [view(item) for item in items if item.status not in _SETTLED_STATUSES]
         return GoalCompletionRequest(
@@ -971,9 +993,7 @@ class GoalExtension(GoalRuntimeHandler):
             )
             if (
                 prompt is None
-                or prompt.payload.get("source")
-                != TurnInputSource.GOAL_CONTINUATION.value
-                or prompt.payload.get("client") != ClientSurface.INTERNAL.value
+                or goal_prompt(prompt.payload) is not GoalPrompt.AUTOMATIC
             ):
                 break
             count += 1

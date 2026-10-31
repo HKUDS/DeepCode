@@ -14,8 +14,8 @@ The method is described in the paper
 Paper2Code runs in the Desktop and Web clients:
 
 1. Start `deepcode desktop` or `deepcode web` and open a trusted project.
-2. Click **Paper** in the thread header, or type `/paper` in the composer, to
-   create a Paper2Code session.
+2. Click **Paper** in the Session header, or type `/paper` in the composer, to
+   create a Paper2Code Session.
 3. Add the sources: a document, a URL, a repository, or written requirements.
 4. Review the plan when the workflow asks for it, then follow stage progress.
    Generated files and artifacts appear in the Inspector.

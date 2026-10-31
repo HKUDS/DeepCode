@@ -256,3 +256,16 @@ def test_exec_resume_reuses_the_canonical_session_and_history(
     assert all(
         message.metadata.get("client") == "headless" for message in session.messages
     )
+
+
+def test_exec_marks_a_refused_call_apart_from_a_failed_one(capsys):
+    from core.events import Event, ToolCompleted
+    from cli.transcript import TranscriptMode
+
+    for denied, is_error in ((True, True), (False, True), (False, False)):
+        exec_cli._emit_human(
+            Event("1", ToolCompleted("c", "bash", is_error, "", denied=denied)),
+            TranscriptMode.NORMAL,
+        )
+
+    assert capsys.readouterr().out.split() == ["⊘", "bash", "✗", "bash", "✓", "bash"]

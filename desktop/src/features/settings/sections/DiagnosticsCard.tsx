@@ -8,6 +8,7 @@ import type { Project } from "../../../generated/app-server";
 import type { ClientRuntime } from "../../../rpc/contracts";
 import { useDiagnostics } from "../useDiagnostics";
 import styles from "../../management/ManagementWorkspace.module.css";
+import { diagnosticsCheckText } from "./diagnosticsCheckText";
 
 export function DiagnosticsCard({
   runtime,
@@ -75,15 +76,18 @@ export function DiagnosticsCard({
       {diagnostics.diagnostics ? (
         <>
           <div className={styles.checkList}>
-            {diagnostics.diagnostics.checks.map((check) => (
-              <article key={check.id} data-status={check.status}>
-                <span />
-                <div>
-                  <strong>{check.label}</strong>
-                  <p>{check.detail}</p>
-                </div>
-              </article>
-            ))}
+            {diagnostics.diagnostics.checks.map((check) => {
+              const [label, detail] = diagnosticsCheckText(check, t);
+              return (
+                <article key={check.id} data-status={check.status}>
+                  <span />
+                  <div>
+                    <strong>{label}</strong>
+                    <p>{detail}</p>
+                  </div>
+                </article>
+              );
+            })}
           </div>
           <dl className={styles.diagnosticGrid}>
             <Diagnostic
@@ -99,7 +103,7 @@ export function DiagnosticsCard({
               value={`${diagnostics.diagnostics.sessionCount} · ${diagnostics.diagnostics.sessionStorePath}`}
             />
             <Diagnostic
-              label={t("settings.diagnostics.database", "Desktop DB")}
+              label={t("settings.diagnostics.database", "Database")}
               value={t(
                 "settings.diagnostics.schema",
                 "schema {{version}} · {{path}}",

@@ -1,16 +1,25 @@
 import { ArrowDown } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type MouseEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 import type {
   Approval,
   ApprovalDecision,
+  GoalOutcome,
   Item,
   Turn,
 } from "../../generated/app-server";
 import type { TurnPlanState } from "../../app/workspaceState";
 import type { DesktopInspectorTab } from "../../app/useDesktopUi";
-import { buildConversationTurns } from "./conversationModel";
+import { buildConversationTurns, historyBatchStart } from "./conversationModel";
 import { PlanProgress } from "./PlanProgress";
 import styles from "./ThreadConversation.module.css";
 import { TurnBlock } from "./TurnBlock";
@@ -21,6 +30,10 @@ interface ThreadConversationProps {
   items: Item[];
   approvals: Approval[];
   plansByTurnId: Record<string, TurnPlanState>;
+  /** The Session Goal's outcome, shown with the Turn that decided it. */
+  goalOutcome: GoalOutcome | null;
+  /** The whole history has been replayed (it arrives a page at a time). */
+  historyLoaded: boolean;
   selectedItemId: string | null;
   transcriptMode: TranscriptMode;
   busy: boolean;
@@ -31,13 +44,21 @@ interface ThreadConversationProps {
   onCancelQueuedTurn(turnId: string): void;
 }
 
-const FOLLOW_THRESHOLD = 120;
+// How near the end still counts as at the end: room for a small nudge and for
+// fractional scroll positions.
+const FOLLOW_THRESHOLD = 40;
+// How much history a batch renders, in rows (see historyBatchStart): in the
+// normal transcript, opening a long Session costs about this much, not its
+// whole length. Earlier Turns load on request.
+const HISTORY_BATCH_ROWS = 200;
 
 export function ThreadConversation({
   turns,
   items,
   approvals,
   plansByTurnId,
+  goalOutcome,
+  historyLoaded,
   selectedItemId,
   transcriptMode,
   busy,
@@ -49,13 +70,54 @@ export function ThreadConversation({
 }: ThreadConversationProps) {
   const { t } = useTranslation();
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
-  const endRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const followingRef = useRef(true);
+  // Where the view last stood at the end, as the browser clamped it.
+  const endTopRef = useRef(0);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const groupedTurns = useMemo(
     () => buildConversationTurns(turns, items),
     [items, turns],
   );
+  // The first Turn shown: the latest batch of history, fixed once the whole
+  // history is in, so Turns that come later never push older ones out of
+  // view. Fixed earlier, it would sit on the oldest part, which replay sends
+  // first. A fixed Turn that is gone (the trace was replayed afresh) is
+  // chosen again.
+  const [firstTurnId, setFirstTurnId] = useState<string | null>(null);
+  const anchored = groupedTurns.findIndex((group) => group.id === firstTurnId);
+  const latestBatchStart = () =>
+    historyBatchStart(groupedTurns, groupedTurns.length, HISTORY_BATCH_ROWS);
+  if (historyLoaded && anchored < 0 && groupedTurns.length > 0) {
+    setFirstTurnId(groupedTurns[latestBatchStart()].id);
+  }
+  const firstShown = anchored >= 0 ? anchored : latestBatchStart();
+
+  // Loading earlier Turns keeps the reader where they were: at the same
+  // distance from the end, whatever the browser does with content added
+  // above. If the button they used is gone, focus stays in the conversation.
+  const revealRef = useRef<{ fromEnd: number; hadFocus: boolean } | null>(null);
+  const showEarlierTurns = (event: MouseEvent<HTMLButtonElement>) => {
+    const viewport = scrollViewportRef.current;
+    revealRef.current = viewport
+      ? {
+          fromEnd: viewport.scrollHeight - viewport.scrollTop,
+          hadFocus: document.activeElement === event.currentTarget,
+        }
+      : null;
+    const start = historyBatchStart(groupedTurns, firstShown, HISTORY_BATCH_ROWS);
+    setFirstTurnId(groupedTurns[start].id);
+  };
+  useLayoutEffect(() => {
+    const reveal = revealRef.current;
+    const viewport = scrollViewportRef.current;
+    revealRef.current = null;
+    if (!reveal || !viewport) return;
+    viewport.scrollTop = viewport.scrollHeight - reveal.fromEnd;
+    if (reveal.hadFocus && !viewport.contains(document.activeElement)) {
+      viewport.focus({ preventScroll: true });
+    }
+  }, [firstTurnId]);
   const hasConversation = groupedTurns.length > 0;
   const approvalsByItem = useMemo(
     () => new Map(approvals.map((approval) => [approval.itemId, approval])),
@@ -74,53 +136,81 @@ export function ThreadConversation({
     [turns],
   );
   const activePlan = activeTurn ? plansByTurnId[activeTurn.id] ?? null : null;
-  const latestItem = items.at(-1);
-  const itemUpdate = latestItem
-    ? `${latestItem.id}:${latestItem.status}:${latestItem.updatedAt}:${JSON.stringify(latestItem.payload).length}`
-    : `${turns.at(-1)?.id ?? "empty"}:${turns.at(-1)?.status ?? "idle"}`;
-  const latestUpdate = `${itemUpdate}:${activePlan?.updatedAt ?? "no-plan"}`;
-  const scrollToLatest = useCallback((behavior: ScrollBehavior) => {
-    const viewport = scrollViewportRef.current;
-    if (typeof viewport?.scrollTo === "function") {
-      viewport.scrollTo({ top: viewport.scrollHeight, behavior });
-      return;
-    }
-    const end = endRef.current;
-    if (typeof end?.scrollIntoView === "function") {
-      end.scrollIntoView({ block: "end", behavior });
-    }
+  const setFollowing = useCallback((following: boolean) => {
+    followingRef.current = following;
+    setShowJumpToLatest(!following);
   }, []);
-
-  // The scroller only exists once there is a conversation; a Session opens
-  // empty and its history arrives after, so attach when it appears and start
-  // at the bottom at once: a smooth scroll from the top would read as the
-  // user scrolling away.
-  useEffect(() => {
+  const pinToEnd = useCallback(() => {
     const viewport = scrollViewportRef.current;
     if (!viewport) return;
+    viewport.scrollTop = viewport.scrollHeight;
+    endTopRef.current = viewport.scrollTop;
+  }, []);
+  const followLatest = useCallback(() => {
+    setFollowing(true);
+    pinToEnd();
+  }, [pinToEnd, setFollowing]);
 
+  // Follow the end of the conversation while the user reads it. Whatever
+  // makes the transcript taller — a new item, streamed text, Markdown laying
+  // out after it arrives, the composer's clearance growing — resizes the
+  // content box or the viewport, and a following view is pinned to the end at
+  // once. Never smoothly: a smooth scroll passes through positions that read
+  // as the user scrolling away.
+  //
+  // Only the user leaves the end: by scrolling above where the view last stood
+  // at it, or by opening a step to read it (see below). A scroll event can
+  // also arrive after more content landed, so the view is short of the end
+  // without anyone moving it; the next resize pins it again. Back at the end,
+  // or with "Latest", the view follows once more.
+  //
+  // The scroller exists once there is a conversation. A Session opens empty
+  // and its history arrives after, so attach when it appears.
+  useEffect(() => {
+    const viewport = scrollViewportRef.current;
+    const content = contentRef.current;
+    if (!viewport || !content) return;
+
+    const atEnd = () =>
+      viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <=
+      FOLLOW_THRESHOLD;
     const handleScroll = () => {
-      const distanceFromBottom =
-        viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
-      const nearBottom = distanceFromBottom <= FOLLOW_THRESHOLD;
-      followingRef.current = nearBottom;
-      setShowJumpToLatest(!nearBottom);
+      if (atEnd()) {
+        endTopRef.current = viewport.scrollTop;
+        setFollowing(true);
+      } else if (viewport.scrollTop < endTopRef.current) {
+        setFollowing(false);
+      }
+    };
+    const handleResize = () => {
+      if (followingRef.current || atEnd()) followLatest();
     };
 
     viewport.addEventListener("scroll", handleScroll, { passive: true });
-    scrollToLatest("auto");
-    return () => viewport.removeEventListener("scroll", handleScroll);
-  }, [hasConversation, scrollToLatest]);
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(handleResize);
+    // The border box: the composer's clearance is the content's padding.
+    observer?.observe(content, { box: "border-box" });
+    observer?.observe(viewport);
+    followLatest();
+    return () => {
+      viewport.removeEventListener("scroll", handleScroll);
+      observer?.disconnect();
+    };
+  }, [hasConversation, followLatest, setFollowing]);
 
-  useEffect(() => {
-    if (!followingRef.current) return;
-    scrollToLatest(latestItem?.status === "in_progress" ? "smooth" : "auto");
-  }, [latestItem?.status, latestUpdate, scrollToLatest]);
-
-  const jumpToLatest = () => {
-    followingRef.current = true;
-    setShowJumpToLatest(false);
-    scrollToLatest("smooth");
+  // Opening a step, or revealing steps (`data-reveals`), is reading them: keep
+  // them where they are rather than pinning the end and pushing them off
+  // screen. Closing a step pushes nothing away. The click comes before the
+  // toggle, so `open` is still the step's current state, and keyboard toggles
+  // click too.
+  const handleContentClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (!(event.target instanceof Element)) return;
+    const step = event.target.closest("summary")?.parentElement;
+    const opensStep = step instanceof HTMLDetailsElement && !step.open;
+    if (opensStep || event.target.closest("[data-reveals]")) setFollowing(false);
   };
 
   if (!hasConversation) {
@@ -159,17 +249,41 @@ export function ThreadConversation({
     >
       <div
         className={styles.conversationScroller}
-        aria-label={t("thread.conversation", "Thread conversation")}
+        role="region"
+        aria-label={t("thread.conversation", "Conversation")}
         ref={scrollViewportRef}
+        // Focus lands here when the control a reader used goes away.
+        tabIndex={-1}
       >
-        <div className={styles.conversation}>
-          {groupedTurns.map((group) => (
+        <div
+          className={styles.conversation}
+          ref={contentRef}
+          onClick={handleContentClick}
+        >
+          {firstShown > 0 ? (
+            <button
+              type="button"
+              className={styles.earlierTurns}
+              // Loading history above is reading it: see handleContentClick.
+              data-reveals=""
+              onClick={showEarlierTurns}
+            >
+              {t("thread.earlierTurns", "Show earlier Turns · {{count}} more", {
+                count: firstShown,
+              })}
+            </button>
+          ) : null}
+          {groupedTurns.slice(firstShown).map((group) => (
             <TurnBlock
               key={group.id}
               group={group}
               approvalsByItem={approvalsByItem}
               selectedItemId={selectedItemId}
               transcriptMode={transcriptMode}
+              following={!showJumpToLatest}
+              goalOutcome={
+                goalOutcome?.decidedByTurnId === group.id ? goalOutcome : null
+              }
               busy={busy}
               onSelectItem={onSelectItem}
               onOpenInspector={onOpenInspector}
@@ -178,7 +292,6 @@ export function ThreadConversation({
               onCancelQueuedTurn={onCancelQueuedTurn}
             />
           ))}
-          <div className={styles.conversationEnd} ref={endRef} />
         </div>
       </div>
 
@@ -192,7 +305,7 @@ export function ThreadConversation({
         <button
           type="button"
           className={styles.jumpToLatest}
-          onClick={jumpToLatest}
+          onClick={followLatest}
         >
           <ArrowDown size={14} />
           {t("thread.latest", "Latest")}

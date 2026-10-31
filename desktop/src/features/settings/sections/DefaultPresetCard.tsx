@@ -11,6 +11,7 @@ import type { AgentPresetEntry, SettingsSnapshot } from "../../../generated/app-
 import type { SettingsSectionProps } from "../settingsSections";
 import { useTranslation } from "react-i18next";
 import styles from "../../management/ManagementWorkspace.module.css";
+import { presetTrustLabel } from "../../presets/presetPresentation";
 
 function configuredDefaultPreset(settings: SettingsSnapshot | null): string {
   const agents = settings?.agents;
@@ -97,7 +98,7 @@ export function DefaultPresetCard({
             ) : null}
             {entries.map((entry) => (
               <option key={entry.id} value={entry.id} disabled={!!entry.broken}>
-                {entry.name} [{entry.trust}]
+                {entry.name} · {presetTrustLabel(entry.trust, t)}
               </option>
             ))}
           </select>

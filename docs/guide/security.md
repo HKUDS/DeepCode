@@ -15,15 +15,15 @@ except notes the agent keeps inside a project:
 | `deepcode_config.json` | Your settings. See [Configuration](configuration.md). |
 | `credentials.json` | Model connection keys. Written atomically with owner-only permissions (`0600`; an owner-only ACL on Windows). Clients never receive a saved key back. |
 | `auth/mcp.json` | Sign-in tokens for MCP servers that use OAuth. |
-| `sessions/<id>/session.jsonl` | The record of each session: messages, tool calls and tool results. |
-| `state/deepcode.sqlite3` | Projects, trust decisions, turns, approvals, Goals and automations. |
+| `sessions/<id>/session.jsonl` | The record of each Session: messages, tool calls and tool results. |
+| `state/deepcode.sqlite3` | Projects, trust decisions, Turns, approvals, Goals and automations. |
 | `state/deepcode.sqlite3.service/` | The background service's address, private access token and `service.log`. |
 | `logs/llm.jsonl` | One line per model call: provider, model, timing, token counts, and the first 2,000 characters of the request and response. |
 | `plugins/`, `agent-presets/`, `hooks.json` | Your plugins, presets and hooks, if any. |
 | `<project>/.deepcode/memory/` | Notes the agent keeps for that project (`MEMORY.md` and topic files). |
 
 DeepCode has no account system, no product analytics and no crash reporter. It
-sends nothing to its developers. Deleting a session removes its records but
+sends nothing to its developers. Deleting a Session removes its records but
 never your project files. To back up or move this data, see
 [Upgrading DeepCode](../UPGRADE_AND_RESTORE.md).
 
@@ -64,7 +64,7 @@ off.
 
 ## Access presets
 
-Each turn runs with one of three presets, chosen per session in the composer,
+Each Turn runs with one of three presets, chosen per Session in the composer,
 with `/permissions` in the TUI, or with `--access` on the command line.
 `deepcode init` makes **Ask** the default.
 
@@ -74,8 +74,8 @@ with `/permissions` in the TUI, or with `--access` on the command line.
 | **Read only** | Read and search only. Edits, shell commands and other tools with side effects are denied. |
 | **Full access** | Everything, without approvals, outside the sandbox. Use it only for work you would run yourself. |
 
-- An approval resumes the exact tool call that was waiting. A session's access
-  is frozen into each turn when it is accepted; changing it affects later turns.
+- An approval resumes the exact tool call that was waiting. A Session's access
+  is frozen into each Turn when it is accepted; changing it affects later Turns.
 - Your own rules in `security.permissions` can `allow`, `ask` or `deny` a tool
   or a command pattern. A `deny` rule applies under every preset.
 - Under Ask and Read only, file tools cannot read or write credential
@@ -88,8 +88,8 @@ with `/permissions` in the TUI, or with `--access` on the command line.
   `DEEPCODE_COMMAND_SCREEN=strict` adds screens for piping downloads into a
   shell and for unusual package installs. `DEEPCODE_RISK_EVALUATOR=1` turns
   calls that would run without asking, but look risky, into approval requests.
-- Stopping a turn ends the processes it started. After a crash, interrupted
-  turns are settled without re-running their side effects.
+- Stopping a Turn ends the processes it started. After a crash, interrupted
+  Turns are settled without re-running their side effects.
 
 ### The command sandbox
 
@@ -125,7 +125,7 @@ File tools ask before writing those hook files, except under Full access.
 
 MCP servers run with your user's rights, outside the command sandbox. Adding a
 server from the bundled catalog copies a disabled entry. An enabled server
-starts inside an agent session, or when you test the connection.
+starts when a Session's agent runs, or when you test the connection.
 `deepcode mcp list` flags `npx` and `uvx` servers whose package version is not
 fixed. Plugin manifests that contain secret-like literal values produce a
 warning. See the [MCP guide](../integrations/MCP.md) and
@@ -136,7 +136,7 @@ warning. See the [MCP guide](../integrations/MCP.md) and
 Each model request goes to the endpoint of the connection you selected, and
 contains:
 
-- DeepCode's system prompt and the session's access mode;
+- DeepCode's system prompt and the Session's access mode;
 - project instructions (`AGENTS.md`, `CLAUDE.md` and similar files) and the
   project memory index;
 - the list of available Skills and the tool definitions, including MCP tools;

@@ -2,8 +2,8 @@
 
 DeepCode saves your conversations so you can return to a task without explaining
 it again. Each conversation belongs to a project folder and includes your
-messages, DeepCode's replies, and its tool activity. The TUI calls this a
-**Session**; Desktop and Web call it a **thread**.
+messages, DeepCode's replies, and its tool activity. DeepCode calls this a
+**Session** in every interface.
 
 ## Resume
 
@@ -14,7 +14,7 @@ Open DeepCode in your project folder and enter:
 ```
 
 Choose a conversation from the list. To search conversations from other projects,
-use `/resume all`. In Desktop/Web, select a saved thread under its Project.
+use `/resume all`. In Desktop/Web, select a saved Session under its Project.
 
 If you know the Session ID, you can open it directly from your terminal:
 
@@ -24,6 +24,12 @@ deepcode --resume SESSION_ID
 
 Replace `SESSION_ID` with the ID shown for your conversation. Read the latest
 messages, then tell DeepCode what you want to do next.
+
+If the conversation is still working on a Turn, for example one you started in
+another terminal, the TUI shows what that Turn is doing now (the answer so far,
+the thinking, a tool that is running or waiting for your approval) and follows
+it to the end. Steps it finished before you joined are not shown again; the
+latest messages printed above them give the context.
 
 ## Multiple clients, one Session
 
@@ -50,21 +56,21 @@ stopped before sending it again. See [Troubleshooting](troubleshooting.md).
 
 | What you want to do | Desktop / Web | TUI |
 |---|---|---|
-| Start a Session | **New thread** | `/new [title]` |
+| Start a Session | **New Session** | `/new [title]` |
 | Resume local history | Select it under the Project | `/resume` |
 | Find history from every Project | Browse the project list | `/resume all` |
 | Attach a file | Composer attachment | `@path/to/file` |
-| Change the next turn's model | Composer model picker | `/model` |
+| Change the next Turn's model | Composer model picker | `/model` |
 | Adjust reasoning effort | Composer effort picker | `/effort` |
 | Cap the Session's context window | Model picker context control | `/context` |
 | Choose tool access | Composer access picker | `/permissions` |
 | Pick an agent preset | Preset picker | `/preset` |
-| Load Skills for the next turn | Composer Skills control | `/skill <name>` |
+| Load Skills for the next Turn | Composer Skills control | `/skill <name>` |
 | Create a reusable Skill | **Skills → Create Skill** | `$skill-creator` |
 | Set or revise a durable Goal | Goal panel | `/goal` |
-| Queue the next instruction | Composer while a turn runs | `/queue <text>` |
-| Stop the active turn | Stop control | `/stop` |
-| Re-run the last turn | Retry control on the turn | `/retry` |
+| Queue the next instruction | Composer while a Turn runs | `/queue <text>` |
+| Stop the active Turn | Stop control | `/stop` |
+| Re-run the last Turn | Retry control on the Turn | `/retry` |
 | Compact a long conversation | Automatic under pressure | `/compact` (also automatic) |
 | Change transcript detail | Transcript detail menu | `/transcript` or `Ctrl+O` |
 | Rename or delete a Session | Session menu | `/rename <title>` · `/delete <id>` |

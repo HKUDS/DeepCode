@@ -43,6 +43,8 @@ export interface WorkspaceState {
   selectedThreadId: string | null;
   /** A thread whose Session file is on disk but could not be read. */
   unreadableThreadId: string | null;
+  /** The selected thread's history has been replayed up to the live head. */
+  historyLoaded: boolean;
   turns: Turn[];
   items: Item[];
   approvals: Approval[];
@@ -74,6 +76,7 @@ export type WorkspaceAction =
   | { type: "select-thread"; threadId: string | null }
   | { type: "thread-unreadable"; threadId: string | null }
   | { type: "trace-reset" }
+  | { type: "history-loaded" }
   | { type: "snapshot"; snapshot: TurnSnapshotResult }
   | { type: "approval-upsert"; approval: Approval }
   | { type: "workflow-snapshot"; snapshot: WorkflowSnapshotResult }
@@ -102,6 +105,7 @@ export const initialWorkspaceState: WorkspaceState = {
   selectedProjectId: null,
   selectedThreadId: null,
   unreadableThreadId: null,
+  historyLoaded: false,
   turns: [],
   items: [],
   approvals: [],
@@ -429,6 +433,7 @@ export function workspaceReducer(
         ...state,
         selectedProjectId: action.projectId,
         selectedThreadId: null,
+        historyLoaded: false,
         turns: [],
         items: [],
         approvals: [],
@@ -460,6 +465,7 @@ export function workspaceReducer(
         ...state,
         threads: state.threads.filter((thread) => thread.id !== action.threadId),
         selectedThreadId: selected ? null : state.selectedThreadId,
+        historyLoaded: selected ? false : state.historyLoaded,
         turns: selected ? [] : state.turns,
         items: selected ? [] : state.items,
         approvals: selected ? [] : state.approvals,
@@ -476,6 +482,7 @@ export function workspaceReducer(
       return {
         ...state,
         selectedThreadId: action.threadId,
+        historyLoaded: false,
         turns: [],
         items: [],
         approvals: [],
@@ -492,6 +499,7 @@ export function workspaceReducer(
     case "trace-reset":
       return {
         ...state,
+        historyLoaded: false,
         turns: [],
         items: [],
         approvals: [],
@@ -566,6 +574,8 @@ export function workspaceReducer(
       return applyLiveText(state, action.delta);
     case "live-text":
       return fillLiveText(state, action.turnId, action.items);
+    case "history-loaded":
+      return state.historyLoaded ? state : { ...state, historyLoaded: true };
     case "live-stale":
       return markStreamingStale(state);
     case "select-item":

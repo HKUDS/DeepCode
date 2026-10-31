@@ -34,20 +34,27 @@ from time import monotonic
 
 from rich.cells import cell_len
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.markup import escape
 from rich.text import Text
 
 from cli.transcript import TranscriptMode
 from cli.tui import animation, theme
 from cli.tui.markdown_stream import MarkdownStream
-from cli.tui.text import fit_head, fit_tail, workspace_path
-from core.events.protocol import Event
+from cli.tui.text import (
+    effort_label,
+    fit_head,
+    fit_tail,
+    terminal_text,
+    workspace_path,
+    wrap_text,
+)
+from core.events.protocol import RESULT_ELISION, Event
 from core.reasoning import ReasoningAvailability, ReasoningChannel
 
 
 _NORMAL_PREVIEW_CHARS = 240
 _STATUS_DETAIL_CHARS = 72
+_STATUS_LABEL_CELLS = 24
 _SUBJECT_CELLS = 88  # ceiling; the real budget is the terminal's width
 _SUBJECT_TAIL_CELLS = 32  # the elbow's "which call is this" fragment
 _ELBOW_MIN_CELLS = 24
@@ -62,6 +69,9 @@ _QUEUED_DETAIL = "waiting to start"  # until the app learns why
 # How the kernel reports a call the user denied at its approval prompt.
 _USER_DENIAL = "permission denied: user rejected"
 APPROVAL_STATUS = "Waiting for your approval"
+# How long the status line says which transcript mode Ctrl+O chose, in place
+# of its detail, while a Turn's activity or an approval otherwise fills it.
+_MODE_NOTICE_SECONDS = 3.0
 
 
 @dataclass(slots=True)
@@ -126,9 +136,40 @@ class _TurnStats:
         return self._first("completion_tokens", "output_tokens")
 
 
+# Markdown marks that say nothing in a one-line summary: a heading's, quote's
+# or bullet's at the start, code-span backticks, and emphasis marks that come
+# in pairs around text. Anything else is text: self._cache, *args, a * b.
+_LEADING_MARKS = re.compile(r"^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+)*")
+# A span closes on a run of backticks as long as the one that opened it.
+_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
+# The text inside a pair holds no mark of its own kind, so a search from an
+# unpaired mark stops at the next one: linear on any line. Like Markdown,
+# * pairs work inside a word (这是**重点**内容), _ pairs only around one.
+_EMPHASIS = (
+    re.compile(r"(?<!\*)(\*{1,3})(?=\S)([^*]+?)(?<=\S)\1(?!\*)"),
+    re.compile(r"(?<![\w_])(_{1,3})(?=\S)([^_]+?)(?<=\S)\1(?![\w_])"),
+)
+_HELD = "\ue000"  # a private-use character holding a code span's place
+_RULE = re.compile(r"\s*([-*_])(?:\s*\1){2,}\s*")
+
+
 def _clean_line(line: str) -> str:
-    """One line with its markdown punctuation stripped, for a status tail."""
-    return re.sub(r"[*_`#>\[\]]", "", line).strip()
+    """One line without its Markdown marks, for a status tail or a preview."""
+    if _RULE.fullmatch(line):
+        return ""  # a rule says nothing; the next line summarises instead
+    spans: list[str] = []
+
+    def hold(match: re.Match[str]) -> str:
+        spans.append(match[2])
+        return _HELD
+
+    # Code spans are kept as written, and held out while emphasis marks
+    # around them (**`relic_offer`**) are stripped.
+    text = _CODE_SPAN.sub(hold, _LEADING_MARKS.sub("", line.replace(_HELD, "")))
+    for pattern in _EMPHASIS:
+        text = pattern.sub(r"\2", text)
+    code = iter(spans)
+    return re.sub(_HELD, lambda _: next(code), text).strip()
 
 
 def _first_content_line(text: str, *, limit: int) -> str:
@@ -188,6 +229,52 @@ def _duration_label(duration_ms: int | None) -> str | None:
         return f"{seconds}s"
     minutes, remainder = divmod(seconds, 60)
     return f"{minutes}m {remainder:02d}s"
+
+
+def _result_lines(preview: str) -> list[str]:
+    """A result preview's lines with content, as a terminal shows them,
+    without the line that marks where the preview skips."""
+    lines = (line.strip() for line in terminal_text(preview).split("\n"))
+    return [line for line in lines if line and line != RESULT_ELISION]
+
+
+def _fit_ends(first: str, last: str, width: int, *, skipped: bool) -> str:
+    """``first`` and ``last`` on one line within ``width`` cells.
+
+    ``…`` joins them when lines between them are left out, `` · `` when
+    they are all there is. Each end gets the room it needs, up to half; a
+    last line the preview cut into keeps its real end. Where a cut meets the
+    joining ``…`` it needs no mark of its own.
+    """
+    if not last:
+        return fit_head(first, width)
+    cut_into = last.startswith(RESULT_ELISION)
+    if skipped:
+        first = first.removesuffix(RESULT_ELISION)
+        last = last.removeprefix(RESULT_ELISION)
+    separator = f" {RESULT_ELISION} " if skipped else " · "
+    joined = f"{first}{separator}{last}"
+    if cell_len(joined) <= width:
+        return joined
+    room = max(2, width - cell_len(separator))
+    first_width = min(cell_len(first), max(room // 2, room - cell_len(last)))
+    last_width = room - first_width
+    head = fit_head(first, first_width, mark=not skipped)
+    # A last line the preview cut into shows its end, where the news is.
+    tail = (
+        fit_tail(last, last_width, mark=not skipped)
+        if cut_into
+        else fit_head(last, last_width)
+    )
+    return f"{head}{separator}{tail}"
+
+
+def _refusal_reason(line: str) -> str:
+    """A refusal's reason without the error wording the model reads."""
+    for prefix in ("Error: permission denied: ", "Error: "):
+        if line.startswith(prefix):
+            return line[len(prefix) :]
+    return line
 
 
 class EventRenderer:
@@ -255,6 +342,7 @@ class EventRenderer:
         self._queued: dict[str, float] = {}
         self._running: set[str] = set()
         self._queue_reason: str | None = None
+        self._mode_chosen_at: float | None = None
 
     def _emit_gap(self) -> None:
         if self._gap_pending:
@@ -279,6 +367,14 @@ class EventRenderer:
             raw=self.raw_output,
             before_output=self._emit_gap if gap else None,
         )
+        self._feed_all(stream, text)
+
+    def _print_detail(self, text: str, style: str) -> None:
+        """Markdown that belongs to the line above it, indented under its mark."""
+        self._feed_all(MarkdownStream(self.console, indent=2, style=style), text)
+
+    @staticmethod
+    def _feed_all(stream: MarkdownStream, text: str) -> None:
         for line in text.split("\n"):
             stream.feed_line(line)
         stream.finish()
@@ -339,7 +435,18 @@ class EventRenderer:
 
     def cycle_transcript_mode(self) -> str:
         mode = self.set_transcript_mode(self.transcript_mode.next())
+        # Only what comes next changes, so say so where the user looks.
+        self._mode_chosen_at = monotonic()
         return mode.value
+
+    def _mode_notice(self) -> str | None:
+        """The mode Ctrl+O just chose, for a few seconds after it."""
+        if (
+            self._mode_chosen_at is None
+            or monotonic() - self._mode_chosen_at > _MODE_NOTICE_SECONDS
+        ):
+            return None
+        return f"Transcript: {self.transcript_mode.value} from here on"
 
     # -- waiting states (fed from service events by the app) ----------------
 
@@ -425,12 +532,15 @@ class EventRenderer:
                 detail = (
                     f"{detail} (+{extra} running)" if detail else f"+{extra} running"
                 )
-            return (call.label, max(0.0, monotonic() - call.started_at), detail)
+            # A tool without a known label is named after itself, which can
+            # be long (an MCP tool's full name); the status line has no room.
+            label = fit_head(call.label, _STATUS_LABEL_CELLS)
+            return (label, max(0.0, monotonic() - call.started_at), detail)
         reasoning_id = self._active_reasoning_id
         if reasoning_id is not None:
             state = self._reasoning.get(reasoning_id)
             if state is not None:
-                effort = (state.effort or "auto").title()
+                effort = effort_label(state.effort)
                 detail = _last_content_line(
                     state.display_text,
                     limit=_STATUS_DETAIL_CHARS,
@@ -453,14 +563,16 @@ class EventRenderer:
         )
 
     def is_working(self) -> bool:
-        """Whether the status line currently has motion to show.
+        """Whether the status line has motion to show, or a notice to take down.
 
         O(1) and side-effect free: the input layer asks this several times a
         second to decide whether the prompt needs an animation repaint at
         all. An idle TUI must cost nothing.
         """
         if self._approvals:
-            return False  # waiting on the user: nothing moves
+            # Waiting on the user, nothing moves; only a Ctrl+O notice on the
+            # approval line needs the repaint that takes it down.
+            return self._mode_notice() is not None
         return bool(
             self._tool_calls
             or self._active_reasoning_id
@@ -491,15 +603,17 @@ class EventRenderer:
     def status_line(self) -> str:
         """The status as plain text (no motion) — pipes, tests, fallbacks."""
         hint = self.approval_hint
+        notice = self._mode_notice()
         if hint is not None:
-            return f" ◆ {APPROVAL_STATUS} · {hint} "
+            # The prompt still lists the keys while the notice stands in.
+            return f" ◆ {APPROVAL_STATUS} · {notice or hint} "
         activity = self._activity()
         if activity is None:
             return f" {self._idle_status()} "
         label, elapsed, detail = activity
         parts = [label, f"{int(elapsed)}s"]
-        if detail:
-            parts.append(detail)
+        if notice or detail:
+            parts.append(notice or detail)
         return f" {' · '.join(parts)} "
 
     def preview_lines(self) -> list[str]:
@@ -524,7 +638,7 @@ class EventRenderer:
         rows: list[str] = []
         for line in pending:
             text = Text(line.replace("\r", "").replace("\t", "    "))
-            rows.extend(row.plain for row in text.wrap(self.console, width))
+            rows.extend(row.plain for row in wrap_text(text, width))
         return [f" {row}" for row in rows[-_PREVIEW_ROWS:]]
 
     def status_fragments(self) -> list[tuple[str, str]]:
@@ -536,11 +650,15 @@ class EventRenderer:
         redrawing the transcript.
         """
         hint = self.approval_hint
+        notice = self._mode_notice()
         if hint is not None:
             # Still, no spinner and no clock: the Turn waits for the user.
+            # The prompt still lists the keys while the notice stands in.
             return [
                 (theme.STATUS_APPROVAL_PTK, f" ◆ {APPROVAL_STATUS} "),
-                (theme.STATUS_DETAIL_PTK, f"· {hint} "),
+                (theme.STATUS_LABEL_PTK, f"· {notice} ")
+                if notice
+                else (theme.STATUS_DETAIL_PTK, f"· {hint} "),
             ]
         activity = self._activity()
         if activity is None:
@@ -560,10 +678,13 @@ class EventRenderer:
                 glare_style=theme.STATUS_GLARE_PTK,
             )
         )
-        tail = f" · {int(elapsed)}s"
-        if detail:
-            tail += f" · {detail}"
-        fragments.append((theme.STATUS_DETAIL_PTK, tail + " "))
+        fragments.append((theme.STATUS_DETAIL_PTK, f" · {int(elapsed)}s"))
+        # The notice stands in for the detail, so it fits a normal width.
+        if notice:
+            fragments.append((theme.STATUS_LABEL_PTK, f" · {notice}"))
+        elif detail:
+            fragments.append((theme.STATUS_DETAIL_PTK, f" · {detail}"))
+        fragments.append((theme.STATUS_DETAIL_PTK, " "))
         return fragments
 
     # -- event entrypoint -----------------------------------------------------
@@ -698,7 +819,7 @@ class EventRenderer:
         self.console.print(
             f"[{theme.META_STYLE}]{theme.THINKING_MARK} Thinking summary[/]"
         )
-        self.console.print(Markdown(msg.text), style=theme.META_STYLE)
+        self._print_detail(msg.text, theme.META_STYLE)
 
     def _on_agent_reasoning_started(self, msg) -> None:
         self._reasoning[msg.reasoning_id] = _ReasoningState(
@@ -770,7 +891,7 @@ class EventRenderer:
         availability: ReasoningAvailability,
     ) -> None:
         self._begin_block()
-        effort = (state.effort or "auto").title()
+        effort = effort_label(state.effort)
         mark = theme.THINKING_MARK
         label = (
             f"{mark} Thought for {duration}"
@@ -784,7 +905,7 @@ class EventRenderer:
         self._gap_pending = True
         if availability is ReasoningAvailability.OPAQUE:
             self.console.print(
-                f"[{theme.META_STYLE}]Details were not provided by this model.[/]"
+                f"  [{theme.META_STYLE}]Details were not provided by this model.[/]"
             )
             return
 
@@ -797,24 +918,23 @@ class EventRenderer:
                 limit=_NORMAL_PREVIEW_CHARS,
             )
             if preview:
-                self.console.print(
-                    f"  [{theme.THINKING_STYLE}]{escape(preview)}[/]",
-                    highlight=False,
-                )
+                for row in wrap_text(Text(preview), self.console.width - 2):
+                    self.console.print(
+                        Text("  ") + row,
+                        style=theme.THINKING_STYLE,
+                        soft_wrap=True,
+                        highlight=False,
+                    )
             return
 
         if state.summary_text:
-            self.console.print(
-                Markdown(state.summary_text),
-                style=theme.THINKING_STYLE,
-            )
+            self._print_detail(state.summary_text, theme.THINKING_STYLE)
         if state.trace_text and state.trace_text != state.summary_text:
             if state.summary_text:
-                self.console.print(f"[{theme.META_STYLE}]Provider reasoning details[/]")
-            self.console.print(
-                Markdown(state.trace_text),
-                style=theme.THINKING_STYLE,
-            )
+                self.console.print(
+                    f"  [{theme.META_STYLE}]Provider reasoning details[/]"
+                )
+            self._print_detail(state.trace_text, theme.THINKING_STYLE)
 
     def _tool_heading(self, msg) -> tuple[str, str | None, str | None]:
         """Presentation ``(label, kind, subject)`` for one tool call.
@@ -920,18 +1040,33 @@ class EventRenderer:
             if elapsed >= _DURATION_FLOOR_SECONDS:
                 parts.append(_elapsed_label(elapsed))
         preview = getattr(msg, "result_preview", "") or ""
-        first_line = preview.splitlines()[0].strip() if preview else ""
+        lines = _result_lines(preview)
+        first_line = lines[0] if lines else ""
+        # A command's news is often its last line (a test summary, the error
+        # under a traceback), so its output shows both ends. For other tools
+        # the first line says what came back; their last is often a listing's
+        # tail or a note for the model.
+        both_ends = call is not None and call.kind == "run" and len(lines) > 1
+        last_line = lines[-1] if both_ends else ""
+        skipped = len(lines) > 2 or f"\n{RESULT_ELISION}\n" in preview
 
-        if msg.is_error and _USER_DENIAL in first_line:
-            # The user said no: not a failure, and the approval's reason
-            # (already on screen above) is not worth repeating.
+        if msg.denied and _USER_DENIAL in first_line:
+            # The user said no: the approval's reason is on screen above and
+            # not worth repeating.
             self.console.print(
                 f"{theme.TOOL_RESULT_ELBOW} [{theme.APPROVAL_STYLE}]Denied by you[/]",
                 highlight=False,
             )
             self._gap_pending = True
             return
-        if msg.is_error:
+        if msg.denied:
+            # A rule, a hook or the turn's tool set refused it before it ran:
+            # no failure, but its reason is the news, without the error
+            # wording the model reads.
+            head = f"{theme.DONE_DECLINED} {msg.name} declined"
+            mark = f"[{theme.APPROVAL_STYLE}]{escape(head)}[/]"
+            first_line, last_line = _refusal_reason(first_line), ""
+        elif msg.is_error:
             head = f"{theme.DONE_ERR} {msg.name} failed"
             mark = f"[{theme.TOOL_ERR_STYLE}]{escape(head)}[/]"
         else:
@@ -944,15 +1079,34 @@ class EventRenderer:
         # The elbow is a SINGLE line: the result snippet is cut to the width
         # left over, so a long error path can never wrap into an unindented
         # mess below.
+        fits = True
         if first_line:
             used = cell_len(theme.TOOL_RESULT_ELBOW) + 1 + cell_len(head) + 3
             budget = max(_ELBOW_MIN_CELLS, self.console.width - used - 1)
-            snippet = fit_head(first_line, budget)
+            fits = cell_len(first_line) <= budget
+            snippet = _fit_ends(first_line, last_line, budget, skipped=skipped)
             # A dot separates two facts; a space separates a mark from the
             # one fact it carries ("✓ total 0", but "✗ bash failed · …").
             separator = " · " if (rendered or msg.is_error) else " "
             mark += f"{separator}[{theme.TOOL_DETAIL_STYLE}]{escape(snippet)}[/]"
         self.console.print(f"{theme.TOOL_RESULT_ELBOW} {mark}", highlight=False)
+        if (
+            self.transcript_mode is TranscriptMode.VERBOSE
+            and not msg.denied
+            and (len(lines) > 1 or not fits)
+        ):
+            # Verbose shows the preview the elbow could not: its start and its
+            # end, wrapped under the elbow rather than cut.
+            indent = " " * (cell_len(theme.TOOL_RESULT_ELBOW) + 1)
+            width = max(_ELBOW_MIN_CELLS, self.console.width - len(indent) - 1)
+            for line in terminal_text(preview).strip("\n").split("\n"):
+                for row in wrap_text(Text(line), width):
+                    self.console.print(
+                        f"{indent}{row.plain}".rstrip(),
+                        style=theme.TOOL_DETAIL_STYLE,
+                        markup=False,
+                        highlight=False,
+                    )
         self._gap_pending = True
 
     def _on_plan_updated(self, msg) -> None:
@@ -1038,7 +1192,7 @@ class EventRenderer:
         self._close_line()
         if msg.stop_reason != "completed":
             self.console.print(
-                f"[{theme.META_STYLE}]· turn ended: {escape(str(msg.stop_reason))}[/]"
+                f"[{theme.META_STYLE}]· Turn ended: {escape(str(msg.stop_reason))}[/]"
             )
         if self.transcript_mode is not TranscriptMode.SUMMARY:
             footer = self._turn_footer()

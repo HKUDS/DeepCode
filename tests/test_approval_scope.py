@@ -1,4 +1,4 @@
-"""What "always allow this session" covers: the same kind of call only."""
+"""What "always allow this Session" covers: the same kind of call only."""
 
 from __future__ import annotations
 
@@ -152,15 +152,15 @@ def test_wrapped_commands_are_not_covered_by_the_inner_program() -> None:
 def test_command_labels_say_what_is_covered() -> None:
     assert (
         session_scope("bash", {"command": "git status"}, "/ws").label
-        == "Always allow `git status …` this session"
+        == "Always allow `git status …` this Session"
     )
     assert (
         session_scope("bash", {"command": "rm -rf b && echo ok"}, "/ws").label
-        == "Always allow `rm …` and `echo …` this session"
+        == "Always allow `rm …` and `echo …` this Session"
     )
     assert (
         session_scope("bash", {"command": "echo hi > out.txt"}, "/ws").label
-        == "Always allow exactly `echo hi > out.txt` this session"
+        == "Always allow exactly `echo hi > out.txt` this Session"
     )
 
 
@@ -187,7 +187,7 @@ def test_edits_in_the_workspace_share_one_scope_across_edit_tools(tmp_path) -> N
         {"patch": "*** Begin Patch\n*** Update File: c.py\n@@\n-a\n+b\n*** End Patch"},
         workspace,
     )
-    assert write.label == "Always allow edits in this workspace this session"
+    assert write.label == "Always allow edits in this workspace this Session"
     assert write.keys == edit.keys == patch.keys
     assert is_covered(edit, [("write", write.keys)])
     assert is_covered(patch, [("write", write.keys)])
@@ -228,7 +228,7 @@ def test_a_patch_without_paths_is_only_this_exact_change(tmp_path) -> None:
 def test_other_tools_keep_whole_tool_grants() -> None:
     scope = session_scope("mcp_github_create_issue", {"title": "x"}, "/ws")
     assert scope.keys == ()
-    assert scope.label == "Always allow `mcp_github_create_issue` this session"
+    assert scope.label == "Always allow `mcp_github_create_issue` this Session"
     later = session_scope("mcp_github_create_issue", {"title": "y"}, "/ws")
     assert is_covered(later, [("mcp_github_create_issue", ())])
     assert not is_covered(later, [("mcp_github_close_issue", ())])
@@ -292,7 +292,7 @@ def test_exec_and_automation_prompts_say_what_always_allow_covers(
     )
     monkeypatch.setattr(sys, "stdin", _Tty("a\n"))
     assert _approval_decider(approval) is ApprovalStatus.APPROVED_SESSION
-    assert "a = always allow `npm test …` this session" in capsys.readouterr().err
+    assert "a = always allow `npm test …` this Session" in capsys.readouterr().err
 
     prompts: list[str] = []
     answers = iter(["maybe", "a"])
@@ -308,6 +308,6 @@ def test_exec_and_automation_prompts_say_what_always_allow_covers(
         return next(answers)
 
     _resolve_interactively(application, approval, reader)
-    assert "always allow `npm test …` this session [a]" in prompts[0]
-    assert "a (always allow `npm test …` this session)" in prompts[1]
+    assert "always allow `npm test …` this Session [a]" in prompts[0]
+    assert "a (always allow `npm test …` this Session)" in prompts[1]
     assert responses == [ApprovalStatus.APPROVED_SESSION]

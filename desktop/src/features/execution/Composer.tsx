@@ -44,12 +44,14 @@ import { PresetPicker } from "../presets/PresetPicker";
 import { usePresetCatalog } from "../presets/usePresetCatalog";
 import { useSkillCatalog } from "../skills/useSkillCatalog";
 import { GoalRail } from "../goal/GoalRail";
+import { skillOriginLabel } from "../extensions/skillPresentation";
 import {
   matchingCommands,
   parseComposerCommand,
   type ComposerCommand,
 } from "./commands";
 import styles from "./Composer.module.css";
+import { attachmentErrorText } from "./attachmentErrorText";
 import { useDictation } from "./useDictation";
 import { usePromptDraft } from "./usePromptDraft";
 import { ModelPicker } from "./ModelPicker";
@@ -373,7 +375,7 @@ export function Composer({
       }
       addAttachments(accepted);
     } catch (error) {
-      setContextError(error instanceof Error ? error.message : String(error));
+      setContextError(attachmentErrorText(error, t));
     }
   };
 
@@ -555,7 +557,7 @@ export function Composer({
                           {skill.shortDescription ?? skill.description}
                         </small>
                       </span>
-                      <em>{skill.originLabel}</em>
+                      <em>{skillOriginLabel(skill, t)}</em>
                     </button>
                   );
                 })

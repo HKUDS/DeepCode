@@ -3,12 +3,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypedDict
 
 from loguru import logger
 
 from core.providers.base import LLMResponse, ToolCallRequest
 from core.reasoning import ReasoningChannel
+
+
+class _ToolEventBase(TypedDict):
+    name: str
+    # "ok", "error", "denied" (refused before it ran) or "timeout".
+    status: str
+    detail: str
+
+
+class ToolEvent(_ToolEventBase, total=False):
+    """What the runner reports for one tool call."""
+
+    # Where hook context begins in the result, when there is any: a character
+    # offset in text, the index of its first block in a list of content blocks.
+    hook_context_at: int
 
 
 @dataclass(slots=True)
@@ -21,7 +36,7 @@ class AgentHookContext:
     usage: dict[str, int] = field(default_factory=dict)
     tool_calls: list[ToolCallRequest] = field(default_factory=list)
     tool_results: list[Any] = field(default_factory=list)
-    tool_events: list[dict[str, str]] = field(default_factory=list)
+    tool_events: list[ToolEvent] = field(default_factory=list)
     final_content: str | None = None
     stop_reason: str | None = None
     error: str | None = None

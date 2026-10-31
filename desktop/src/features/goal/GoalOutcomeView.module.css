@@ -1,0 +1,83 @@
+/* Tracks no wider than their box: long activity lines end in an ellipsis. */
+.outcome {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.outcome > header {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.outcome > header > svg {
+  flex: 0 0 auto;
+  color: var(--success);
+}
+
+/* Blocked means it needs the user, not that something broke. */
+.outcome[data-status="blocked"] > header > svg {
+  color: var(--attention);
+}
+
+.outcome > header strong {
+  color: var(--text-primary);
+  /* As large as the reason below it, which compact Markdown sets. */
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+}
+
+.outcome > header small {
+  color: var(--text-tertiary);
+  font: var(--text-micro) var(--font-mono);
+}
+
+.related {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+
+.related > span {
+  color: var(--text-tertiary);
+  font: var(--text-micro) var(--font-mono);
+}
+
+.related ul {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.related button {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--radius-xs);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  text-align: left;
+}
+
+.related button > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.related button:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}

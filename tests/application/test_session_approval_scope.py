@@ -1,4 +1,4 @@
-"""An "always allow this session" answer covers the same kind of call only.
+"""An "always allow this Session" answer covers the same kind of call only.
 
 Each Turn below asks for one tool call (named by its prompt) through the real
 ApprovalService and the durable grant table, the way every client's answer
@@ -116,7 +116,7 @@ def test_approving_ls_for_the_session_still_asks_for_rm(session) -> None:
     )
     assert first is not None
     assert first.request["sessionScope"]["label"] == (
-        "Always allow `ls …` this session"
+        "Always allow `ls …` this Session"
     )
     assert first.request["reason"] == "Running a command needs your approval."
 
@@ -124,7 +124,7 @@ def test_approving_ls_for_the_session_still_asks_for_rm(session) -> None:
     asked = _call(application, thread_id, "bash", {"command": "rm -rf build"})
     assert asked is not None
     assert asked.request["sessionScope"]["label"] == (
-        "Always allow `rm …` this session"
+        "Always allow `rm …` this Session"
     )
 
 
@@ -174,7 +174,7 @@ def test_allowing_one_edit_allows_edits_in_the_workspace_only(session) -> None:
         answer=ApprovalStatus.APPROVED_SESSION,
     )
     assert first.request["sessionScope"]["label"] == (
-        "Always allow edits in this workspace this session"
+        "Always allow edits in this workspace this Session"
     )
     assert first.request["reason"] == "Changing files needs your approval."
     assert (

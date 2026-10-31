@@ -1805,7 +1805,7 @@ describe("desktop command center", () => {
     render(<App runtime={new TestRuntime()} />);
 
     expect(
-      screen.getByRole("heading", { name: "Start a local coding thread" }),
+      screen.getByRole("heading", { name: "Start a local coding Session" }),
     ).toBeTruthy();
     expect(
       screen.getAllByRole("button", { name: "Open project folder" }),
@@ -1945,7 +1945,7 @@ describe("desktop command center", () => {
     ).toContain("Skill Creator");
   });
 
-  it("runs and manages a durable automation backed by a Goal Thread", async () => {
+  it("runs and manages a durable automation backed by a Goal Session", async () => {
     const runtime = new TestRuntime([project], [thread, goalThread], []);
     render(<App runtime={runtime} />);
 
@@ -1977,7 +1977,7 @@ describe("desktop command center", () => {
       expect(request).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Thread" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Session" }));
     await screen.findByRole("heading", { name: "Repository caretaker" });
     expect(
       runtime.requests.filter(
@@ -2183,15 +2183,24 @@ describe("desktop command center", () => {
     render(<App runtime={runtime} />);
 
     await screen.findByText("Complete");
-    fireEvent.click(screen.getByText("Ship version one").closest("button")!);
+    // One Turn, said in the singular.
+    expect(screen.getByText("Ship version one").closest("button")!.textContent).toContain(
+      "1 Turn",
+    );
     expect(
-      screen.getByText(
+      screen.getByText("Ship version one").closest("button")!.textContent,
+    ).not.toContain("1 Turns");
+    fireEvent.click(screen.getByText("Ship version one").closest("button")!);
+    const rail = screen.getByRole("region", { name: "Goal outcome" });
+    expect(
+      within(rail).getByText(
         "The requested change is implemented and focused tests pass.",
       ),
     ).toBeTruthy();
-    expect(screen.getByText(/Deciding Turn/)).toBeTruthy();
+    // The deciding Turn shows the outcome in the conversation too.
+    expect(screen.getByRole("region", { name: "Goal complete" })).toBeTruthy();
     fireEvent.click(
-      screen.getByRole("button", { name: "Focused tests passed" }),
+      within(rail).getByRole("button", { name: "Focused tests passed" }),
     );
     expect(
       await screen.findByRole("heading", { name: "Focused tests passed" }),
@@ -2252,7 +2261,7 @@ describe("desktop command center", () => {
       name: "Default for new Sessions",
     });
     await within(dialog).findByRole("option", {
-      name: "Code reader [system]",
+      name: "Code reader · Built in",
     });
     fireEvent.change(picker, { target: { value: "code-reader" } });
     fireEvent.click(
@@ -2585,7 +2594,7 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Settings" });
     expect(
-      await screen.findByText("SQLite integrity check passed"),
+      await screen.findByText("The database integrity check passed."),
     ).toBeTruthy();
     expect(
       runtime.requests.find((request) => request.method === "diagnostics/read")
@@ -2623,7 +2632,7 @@ describe("desktop command center", () => {
 
     fireEvent.click(runChecks);
     expect(
-      await screen.findByText("SQLite integrity check passed"),
+      await screen.findByText("The database integrity check passed."),
     ).toBeTruthy();
     expect(screen.queryByText("Diagnostics are unavailable")).toBeNull();
   });
@@ -3141,7 +3150,7 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Session 77f8ff1b" });
 
-    expect(screen.getAllByText("Previous sessions").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Previous Sessions").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Folder unavailable").length).toBeGreaterThan(0);
     expect(
       screen.getByText(
@@ -3158,7 +3167,7 @@ describe("desktop command center", () => {
     expect(
       (
         screen.getByRole("button", {
-          name: /New thread/,
+          name: /New Session/,
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(true);
@@ -3519,9 +3528,8 @@ describe("desktop command center", () => {
     expect(screen.getByText(/pytest -q/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
 
-    await waitFor(() =>
-      expect(screen.getByText("Decision: approved once")).toBeTruthy(),
-    );
+    // The resolved approval says what was decided, once.
+    await waitFor(() => expect(screen.getAllByText("Allowed once")).toHaveLength(1));
     expect(runtime.calls).toContain("approval/respond");
   });
 
@@ -3956,11 +3964,159 @@ describe("a Session whose file can't be read", () => {
 
     runtime.unreadable.delete(thread.id);
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    await screen.findByLabelText("Thread conversation");
+    await screen.findByLabelText("Conversation");
     expect(
       screen.queryByRole("heading", {
         name: "This Session can't be read right now.",
       }),
     ).toBeNull();
+  });
+});
+
+describe("a long Session's history", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    __setLocaleForTests("en");
+  });
+  afterEach(() => {
+    cleanup();
+    localStorage.clear();
+  });
+
+  /** 40 Turns, each a prompt, ten runs of six commands with a note, and an answer. */
+  function longSession(): Event[] {
+    const events: Event[] = [];
+    const push = (event: Omit<Event, "sequence" | "eventId">) => {
+      const sequence = events.length + 1;
+      events.push({ ...event, sequence, eventId: `event-${sequence}` } as Event);
+    };
+    for (let index = 0; index < 40; index += 1) {
+      const turnId = `turn-long-${index}`;
+      push({
+        type: "turn.completed",
+        threadId: thread.id,
+        turnId,
+        itemId: null,
+        timestamp: "2026-07-16T00:00:03Z",
+        payload: {
+          turn: { ...turn, id: turnId, ordinal: index + 1, prompt: `Prompt ${index}` } as unknown as JsonValue,
+        },
+      });
+      let ordinal = 0;
+      const add = (kind: Item["kind"], text: string, extra: Record<string, JsonValue> = {}) => {
+        ordinal += 1;
+        const id = `item-long-${index}-${ordinal}`;
+        push({
+          type: "item.created",
+          threadId: thread.id,
+          turnId,
+          itemId: id,
+          timestamp: "2026-07-16T00:00:02Z",
+          payload: {
+            item: {
+              id,
+              threadId: thread.id,
+              turnId,
+              ordinal,
+              kind,
+              status: "completed",
+              summary: text,
+              payload: { text, ...extra },
+              createdAt: "2026-07-16T00:00:02Z",
+              updatedAt: "2026-07-16T00:00:02Z",
+            } as unknown as JsonValue,
+          },
+        });
+      };
+      add("user_message", `Prompt ${index}`);
+      for (let run = 0; run < 10; run += 1) {
+        for (let step = 0; step < 6; step += 1) add("command_execution", `command ${step}`);
+        add("assistant_message", `Turn ${index} note ${run}`, { phase: "commentary" });
+      }
+      add("assistant_message", `Turn ${index} answer`, { phase: "final_answer" });
+    }
+    return events;
+  }
+
+  /** Replay pages arrive in later tasks, as they do over a socket. */
+  class PagedReplayRuntime extends TestRuntime {
+    async request<M extends RpcMethod>(
+      method: M,
+      params: MethodParams[M],
+    ): Promise<MethodResults[M]> {
+      if (method === "event/replay") {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      return super.request(method, params);
+    }
+  }
+
+  it("opens at its recent history once every replayed page is in", async () => {
+    const events = longSession();
+    const runtime = new PagedReplayRuntime([project], [thread], events);
+    render(<App runtime={runtime} />);
+
+    await screen.findByText("Turn 39 answer", {}, { timeout: 5000 });
+    expect(
+      runtime.requests.filter((request) => request.method === "event/replay").length,
+    ).toBeGreaterThan(1);
+    // 22 rows a Turn: nine fit in a batch.
+    expect(screen.queryByText("Turn 30 answer")).toBeNull();
+    expect(screen.getByText("Turn 31 answer")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Show earlier Turns · 31 more" }),
+    ).toBeTruthy();
+
+    // A Turn that arrives later does not push the opening batch out.
+    const live: Event[] = [];
+    const deliver = (event: Omit<Event, "sequence" | "eventId">) => {
+      const sequence = events.length + live.length + 1;
+      live.push({ ...event, sequence, eventId: `event-${sequence}` } as Event);
+    };
+    const later = "turn-long-40";
+    deliver({
+      type: "turn.completed",
+      threadId: thread.id,
+      turnId: later,
+      itemId: null,
+      timestamp: "2026-07-16T00:00:04Z",
+      payload: {
+        turn: { ...turn, id: later, ordinal: 41, prompt: "Prompt 40" } as unknown as JsonValue,
+      },
+    });
+    for (let ordinal = 1; ordinal <= 21; ordinal += 1) {
+      const id = `item-long-40-${ordinal}`;
+      deliver({
+        type: "item.created",
+        threadId: thread.id,
+        turnId: later,
+        itemId: id,
+        timestamp: "2026-07-16T00:00:04Z",
+        payload: {
+          item: {
+            id,
+            threadId: thread.id,
+            turnId: later,
+            ordinal,
+            kind: "assistant_message",
+            status: "completed",
+            summary: `Turn 40 note ${ordinal}`,
+            payload: { text: `Turn 40 note ${ordinal}`, phase: "commentary" },
+            createdAt: "2026-07-16T00:00:04Z",
+            updatedAt: "2026-07-16T00:00:04Z",
+          } as unknown as JsonValue,
+        },
+      });
+    }
+    events.push(...live);
+    act(() =>
+      live.forEach((event) =>
+        runtime.notifications.forEach((receive) =>
+          receive({ jsonrpc: "2.0", method: event.type, params: event } as AnyRpcNotification),
+        ),
+      ),
+    );
+    await screen.findByText("Turn 40 note 21");
+    expect(screen.getByText("Turn 31 answer")).toBeTruthy();
   });
 });

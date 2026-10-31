@@ -506,6 +506,8 @@ async def test_nonzero_bash_exit_emits_failed_tool_completion(tmp_path):
     )
     assert completed.name == "bash"
     assert completed.is_error is True
+    # It ran and failed; nothing refused it.
+    assert completed.denied is False
     assert completed.result_preview.startswith("[exit 9]")
     tool_message = next(
         message for message in session.history if message.get("role") == "tool"
@@ -636,6 +638,100 @@ async def test_denied_tool_marks_completed_as_error():
 
     completed = [e.msg for e in events if isinstance(e.msg, ToolCompleted)][0]
     assert completed.is_error is True
+    # Refused, not broken: it never ran.
+    assert completed.denied is True
+    # The nudge appended for the model is not shown to people.
+    assert "Analyze the error above" not in completed.result_preview
+    assert "blocked" in completed.result_preview
+
+
+@pytest.mark.asyncio
+async def test_each_refused_call_and_only_it_is_marked_denied():
+    def call(call_id: str, text: str) -> ToolCallRequest:
+        return ToolCallRequest(id=call_id, name="echo", arguments={"text": text})
+
+    provider = ScriptedProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    call("ran", "hello"),
+                    call("ruled", "rule"),
+                    call("rejected", "ask"),
+                    call("broken", "ask-and-break"),
+                    call("unchecked", "check-and-break"),
+                    ToolCallRequest(id="unknown", name="no_such_tool", arguments={}),
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="ok", finish_reason="stop"),
+        ]
+    )
+
+    def checker(_name, args):
+        text = args.get("text", "")
+        if text == "check-and-break":
+            raise RuntimeError("policy store unreadable")
+        if text == "rule":
+            return ("deny", "blocked by a rule")
+        if text.startswith("ask"):
+            return ("ask", "needs approval")
+        return ("allow", "")
+
+    def approver(_name, args, _reason):
+        if args.get("text") == "ask-and-break":
+            raise RuntimeError("approval channel lost")
+        return False
+
+    session = _session(provider, permission_checker=checker, approval_callback=approver)
+    await session.submit(UserInput(text="go"))
+    completed = {
+        event.msg.call_id: event.msg
+        for event in session.drain_events()
+        if isinstance(event.msg, ToolCompleted)
+    }
+
+    assert {call_id: done.denied for call_id, done in completed.items()} == {
+        "ran": False,
+        # A rule and the user refused these before they ran.
+        "ruled": True,
+        "rejected": True,
+        # A broken approval or permission check is a fault, and an unknown
+        # tool an error: none of them is a decision.
+        "broken": False,
+        "unchecked": False,
+        "unknown": False,
+    }
+    assert all(
+        completed[call_id].is_error
+        for call_id in ("ruled", "rejected", "broken", "unchecked")
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_tool_preview_cuts_hook_context_where_the_runner_put_it():
+    from core.agent_runtime.hook import AgentHookContext, ToolEvent
+    from core.agent_runtime.runner import AgentRunner
+    from core.events.session import _EventEmittingHook
+
+    output = "step 1\n\n[hook] printed by the program\nstep 2 ran"
+    event: ToolEvent = {"name": "bash", "status": "ok", "detail": ""}
+    composed = AgentRunner._compose_hook_context(output, ["lint: 2 issues"], event)
+    emitted: list = []
+    hook = _EventEmittingHook(emitted.append)
+
+    await hook.after_iteration(
+        AgentHookContext(
+            iteration=1,
+            messages=[],
+            tool_calls=[ToolCallRequest(id="c1", name="bash", arguments={})],
+            tool_results=[composed],
+            tool_events=[event],
+        )
+    )
+
+    completed = next(msg for msg in emitted if isinstance(msg, ToolCompleted))
+    assert completed.result_preview == output
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import io
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, ClassVar
@@ -21,6 +22,7 @@ import pytest
 pytestmark = pytest.mark.usefixtures("shared_cli_service")
 from rich.cells import cell_len
 from rich.console import Console
+from rich.text import Text
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -470,6 +472,103 @@ def test_cli_reasoning_respects_transcript_mode(mode, included, excluded):
         assert text not in rendered
 
 
+def test_verbose_reasoning_is_indented_under_its_card():
+    """The full reasoning reads as the card's body, not as stray prose."""
+    output = io.StringIO()
+    renderer = EventRenderer(
+        Console(file=output, color_system=None, width=40),
+        transcript_mode=TranscriptMode.VERBOSE,
+    )
+    thought = (
+        "先读取 main.js，确认 relic_offer 在哪里触发，再决定埋点的位置。\n\n"
+        "- 检查 death 事件"
+    )
+    renderer.on_event(Event("1", AgentReasoningStarted("r1", effort="high")))
+    renderer.on_event(
+        Event("2", AgentReasoningDelta("r1", ReasoningChannel.SUMMARY, thought))
+    )
+    renderer.on_event(
+        Event(
+            "3",
+            AgentReasoningCompleted(
+                "r1",
+                summary_text=thought,
+                trace_text="",
+                availability=ReasoningAvailability.AVAILABLE,
+                effort="high",
+                duration_ms=2200,
+            ),
+        )
+    )
+
+    lines = [line.rstrip() for line in output.getvalue().splitlines()]
+    card = next(i for i, line in enumerate(lines) if "Thought for 2s" in line)
+    assert lines[card + 1 :] == [
+        "  先读取 main.js，确认 relic_offer 在哪",
+        "  里触发，再决定埋点的位置。",
+        "",
+        "   • 检查 death 事件",
+    ]
+
+
+def test_the_reasoning_preview_wraps_under_its_card_and_keeps_words():
+    output = io.StringIO()
+    renderer = EventRenderer(Console(file=output, color_system=None, width=40))
+    thought = "**先读取** main.js，确认 `relic_offer` 在哪里触发，再决定埋点的位置。"
+    renderer.on_event(Event("1", AgentReasoningStarted("r1", effort="high")))
+    renderer.on_event(
+        Event("2", AgentReasoningDelta("r1", ReasoningChannel.SUMMARY, thought))
+    )
+    renderer.on_event(
+        Event(
+            "3",
+            AgentReasoningCompleted(
+                "r1",
+                summary_text=thought,
+                trace_text="",
+                availability=ReasoningAvailability.AVAILABLE,
+                effort="high",
+                duration_ms=2200,
+            ),
+        )
+    )
+
+    lines = [line.rstrip() for line in output.getvalue().splitlines()]
+    card = next(i for i, line in enumerate(lines) if "Thought for 2s" in line)
+    assert lines[card + 1 :] == [
+        "  先读取 main.js，确认 relic_offer 在哪",
+        "  里触发，再决定埋点的位置。",
+    ]
+
+
+def test_a_summary_line_drops_markdown_marks_but_keeps_identifiers():
+    from cli.tui.renderer import _clean_line
+
+    assert _clean_line("## **Plan**: check `relic_offer` and _why_") == (
+        "Plan: check relic_offer and why"
+    )
+    for text in ("self._cache", "os._exit(1)", "*args / **kwargs", "a * b"):
+        assert _clean_line(text) == text
+    assert _clean_line("open `__init__.py` and `*.py`") == "open __init__.py and *.py"
+    # Chinese has no spaces around bold; marks around a code span go too.
+    assert _clean_line("这是**重点**内容") == "这是重点内容"
+    assert _clean_line("**`relic_offer`** 在哪里触发") == "relic_offer 在哪里触发"
+    # A rule is not a line of thought.
+    assert [_clean_line(rule) for rule in ("***", "- - -", "___")] == ["", "", ""]
+
+
+def test_a_summary_line_is_cleaned_in_linear_time():
+    """The status line cleans the newest reasoning line on every repaint."""
+    from time import perf_counter
+
+    from cli.tui.renderer import _clean_line
+
+    started = perf_counter()
+    for text in (" _x" * 7000, " *x" * 7000, " **x" * 5000, "`" * 4000):
+        _clean_line(text)
+    assert perf_counter() - started < 0.5
+
+
 def test_cli_status_line_tracks_live_reasoning_without_printing_deltas():
     output = io.StringIO()
     renderer = EventRenderer(Console(file=output, color_system=None, width=120))
@@ -733,6 +832,65 @@ def test_text_fits_to_terminal_cells_not_characters():
     assert text_fitting.fit_tail("short", 40) == "short"
 
 
+def _wrapped(text: str, width: int) -> list[str]:
+    return [line.plain for line in text_fitting.wrap_text(Text(text), width)]
+
+
+def test_cjk_prose_breaks_between_characters_and_keeps_words_whole():
+    """Rich breaks only at spaces, and CJK text has none between words.
+
+    A CJK run jumped whole to the next line, leaving a short one behind, or
+    was cut at the edge, splitting an English word inside it ("rel|ic_offer").
+    """
+    text = "埋点：run_start、death、relic_offer 这些事件都要记录下来，并且在面板里展示出来以便调试。"
+    assert _wrapped(text, 30) == [
+        "埋点：run_start、death、",  # "relic_offer" would cross the edge
+        "relic_offer 这些事件都要记录下",
+        "来，并且在面板里展示出来以便调",
+        "试。",
+    ]
+    # Text with spaces wraps at them, as before.
+    sentence = "This sentence is long enough that it has to wrap at least once."
+    assert _wrapped(sentence, 40) == [
+        "This sentence is long enough that it has",
+        "to wrap at least once.",
+    ]
+
+
+def test_cjk_punctuation_never_starts_or_ends_a_line_on_the_wrong_side():
+    lines = _wrapped("他说：“你好”。然后离开了这个房间，没有再回来。", 12)
+    assert lines == ["他说：“你", "好”。然后离", "开了这个房", "间，没有再回", "来。"]
+    assert all(cell_len(line) <= 12 for line in lines)
+
+
+def test_straight_quotes_stay_with_the_text_they_enclose():
+    assert _wrapped('然后点击"保存"按钮即可。', 10) == [
+        "然后点",
+        '击"保存"按',
+        "钮即可。",
+    ]
+
+
+def test_leading_spaces_stay_with_the_first_word():
+    """An indented line too long for the width keeps its indent."""
+    url = "https://example.com/a/very/long/path/that/does/not/fit"
+    first, *_ = _wrapped(" " * 12 + url, 40)
+    assert first == " " * 12 + url[:28]
+
+
+def test_a_word_wider_than_the_line_is_cut_at_the_edge():
+    assert _wrapped("averyveryverylongidentifier and more", 10) == [
+        "averyveryv",
+        "erylongide",
+        "ntifier",
+        "and more",
+    ]
+    # Every line keeps at least one character, even one wider than the line,
+    # and a combining accent stays with the character it marks.
+    assert _wrapped("中文", 1) == ["中", "文"]
+    assert _wrapped("中\u0301文", 1) == ["中\u0301", "文"]
+
+
 def test_workspace_paths_shorten_only_when_they_are_paths():
     assert text_fitting.workspace_path("/repo/core/app.py", "/repo") == "core/app.py"
     # Outside the workspace it stays absolute (home-folded), and a value that
@@ -800,6 +958,135 @@ def test_tool_cards_name_paths_the_way_the_user_would_type_them():
     rendered = output.getvalue()
     assert "core/tui/renderer.py" in rendered
     assert "/repo/core" not in rendered
+
+
+_TEST_RUN = "\n".join(
+    ["===== test session starts ====="]
+    + [f"tests/test_{index}.py ......" for index in range(60)]
+    + ["===== 360 passed in 1.2s ====="]
+)
+
+
+def _settled_elbow(
+    result: str,
+    *,
+    mode: TranscriptMode = TranscriptMode.NORMAL,
+    kind: ToolActivityKind = ToolActivityKind.RUN,
+    width: int = 100,
+) -> list[str]:
+    from core.events.protocol import summarize_result
+
+    output = io.StringIO()
+    renderer = EventRenderer(
+        Console(file=output, color_system=None, width=width),
+        transcript_mode=mode,
+    )
+    activity = ToolActivity(kind, kind.value.title(), "subject")
+    renderer.on_event(Event("1", ToolStarted("call", "tool", activity=activity)))
+    renderer.on_event(
+        Event("2", ToolCompleted("call", "tool", False, summarize_result(result)))
+    )
+    lines = output.getvalue().splitlines()
+    elbow = next(index for index, line in enumerate(lines) if "⎿" in line)
+    return lines[elbow:]
+
+
+def test_a_command_result_reads_by_both_ends_on_one_line():
+    shown = _settled_elbow(_TEST_RUN)
+
+    assert len(shown) == 1
+    assert "test session starts ===== … ===== 360 passed" in shown[0]
+
+
+def test_a_two_line_command_result_shows_both_lines_side_by_side():
+    (elbow,) = _settled_elbow("[exit 1]\nnpm ERR! missing script: test")
+
+    assert "[exit 1] · npm ERR! missing script: test" in elbow
+
+
+def test_a_result_without_its_card_reads_by_its_first_line():
+    output = io.StringIO()
+    renderer = EventRenderer(Console(file=output, color_system=None, width=100))
+    renderer.on_event(
+        Event("1", ToolCompleted("lost", "bash", False, "first\nsecond\nlast"))
+    )
+
+    elbow = output.getvalue().splitlines()[-1]
+    assert "first" in elbow and "last" not in elbow
+
+
+def test_other_tools_say_what_came_back_by_their_first_line():
+    listing = "\n".join(f"src/file_{index}.py" for index in range(20))
+    (elbow,) = _settled_elbow(listing, kind=ToolActivityKind.LIST)
+
+    assert "src/file_0.py" in elbow
+    assert "file_19" not in elbow
+
+
+def test_a_short_first_line_leaves_the_room_to_the_last():
+    from cli.tui.renderer import _fit_ends
+
+    shown = _fit_ends(
+        "[exit 1]",
+        "AssertionError: expected 3, got 4 in test_calculator",
+        40,
+        skipped=True,
+    )
+    assert shown.startswith("[exit 1] … AssertionError: expected 3")
+    # The short first line takes only what it needs; the rest goes to the last.
+    assert 38 <= len(shown) <= 40
+
+
+def test_a_last_line_the_preview_cut_into_keeps_its_end():
+    # Longer than the preview holds, so the preview cuts into the last line.
+    shown = _settled_elbow("start\n" + "x" * 600 + " the real end", width=60)
+
+    assert shown[0].rstrip().endswith("the real end")
+
+
+def test_the_verbose_transcript_shows_what_came_back():
+    elbow, *below = _settled_elbow(_TEST_RUN, mode=TranscriptMode.VERBOSE)
+
+    assert "360 passed" in elbow
+    assert any("tests/test_0.py" in line for line in below)
+    assert any(line.strip() == "…" for line in below)
+    assert below[-1].strip() == "===== 360 passed in 1.2s ====="
+
+
+def test_verbose_wraps_a_long_line_under_the_elbow():
+    error = "Error: " + "configuration key not found " * 8
+    elbow, *below = _settled_elbow(error, mode=TranscriptMode.VERBOSE, width=60)
+
+    assert len(below) >= 2
+    assert all(line.startswith("   ") for line in below)
+    assert "".join(line.strip() for line in below).count("configuration") == 8
+
+
+def test_verbose_output_wraps_cjk_without_splitting_words():
+    output = (
+        "先看一下这个函数里面的处理逻辑handle_relic_offer然后再决定怎么修改它的返回值。"
+    )
+    elbow, *below = _settled_elbow(output, mode=TranscriptMode.VERBOSE, width=40)
+
+    assert len(below) >= 2
+    assert any("handle_relic_offer" in line for line in below)
+    assert not any(line.strip().startswith("。") for line in below)
+
+
+def test_verbose_survives_a_terminal_a_few_columns_wide():
+    shown = _settled_elbow(_TEST_RUN, mode=TranscriptMode.VERBOSE, width=5)
+
+    assert shown
+
+
+def test_a_line_cut_at_both_ends_carries_one_mark_between_them():
+    from cli.tui.renderer import _fit_ends
+    from core.events.protocol import summarize_result
+
+    head, _, tail = summarize_result("x" * 500).split("\n")
+    shown = _fit_ends(head, tail, 40, skipped=True)
+
+    assert shown.count("…") == 1
 
 
 def test_elbow_names_its_card_only_while_calls_overlap():
@@ -1037,7 +1324,7 @@ def test_skill_command_is_one_turn_only_and_persists_invocation_metadata(
     assert provider.calls == 1
     output = capsys.readouterr().out
     assert "Skill error:" in output
-    assert "selected review for the next turn" in output
+    assert "selected review for the next Turn" in output
     assert "Skill review (explicit)" in output
 
     from core.sessions.store import SessionStore
@@ -1235,7 +1522,7 @@ def test_goal_edit_and_steer_remain_available_while_work_runs_in_background(
 
     assert rc == 0
     output = capsys.readouterr().out
-    assert "Steered the active turn" in output or "Queued — runs after" in output
+    assert "Steered the active Turn" in output or "Queued — runs after" in output
     assert "Goal saved with the same identity" in output
     store = SessionStore(tmp_path / "sessions")
     goal = ThreadGoalStore(store).read(store.list_sessions()[0].session_id)
@@ -1372,7 +1659,7 @@ def test_effort_switch_preserves_history_and_session_selection(
 
     assert rc == 0
     assert provider.calls == 2
-    assert "effort switched to high" in capsys.readouterr().out
+    assert "effort switched to High" in capsys.readouterr().out
 
     from core.sessions.store import SessionStore
 
@@ -1492,12 +1779,47 @@ def test_startup_resume_shows_history_without_running_another_turn(
     assert store.list_sessions()[0].message_count == session.message_count
 
 
+def test_resume_replay_shows_only_what_people_said(monkeypatch, tmp_path, capsys):
+    from core.sessions.store import SessionStore
+
+    rc, _ = _run_tui(monkeypatch, tmp_path, "Fix the parser\n/exit\n", ["Fixed it."])
+    assert rc == 0
+    store = SessionStore(tmp_path / "sessions")
+    session_id = store.list_sessions()[0].session_id
+    store.append_message(
+        session_id,
+        "user",
+        "Continue working toward the active Thread Goal.\nGoal: ship it",
+        metadata={"source": "goal_continuation", "client": "internal"},
+    )
+    store.append_message(
+        session_id,
+        "user",
+        "The persistent Goal for this Thread was updated.",
+        metadata={"source": "goal_update", "delivery": "between_turns"},
+    )
+    store.append_message(session_id, "assistant", "Shipped.")
+    capsys.readouterr()
+    monkeypatch.setattr("sys.stdin", io.StringIO("/exit\n"))
+
+    assert (
+        tui_app.main(["--workspace", str(tmp_path / "ws"), "--resume", session_id]) == 0
+    )
+
+    output = capsys.readouterr().out
+    assert "› Fix the parser" in output
+    assert f"{theme.GOAL_PROMPT_MARK} Goal continued automatically" in output
+    assert "Continue working toward" not in output
+    assert "was updated" not in output
+    assert "Shipped." in output
+
+
 def test_resume_without_arg_lists_sessions(monkeypatch, tmp_path, capsys):
     _run_tui(monkeypatch, tmp_path, "task one\n/exit\n", ["done"])
     capsys.readouterr()
     rc, _ = _run_tui(monkeypatch, tmp_path, "/resume\n/exit\n", ["unused"])
     assert rc == 0
-    assert "recent sessions" in capsys.readouterr().out
+    assert "recent Sessions" in capsys.readouterr().out
 
 
 # --- directory scoping (P2-L5c: central storage, per-directory view) --------
@@ -1528,7 +1850,7 @@ def test_resume_scoped_to_directory(monkeypatch, tmp_path, capsys):
     )
     assert rc == 0
     out = capsys.readouterr().out
-    assert "no sessions for this directory" in out
+    assert "no Sessions for this directory" in out
     assert "task in A" in out  # shown in the `all` view
     # Origin directory annotated, exactly as the picker names it: a path under
     # the home directory is `~`-folded (pytest's tmp dir lives under $HOME on
@@ -1620,7 +1942,7 @@ def test_rename_command_updates_the_stored_session_title(monkeypatch, tmp_path, 
         ["hi"],
     )
     assert rc == 0
-    assert "session renamed to Renamed conversation" in capsys.readouterr().out
+    assert "Session renamed to Renamed conversation" in capsys.readouterr().out
 
     from core.sessions.store import SessionStore
 
@@ -1653,7 +1975,7 @@ def test_delete_command_removes_a_stored_session_but_needs_an_id(
     assert rc == 0
     out = capsys.readouterr().out
     assert "usage: /delete" in out
-    assert f"deleted session {victim}" in out
+    assert f"deleted Session {victim}" in out
 
     store = SessionStore(tmp_path / "sessions")
     assert victim not in [s.session_id for s in store.list_sessions()]
@@ -1717,7 +2039,7 @@ def test_picker_filters_by_title_and_wraps_navigation():
                 [
                     PickerItem(1, "Alpha task", "aa11"),
                     PickerItem(2, "Beta task", "bb22"),
-                    PickerItem(3, "Gamma", "cc33", disabled_reason="current session"),
+                    PickerItem(3, "Gamma", "cc33", disabled_reason="current Session"),
                 ],
             )
         ],
@@ -1881,7 +2203,7 @@ def test_resume_picker_marks_current_session_and_resumes_choice(monkeypatch):
     assert seen["resumed"] == "bb22cc33"
     assert "resumed bb22cc33" in status
     local_items = list(seen["scopes"][0].items)
-    assert local_items[0].disabled_reason == "current session"
+    assert local_items[0].disabled_reason == "current Session"
     assert local_items[1].disabled_reason is None
 
 
@@ -1914,3 +2236,76 @@ def test_agent_preset_overview_shows_the_deny_list(tmp_path: Path, monkeypatch) 
     # A deny-only preset must not claim "all tools" (the reviewer's point).
     assert "all tools except write, edit" in overview
     assert "read, bash except write" in overview
+
+
+def test_efforts_read_as_the_desktop_names_them():
+    from cli.tui.text import effort_label
+
+    assert [
+        effort_label(value)
+        for value in (None, "auto", "none", "off", "low", "high", "xhigh", "max")
+    ] == ["Auto", "Auto", "Off", "Off", "Low", "High", "Extra high", "Max"]
+
+
+def test_tui_text_names_keys_one_way():
+    """Ctrl+O, Esc, Enter, Shift+Tab — as the guide and the status line write them."""
+    import ast
+
+    # Any spelling of a modifier key or Esc; only the guide's forms pass.
+    key = re.compile(
+        r"(?i)\b(?:ctrl|shift|alt)[-+]\w+|\besc(?:ape)?\b"
+        r"|\b(?:enter|tab) (?:select|scope|cancel)\b"
+    )
+    allowed = re.compile(
+        r"Ctrl\+[A-Z]|Shift\+Tab|Alt\+[A-Z]|Esc|(?:Enter|Tab) (?:select|scope|cancel)"
+    )
+    sources = [
+        *Path(ROOT, "cli", "tui").glob("*.py"),
+        Path(ROOT, "cli", "exec_cli.py"),
+        Path(ROOT, "cli", "automation_foreground.py"),
+    ]
+    offenders = []
+    for path in sources:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        docstrings = {
+            id(node.body[0].value)
+            for node in ast.walk(tree)
+            if isinstance(
+                node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+            )
+            and node.body
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Constant)
+        }
+        # Key binding names (bindings.add("escape")) are code, not text.
+        bindings = {
+            id(argument)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "add"
+            and "bindings" in ast.unparse(node.func.value)
+            for argument in node.args
+        }
+        offenders += [
+            f"{path.name}:{node.lineno}: {match.group()!r} in {node.value!r}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in docstrings | bindings
+            for match in key.finditer(node.value)
+            if not allowed.fullmatch(match.group())
+        ]
+    assert offenders == []
+
+
+def test_a_picker_row_is_found_by_the_value_you_would_type():
+    """The effort picker shows "Extra high"; Tab completion offers ``xhigh``."""
+    from cli.tui.picker import PickerItem
+
+    row = PickerItem(value="xhigh", title="Extra high", keywords="xhigh")
+    assert row.matches("xhigh") and row.matches("extra")
+    assert not row.matches("medium")
+    # A value that is not shown, such as a Skill's id, does not match.
+    skill = PickerItem(value="sk_0a1b2c3d4e5f", title="Review")
+    assert not skill.matches("sk_") and not skill.matches("a")

@@ -22,7 +22,12 @@ from core.domain.approval import Approval, ApprovalCategory, ApprovalStatus
 from core.domain.execution_permission import ExecutionPermissionMode
 from core.domain.execution_security import ExecutionAccessPreset
 from core.domain.item import Item, ItemKind, ItemStatus
-from core.domain.message_provenance import ClientSurface, TurnInputSource
+from core.domain.message_provenance import (
+    ClientSurface,
+    GoalPrompt,
+    TurnInputSource,
+    goal_prompt,
+)
 from core.domain.thread import ThreadStatus
 from core.domain.turn import Turn, TurnStatus
 from core.events import (
@@ -83,6 +88,7 @@ class ScriptedSession:
                     "write",
                     not approved,
                     "written" if approved else "denied",
+                    denied=not approved,
                 ),
             )
         yield Event("4", AgentMessageDelta("do"))
@@ -274,14 +280,46 @@ class PlannedSession(ScriptedSession):
 
 
 class PlannedFactory(ScriptedFactory):
+    session_class: type[ScriptedSession] = PlannedSession
+
     def create(self, *, workspace, model, approval_callback):
-        session = PlannedSession(
+        session = self.session_class(
             approval_callback,
             approval=False,
             hang=False,
         )
         self.sessions.append(session)
         return session
+
+
+class RefusedPlanSession(ScriptedSession):
+    """A plan update the runner refused before it ran."""
+
+    async def run_stream(self, _op):
+        self.history.append({"role": "user", "content": _op.text})
+        yield Event("1", TurnStarted())
+        yield Event(
+            "2",
+            ToolStarted(
+                "plan-1",
+                "update_plan",
+                "",
+                ToolActivity(ToolActivityKind.PLAN, "Update plan"),
+            ),
+        )
+        yield Event(
+            "3",
+            ToolCompleted(
+                "plan-1", "update_plan", True, "Error: not allowed", denied=True
+            ),
+        )
+        yield Event("4", AgentMessage("done"))
+        yield Event("5", TaskComplete("done", "completed"))
+        self.history.append({"role": "assistant", "content": "done"})
+
+
+class RefusedPlanFactory(PlannedFactory):
+    session_class = RefusedPlanSession
 
 
 class ReasoningSession(ScriptedSession):
@@ -909,6 +947,50 @@ def test_retry_re_resolves_current_session_access_after_downgrade(
         application.close()
 
 
+def test_a_retry_records_where_its_prompt_came_from(tmp_path: Path) -> None:
+    application, thread_id = _application(tmp_path, ScriptedFactory())
+    try:
+        original = application.turns.start(
+            thread_id,
+            prompt="Continue working toward the active Thread Goal.",
+            client_surface=ClientSurface.INTERNAL,
+            input_source=TurnInputSource.GOAL_CONTINUATION,
+        )
+        _wait_for(application, original.turn.id, TurnStatus.COMPLETED)
+        retried = application.turns.retry(original.turn.id)
+        _wait_for(application, retried.turn.id, TurnStatus.COMPLETED)
+        # A retry of the retry still points at the Turn first retried.
+        again = application.turns.retry(retried.turn.id)
+        _wait_for(application, again.turn.id, TurnStatus.COMPLETED)
+
+        origin = {
+            "turnId": original.turn.id,
+            "source": TurnInputSource.GOAL_CONTINUATION.value,
+            "client": ClientSurface.INTERNAL.value,
+        }
+        for turn_id in (retried.turn.id, again.turn.id):
+            prompt = next(
+                item
+                for item in application.turns.read(turn_id).items
+                if item.kind is ItemKind.USER_MESSAGE
+            )
+            assert prompt.payload["source"] == TurnInputSource.RETRY.value
+            assert prompt.payload["retryOf"] == origin
+            assert goal_prompt(prompt.payload) is GoalPrompt.REQUESTED
+
+        session = application.session_store.get_session(thread_id)
+        assert session is not None
+        records = [
+            message.metadata
+            for message in session.messages
+            if message.role == "user"
+            and message.metadata.get("turnId") == retried.turn.id
+        ]
+        assert [record["retryOf"] for record in records] == [origin]
+    finally:
+        application.close()
+
+
 def test_one_session_preserves_each_turns_client_surface(tmp_path: Path) -> None:
     application, thread_id = _application(tmp_path, ScriptedFactory())
     try:
@@ -1182,6 +1264,38 @@ def test_approval_round_trip_resumes_the_same_turn(tmp_path: Path) -> None:
             item for item in completed.items if item.kind is ItemKind.FILE_CHANGE
         )
         assert tool.status is ItemStatus.COMPLETED
+    finally:
+        application.close()
+
+
+def test_a_refused_plan_update_is_no_error(tmp_path: Path) -> None:
+    application, thread_id = _application(tmp_path, RefusedPlanFactory())
+    try:
+        started = application.turns.start(thread_id, prompt="Plan it")
+        snapshot = _wait_for(application, started.turn.id, TurnStatus.COMPLETED)
+
+        assert ItemKind.ERROR not in {item.kind for item in snapshot.items}
+    finally:
+        application.close()
+
+
+def test_a_call_the_user_denies_is_declined_not_failed(tmp_path: Path) -> None:
+    factory = ScriptedFactory(approval=True)
+    application, thread_id = _application(tmp_path, factory)
+    try:
+        started = application.turns.start(thread_id, prompt="Write it")
+        waiting = _wait_for(application, started.turn.id, TurnStatus.WAITING_APPROVAL)
+
+        application.approvals.respond(
+            waiting.approvals[0].id, decision=ApprovalStatus.DENIED
+        )
+        completed = _wait_for(application, started.turn.id, TurnStatus.COMPLETED)
+
+        tool = next(
+            item for item in completed.items if item.kind is ItemKind.FILE_CHANGE
+        )
+        assert tool.status is ItemStatus.DECLINED
+        assert tool.payload["isError"] is True
     finally:
         application.close()
 

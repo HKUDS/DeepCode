@@ -1,4 +1,4 @@
-import { FolderOpen, MessageSquarePlus, RotateCw } from "lucide-react";
+import { FolderOpen, Menu, MessageSquarePlus, RotateCw } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -6,6 +6,11 @@ import { projectCanExecute } from "./app/projectPresentation";
 import { latestExecutingTurn } from "./app/interactiveTurnRouter";
 import { useAppearance } from "./app/useAppearance";
 import { useDesktopUi } from "./app/useDesktopUi";
+import { useEscapeLayer } from "./app/escapeLayer";
+import { FLOATING_REVIEW } from "./app/layout";
+import { useFocusHandoff } from "./app/useFocusHandoff";
+import { useMediaQuery } from "./app/useMediaQuery";
+import { useNavigationDrawer } from "./app/useNavigationDrawer";
 import { useComposerCommands } from "./app/useComposerCommands";
 import { useWorkspaceController } from "./app/useWorkspaceController";
 import { RuntimeNotice } from "./components/RuntimeNotice";
@@ -69,12 +74,24 @@ function LoadingSurface({
   );
 }
 
+const NAVIGATION_ID = "app-navigation";
+const REVIEW_PANEL_ID = "review-panel";
+const REVIEW_TOGGLE_ID = "review-toggle";
+
 export function App({ runtime }: { runtime: ClientRuntime }) {
   const { t } = useTranslation();
   const controller = useWorkspaceController(runtime);
   // Mounted for its effect: paints saved appearance preferences at startup.
   useAppearance();
   const ui = useDesktopUi();
+  const {
+    narrow,
+    open: navigationOpen,
+    buttonRef: navigationButtonRef,
+    reveal: revealNavigation,
+    close: closeNavigation,
+  } = useNavigationDrawer(NAVIGATION_ID);
+  const floatingReviewWidth = useMediaQuery(FLOATING_REVIEW);
   const transcript = useTranscriptMode();
   const runComposerCommand = useComposerCommands(controller, ui);
   const [composerIntent, setComposerIntent] =
@@ -124,7 +141,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
         : selectedProject.trustState !== "trusted"
           ? t("app.disabled.untrusted", "Trust this folder before agent execution.")
           : !selectedThread
-            ? t("app.disabled.noThread", "Create a thread to begin.")
+            ? t("app.disabled.noThread", "Create a Session to begin.")
             : threadUnreadable
               ? t(
                   "app.disabled.unreadable",
@@ -135,10 +152,32 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
   const inspectorVisible = Boolean(
     showingThreads && selectedThread && ui.inspectorOpen,
   );
+  // On a narrower window the review panel floats over the page: it holds the
+  // keyboard and Escape until it is closed, like a dialog. Its Escape layer
+  // exists while the panel is open, so a dialog opened later stays above it
+  // even if the window then narrows.
+  const reviewFloating = inspectorVisible && floatingReviewWidth;
+  useEscapeLayer(() => {
+    if (reviewFloating) void ui.closeInspector();
+  }, inspectorVisible);
+  // A wider window stops it floating without closing it: focus stays put.
+  useFocusHandoff(reviewFloating, REVIEW_PANEL_ID, () =>
+    inspectorVisible ? null : document.getElementById(REVIEW_TOGGLE_ID),
+  );
 
   return (
-    <main className={styles.shell} data-inspector={inspectorVisible}>
+    <main
+      className={styles.shell}
+      data-inspector={inspectorVisible}
+      data-layout={narrow ? "narrow" : undefined}
+      data-review={reviewFloating ? "floating" : undefined}
+    >
       <DesktopSidebar
+        id={NAVIGATION_ID}
+        drawer={narrow ? (navigationOpen ? "open" : "closed") : undefined}
+        inert={reviewFloating}
+        onRevealDrawer={revealNavigation}
+        onCloseDrawer={closeNavigation}
         projects={state.projects}
         threads={state.threads}
         selectedProjectId={state.selectedProjectId}
@@ -149,9 +188,13 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
         destination={ui.destination}
         settingsOpen={ui.settingsOpen}
         onDestination={(destination) => {
+          closeNavigation();
           void ui.navigateTo(destination);
         }}
-        onOpenSettings={ui.openSettings}
+        onOpenSettings={() => {
+          closeNavigation();
+          ui.openSettings();
+        }}
         onQueryChange={ui.setSessionQuery}
         onOpenProject={() => {
           void (async () => {
@@ -169,6 +212,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
           })();
         }}
         onCreateThread={() => {
+          closeNavigation();
           void (async () => {
             if (await ui.confirmDiscardInspectorDraft()) {
               await controller.createThread();
@@ -176,6 +220,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
           })();
         }}
         onSelectThread={(threadId) => {
+          closeNavigation();
           if (threadId === state.selectedThreadId) return;
           void (async () => {
             if (await ui.confirmDiscardInspectorDraft()) {
@@ -204,9 +249,29 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
         }}
       />
 
-      <section className={styles.workspace} aria-labelledby="thread-title">
+      {navigationOpen ? (
+        // A pointer target only: Escape and the menu button close it too.
+        <div className={styles.navigationScrim} aria-hidden="true" onClick={closeNavigation} />
+      ) : null}
+
+      <section
+        className={styles.workspace}
+        aria-labelledby="thread-title"
+        inert={navigationOpen || reviewFloating}
+      >
+        <button
+          ref={navigationButtonRef}
+          className={styles.navigationButton}
+          type="button"
+          aria-controls={NAVIGATION_ID}
+          aria-expanded={navigationOpen}
+          aria-label={t("sidebar.label", "Projects and Sessions")}
+          onClick={revealNavigation}
+        >
+          <Menu size={18} />
+        </button>
         <RuntimeNotice
-          reconnectOnly={runtime.host?.kind === "browser"}
+          browserHost={runtime.host?.kind === "browser"}
           runtime={state.runtime}
           error={state.error}
           busy={state.busy}
@@ -238,6 +303,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
                 })();
               }}
               onToggleInspector={() => void ui.toggleInspector()}
+              reviewButtonId={REVIEW_TOGGLE_ID}
             />
 
             <section className={styles.threadViewport}>
@@ -299,7 +365,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
                       }}
                     >
                       <MessageSquarePlus size={16} />
-                      {t("app.noSessions.newThread", "New thread")}
+                      {t("app.noSessions.newThread", "New Session")}
                     </button>
                     <span>
                       {t("app.noSessions.shortcut", "⌘N from anywhere")}
@@ -346,6 +412,8 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
                     items={state.items}
                     approvals={state.approvals}
                     plansByTurnId={state.plansByTurnId}
+                    goalOutcome={state.goalOutcome}
+                    historyLoaded={state.historyLoaded}
                     selectedItemId={state.selectedItemId}
                     transcriptMode={transcript.mode}
                     busy={state.busy}
@@ -484,8 +552,17 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
         {showingThreads && selectedThread ? <ConversationSplitter /> : null}
       </section>
 
+      {reviewFloating ? (
+        <div
+          className={styles.reviewScrim}
+          aria-hidden="true"
+          onClick={() => void ui.closeInspector()}
+        />
+      ) : null}
       {inspectorVisible ? (
         <section
+          id={REVIEW_PANEL_ID}
+          tabIndex={-1}
           className={styles.reviewPane}
           aria-label={t("app.reviewPanel", "Review panel")}
         >
@@ -525,6 +602,8 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
             onRefresh={controller.refreshSettings}
             onUpdate={controller.updateSettings}
             onClose={ui.closeSettings}
+            // Opened from the drawer, its button is hidden once it closes.
+            returnFocus={narrow ? navigationButtonRef : undefined}
           />
         </Suspense>
       ) : null}

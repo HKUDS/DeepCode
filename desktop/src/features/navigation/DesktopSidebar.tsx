@@ -12,6 +12,7 @@ import {
   ShieldAlert,
   Sparkles,
   WandSparkles,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -30,6 +31,14 @@ import { useTranslation } from "react-i18next";
 import styles from "./DesktopSidebar.module.css";
 
 interface DesktopSidebarProps {
+  /** The element id the narrow layout's menu button controls. */
+  id?: string;
+  /** On a narrow window the sidebar is a drawer, open or closed. */
+  drawer?: "open" | "closed";
+  /** Behind a panel that holds the keyboard (the floating review panel). */
+  inert?: boolean;
+  onRevealDrawer?(): void;
+  onCloseDrawer?(): void;
   projects: Project[];
   threads: Thread[];
   selectedProjectId: string | null;
@@ -98,6 +107,11 @@ export function DesktopSidebar({
   onRenameThread,
   onArchiveThread,
   onDeleteThread,
+  id,
+  drawer,
+  inert,
+  onRevealDrawer,
+  onCloseDrawer,
 }: DesktopSidebarProps) {
   const { t } = useTranslation();
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -143,7 +157,7 @@ export function DesktopSidebar({
       regularGroups.push({
         key: "recovered-history",
         project: null,
-        displayName: t("sidebar.previousSessions", "Previous sessions"),
+        displayName: t("sidebar.previousSessions", "Previous Sessions"),
         description: t("sidebar.folderUnavailable", "Original folders unavailable"),
         threads: recoveredThreads,
         active: recoveredThreads.some(
@@ -157,11 +171,28 @@ export function DesktopSidebar({
     projectGroups.find((group) => group.active)?.key ?? null;
   const disclosure = useProjectDisclosure(activeGroupKey);
 
+  // Cmd+K on a narrow window first opens the drawer the search field is in;
+  // the field takes focus once the drawer is open.
+  const searchWhenOpen = useRef(false);
+  useEffect(() => {
+    if (drawer !== "open" || !searchWhenOpen.current) return;
+    searchWhenOpen.current = false;
+    searchRef.current?.focus();
+    searchRef.current?.select();
+  }, [drawer]);
+
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      // Behind a panel that holds the keyboard, the sidebar takes no shortcut.
+      if (inert) return;
       if (event.key.toLocaleLowerCase() === "k") {
         event.preventDefault();
+        if (drawer === "closed") {
+          searchWhenOpen.current = true;
+          onRevealDrawer?.();
+          return;
+        }
         searchRef.current?.focus();
         searchRef.current?.select();
       }
@@ -176,10 +207,16 @@ export function DesktopSidebar({
     };
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [busy, canCreateThread, onCreateThread]);
+  }, [busy, canCreateThread, drawer, inert, onCreateThread, onRevealDrawer]);
 
   return (
-    <aside className={styles.sidebar} aria-label="Projects and Sessions">
+    <aside
+      id={id}
+      className={styles.sidebar}
+      aria-label={t("sidebar.label", "Projects and Sessions")}
+      data-drawer={drawer}
+      inert={inert}
+    >
       <div className={styles.brandRow}>
         <span className={styles.brandMark} aria-hidden="true">
           {/* Three rules stepping inward: nesting, and so depth. The tile takes
@@ -195,6 +232,17 @@ export function DesktopSidebar({
           <strong>DeepCode</strong>
           <small>{t("sidebar.localAgent", "Local agent")}</small>
         </span>
+        {drawer ? (
+          // A phone has no Escape key, and the menu button is behind the drawer.
+          <button
+            className={styles.drawerClose}
+            type="button"
+            onClick={onCloseDrawer}
+            aria-label={t("sidebar.closeNavigation", "Close navigation")}
+          >
+            <X size={16} />
+          </button>
+        ) : null}
       </div>
 
       {destination === "threads" ? (
@@ -206,7 +254,7 @@ export function DesktopSidebar({
             disabled={busy || !canCreateThread}
           >
             <Plus size={16} strokeWidth={1.9} />
-            {t("sidebar.newThread", "New thread")}
+            {t("sidebar.newThread", "New Session")}
             <kbd>⌘N</kbd>
           </button>
 
@@ -231,14 +279,14 @@ export function DesktopSidebar({
         </>
       ) : null}
 
-      <nav className={styles.destinations} aria-label="DeepCode destinations">
+      <nav className={styles.destinations} aria-label={t("sidebar.destinations", "DeepCode destinations")}>
         <button
           type="button"
           data-active={destination === "threads"}
           onClick={() => onDestination("threads")}
         >
           <MessageSquare size={16} />
-          {t("sidebar.threads", "Threads")}
+          {t("sidebar.threads", "Sessions")}
         </button>
         <button
           type="button"
@@ -288,14 +336,14 @@ export function DesktopSidebar({
           type="button"
           onClick={onOpenProject}
           disabled={busy}
-          aria-label="Open project folder"
-          title="Open project folder"
+          aria-label={t("sidebar.openProject", "Open project folder")}
+          title={t("sidebar.openProject", "Open project folder")}
         >
           <Plus size={16} />
         </button>
       </div>
 
-      <nav className={styles.projectList} aria-label="Session history">
+      <nav className={styles.projectList} aria-label={t("sidebar.sessionHistory", "Session history")}>
         {projects.length === 0 ? (
           <button className={styles.emptyProject} type="button" onClick={onOpenProject}>
             <FolderOpen size={18} />
@@ -353,7 +401,7 @@ export function DesktopSidebar({
                     <ShieldAlert
                       size={14}
                       className={styles.untrusted}
-                      aria-label="Project not trusted"
+                      aria-label={t("sidebar.projectUntrusted", "Project not trusted")}
                     />
                   ) : null}
                 </button>

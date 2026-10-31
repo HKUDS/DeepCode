@@ -21,7 +21,8 @@ import type {
   Turn,
 } from "../../generated/app-server";
 import type { GoalDefinitionInput } from "../../app/useWorkspaceController";
-import { deriveGoalPresentation } from "./goalPresentation";
+import { deriveGoalPresentation, goalStatusLabel } from "./goalPresentation";
+import { GoalOutcomeView } from "./GoalOutcomeView";
 import styles from "./GoalRail.module.css";
 
 interface GoalRailProps {
@@ -146,10 +147,13 @@ export function GoalRail({
             <span className={styles.summaryText}>
               <strong>{goal.objective}</strong>
               <small>
-                <span>{presentation?.label}</span>
+                <span>{presentation ? goalStatusLabel(presentation.status, t) : null}</span>
                 <i>·</i>
-                {presentation?.linkedTurnCount ?? 0}{" "}
-                {presentation?.linkedTurnCount === 1 ? t("goal.turn", "Turn") : t("goal.turns", "Turns")}
+                {t("goal.turnCount", {
+                  count: presentation?.linkedTurnCount ?? 0,
+                  defaultValue_one: "{{count}} Turn",
+                  defaultValue_other: "{{count}} Turns",
+                })}
                 {goal.tokensUsed > 0 ? (
                   <>
                     <i>·</i>
@@ -162,7 +166,10 @@ export function GoalRail({
               <progress
                 max={goal.tokenBudget}
                 value={Math.min(goal.tokensUsed, goal.tokenBudget)}
-                aria-label={`${goal.tokensUsed} of ${goal.tokenBudget} Goal tokens`}
+                aria-label={t("goal.tokenProgress", "{{used}} of {{budget}} Goal tokens", {
+                  used: goal.tokensUsed,
+                  budget: goal.tokenBudget,
+                })}
               />
             ) : (
               <span />
@@ -230,7 +237,7 @@ export function GoalRail({
           {expanded ? (
             <div className={styles.details}>
               <p>
-                {t("goal.goalDescription", "Goal {{id}} stays attached to this Session. Normal follow-ups steer the work without rewriting the objective.", { id: shortId(goal.id) })}
+                {t("goal.attachedNote", "This Goal stays attached to the Session. Normal follow-ups steer the work without rewriting the objective.")}
               </p>
               <p>
                 {goal.timeUsedSeconds > 0
@@ -242,40 +249,7 @@ export function GoalRail({
               </p>
               {outcome ? (
                 <section className={styles.outcome} aria-label={t("goal.outcome", "Goal outcome")}>
-                  <header>
-                    <strong>
-                      {outcome.status === "complete"
-                        ? t("goal.completionOutcome", "Completion outcome")
-                        : t("goal.blockedOutcome", "Blocked outcome")}
-                    </strong>
-                    <small>
-                      {outcome.source}
-                      {" · "}
-                      {formatOutcomeTime(outcome.decidedAt)}
-                    </small>
-                  </header>
-                  <p>{outcome.reason}</p>
-                  {outcome.decidedByTurnId ? (
-                    <small>
-                      {t("goal.decidingTurn", "Deciding Turn")} <code>{shortId(outcome.decidedByTurnId)}</code>
-                    </small>
-                  ) : null}
-                  {outcome.evidenceRefs.length ? (
-                    <div className={styles.evidence}>
-                      <span>{t("goal.relatedActivity", "Related activity")}</span>
-                      {outcome.evidenceRefs.map((evidence) => (
-                        <button
-                          type="button"
-                          key={evidence.itemId}
-                          onClick={() => onSelectEvidence(evidence.itemId)}
-                          title={`Open ${evidence.kind.replaceAll("_", " ")} details`}
-                        >
-                          <Check size={12} />
-                          <span>{evidence.summary}</span>
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
+                  <GoalOutcomeView outcome={outcome} onSelectEvidence={onSelectEvidence} />
                 </section>
               ) : null}
               {goal.skillIds.length ? (
@@ -285,7 +259,7 @@ export function GoalRail({
                     return (
                       <li key={skillId}>
                         <Check size={12} />
-                        {skill?.name ?? shortId(skillId)}
+                        {skill?.name ?? t("goal.skillUnavailable", "A skill that is no longer available")}
                       </li>
                     );
                   })}
@@ -437,17 +411,4 @@ function formatDuration(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m`;
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-}
-
-function formatOutcomeTime(value: string): string {
-  const timestamp = new Date(value);
-  if (Number.isNaN(timestamp.getTime())) return value;
-  return timestamp.toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
-
-function shortId(value: string): string {
-  return value.length > 14 ? `${value.slice(0, 11)}…` : value;
 }

@@ -120,8 +120,8 @@ def test_interrupt_failure_is_reported_not_raised() -> None:
     client.interrupt_error = _ServiceDown("The DeepCode service is not running.")
     app, _ = _app(client)
 
-    assert app.stop_turn().startswith("Could not stop the turn:")
-    assert asyncio.run(app.stop_turn_async()).startswith("Could not stop the turn:")
+    assert app.stop_turn().startswith("Could not stop the Turn:")
+    assert asyncio.run(app.stop_turn_async()).startswith("Could not stop the Turn:")
 
 
 def test_late_approval_reply_is_not_sent_to_the_model() -> None:

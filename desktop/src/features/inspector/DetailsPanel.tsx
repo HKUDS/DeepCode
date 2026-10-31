@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 
 import type { Item } from "../../generated/app-server";
-import { presentItem } from "../execution/itemPresentation";
+import { itemStatusText, presentItem } from "../execution/itemPresentation";
 import { InspectorEmpty } from "./InspectorEmpty";
 import styles from "./Inspector.module.css";
 
@@ -38,18 +38,19 @@ export function DetailsPanel({
     );
   }
 
+  const presentation = presentItem(selected, t);
   return (
     <div className={styles.content}>
-      <p className={styles.eyebrow}>{presentItem(selected).stage}</p>
+      <p className={styles.eyebrow}>{presentation.stage}</p>
       <h2>{selected.summary}</h2>
       <dl className={styles.metadata}>
         <div>
           <dt>{t("inspector.details.kind", "Kind")}</dt>
-          <dd>{selected.kind.replaceAll("_", " ")}</dd>
+          <dd>{presentation.label}</dd>
         </div>
         <div>
           <dt>{t("inspector.details.status", "Status")}</dt>
-          <dd>{selected.status.replaceAll("_", " ")}</dd>
+          <dd>{itemStatusText(selected.status, t)}</dd>
         </div>
         <div>
           <dt>{t("inspector.details.item", "Item")}</dt>

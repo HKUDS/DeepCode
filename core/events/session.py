@@ -36,6 +36,7 @@ from core.agent_runtime.microcompact import MicrocompactPolicy
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec
 from core.agent_runtime.token_meter import ProviderAnchoredTokenMeter
 from core.agent_runtime.tools.base import ToolResult
+from core.agent_runtime.tools.model_notes import without_error_hint
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.events.protocol import (
     AgentMessage,
@@ -83,6 +84,22 @@ def _one_line_detail(value: str, *, limit: int = 80) -> str:
         return ""
     text = value.strip().splitlines()[0] if value.strip() else ""
     return text[:limit] + ("…" if len(text) > limit else "")
+
+
+def display_preview(result: Any, *, hook_context_at: int | None = None) -> str:
+    """The bounded preview of a tool result that people see.
+
+    It leaves out what only the model needs: the error hint, and hook context
+    from ``hook_context_at`` on (see ``ToolEvent``). Used for a live Turn's
+    tool items and for those rebuilt from the session file, so both read the
+    same.
+    """
+    if hook_context_at is not None:
+        result = result[:hook_context_at]
+    if isinstance(result, str):
+        # A ToolResult is a str too; the preview needs only its text.
+        result = without_error_hint(str(result))
+    return summarize_result(result)
 
 
 def _is_error_result(result: Any) -> bool:
@@ -357,7 +374,10 @@ class _EventEmittingHook(AgentHook):
             )
 
     async def after_iteration(self, context: AgentHookContext) -> None:
-        for call, result in zip(context.tool_calls, context.tool_results):
+        # The runner reports one event per call, in order.
+        for call, result, event in zip(
+            context.tool_calls, context.tool_results, context.tool_events
+        ):
             is_error = _is_error_result(result)
             if call.name.lower() == "update_plan" and not is_error:
                 try:
@@ -371,7 +391,10 @@ class _EventEmittingHook(AgentHook):
                     call_id=call.id,
                     name=call.name,
                     is_error=is_error,
-                    result_preview=summarize_result(result),
+                    result_preview=display_preview(
+                        result, hook_context_at=event.get("hook_context_at")
+                    ),
+                    denied=event.get("status") == "denied",
                 )
             )
 

@@ -7,7 +7,7 @@
  */
 
 import { FileText, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { type RefObject, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -16,6 +16,7 @@ import type {
   Project,
   SettingsSnapshot,
 } from "../../generated/app-server";
+import { configScopeLabel } from "../../app/configScope";
 import { Dialog } from "../../components/Dialog";
 import type { ClientRuntime } from "../../rpc/contracts";
 import {
@@ -36,6 +37,8 @@ interface SettingsDialogProps {
     riskAcknowledged?: boolean,
   ): Promise<boolean>;
   onClose(): void;
+  /** Where focus goes on close when the button that opened it is gone. */
+  returnFocus?: RefObject<HTMLElement | null>;
 }
 
 export function SettingsDialog({
@@ -46,6 +49,7 @@ export function SettingsDialog({
   onRefresh,
   onUpdate,
   onClose,
+  returnFocus,
 }: SettingsDialogProps) {
   const { t } = useTranslation();
   const [activeId, setActiveId] = useState<SettingsSectionId>(
@@ -102,6 +106,7 @@ export function SettingsDialog({
       backdropClassName={styles.backdrop}
       labelledBy="settings-dialog-title"
       onClose={onClose}
+      returnFocus={returnFocus}
     >
       <header className={styles.header}>
         <h1 id="settings-dialog-title">{t("settings.title", "Settings")}</h1>
@@ -114,9 +119,9 @@ export function SettingsDialog({
                 setScope(event.target.value as ConfigScope)
               }
             >
-              <option value="user">{t("settings.scope.user", "User config")}</option>
+              <option value="user">{configScopeLabel("user", t)}</option>
               <option value="project" disabled={!canWriteProject}>
-                {t("settings.scope.project", "Selected project")}
+                {configScopeLabel("project", t)}
               </option>
             </select>
           </label>

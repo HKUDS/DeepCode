@@ -1346,7 +1346,7 @@ export interface McpServerInfo {
   configurationState: "configured" | "invalid" | "disabled" | "blocked" | "missing_credentials";
   configurationMessage: string;
   authState: "not_required" | "login_required" | "authorizing" | "authenticated";
-  runtimeState: "stopped" | "connecting" | "tested" | "connected" | "failed";
+  runtimeState: "stopped" | "connecting" | "deferred" | "tested" | "connected" | "failed";
   runtimeMessage: string;
   toolCount: number;
   resourceCount: number;

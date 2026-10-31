@@ -4,6 +4,11 @@ import { useTranslation } from "react-i18next";
 import { confirmAction } from "../../platform/confirmAction";
 import type { ClientRuntime } from "../../rpc/contracts";
 import styles from "../management/ManagementWorkspace.module.css";
+import {
+  pluginComponentLabel,
+  pluginSeverityLabel,
+  pluginStatusLabel,
+} from "./pluginPresentation";
 import { usePluginCatalog } from "./usePluginCatalog";
 
 export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
@@ -71,7 +76,7 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
           </summary>
           {catalog.diagnostics.map((diagnostic, index) => (
             <p key={`${diagnostic.code}-${index}`}>
-              {diagnostic.severity}: {diagnostic.message}
+              {pluginSeverityLabel(diagnostic.severity, t)}: {diagnostic.message}
             </p>
           ))}
         </details>
@@ -90,7 +95,7 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
               >
                 <span className={styles.skillRowMeta}>
                   {plugin.version ?? t("plugins.unresolved", "unresolved")}
-                  <em data-status={plugin.status}>{plugin.status}</em>
+                  <em data-status={plugin.status}>{pluginStatusLabel(plugin.status, t)}</em>
                 </span>
                 <strong>{plugin.name}</strong>
                 <small>{plugin.description || plugin.error}</small>
@@ -118,7 +123,7 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
               </p>
               <div className={styles.skillActions}>
                 <span className={styles.badge} data-status={catalog.selected.status}>
-                  {catalog.selected.status}
+                  {pluginStatusLabel(catalog.selected.status, t)}
                 </span>
                 <button
                   type="button"
@@ -194,7 +199,7 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
                     {catalog.selected.components
                       .map(
                         (component) =>
-                          `${component.kind}: ${component.status}${
+                          `${pluginComponentLabel(component, t)}${
                             component.itemCount === null
                               ? ""
                               : ` (${component.itemCount})`
@@ -215,7 +220,7 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
                   </summary>
                   {catalog.selected.diagnostics.map((diagnostic, index) => (
                     <p key={`${diagnostic.code}-${index}`}>
-                      {diagnostic.severity}: {diagnostic.message}
+                      {pluginSeverityLabel(diagnostic.severity, t)}: {diagnostic.message}
                     </p>
                   ))}
                 </details>

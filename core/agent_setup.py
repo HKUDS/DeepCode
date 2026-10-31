@@ -23,6 +23,7 @@ from typing import Any
 
 from loguru import logger
 
+from core.agent_runtime.tools.model_notes import with_hook_context
 from core.compat import DeepCodeRuntime, get_runtime
 from core.domain.execution_profile import ExecutionProfile
 from core.domain.execution_security import ExecutionSecurityProfile
@@ -195,8 +196,7 @@ def _wire_code_mode(
         if hooks_engine is not None and hooks_engine.has_event("PostToolUse"):
             post = await hooks_engine.run_post_tool_use(tool_name, args, result)
             if post.additional_contexts:
-                joined = "\n".join(f"[hook] {c}" for c in post.additional_contexts)
-                result = f"{result}\n\n{joined}"
+                result = with_hook_context(str(result), post.additional_contexts)
         return result
 
     tool_registry.register(

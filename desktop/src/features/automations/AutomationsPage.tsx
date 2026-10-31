@@ -163,7 +163,7 @@ export function AutomationsPage({
       !(await confirmAction(
         t(
           "automations.removeConfirm",
-          "Remove the automation “{{name}}”? Its Goal Thread and Session history will be kept.",
+          "Remove the automation “{{name}}”? Its Goal Session and its history will be kept.",
           { name: automation.name },
         ),
         {
@@ -190,7 +190,7 @@ export function AutomationsPage({
           <p>
             {t(
               "automations.description",
-              "Each automation owns a canonical Goal Thread and submits ordinary Agent Turns through the same permission, approval, Hook, and Session lifecycle as interactive work.",
+              "Each automation owns one Goal Session and submits ordinary agent Turns through the same permissions, approvals, Hooks and Session lifecycle as interactive work.",
             )}
           </p>
         </div>
@@ -318,7 +318,7 @@ export function AutomationsPage({
                       </dd>
                     </div>
                     <div>
-                      <dt>{t("automations.goalThread", "Goal Thread")}</dt>
+                      <dt>{t("automations.goalThread", "Goal Session")}</dt>
                       <dd>{automation.threadId}</dd>
                     </div>
                   </dl>
@@ -362,7 +362,7 @@ export function AutomationsPage({
                       type="button"
                       onClick={() => onOpenThread(automation.threadId)}
                     >
-                      {t("automations.openThread", "Open Thread")}
+                      {t("automations.openThread", "Open Session")}
                     </button>
                     <button
                       type="button"

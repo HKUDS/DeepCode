@@ -13,6 +13,7 @@ from core.domain.execution_security import (
     ExecutionSecurityProfile,
 )
 from core.domain.item import Item, ItemKind, ItemStatus
+from core.domain.message_provenance import GoalPrompt, goal_prompt
 from core.domain.project import Project
 from core.domain.runtime_coordination import ExecutionClass
 from core.domain.thread import Thread, ThreadMode
@@ -120,6 +121,55 @@ def test_reading_an_up_to_date_thread_takes_no_write_lock(tmp_path: Path) -> Non
         if writer.is_alive():
             writer.join()
         application.close()
+
+
+def test_a_rebuilt_tool_result_shows_people_what_a_live_one_shows(
+    tmp_path: Path,
+) -> None:
+    from core.agent_runtime.tools.model_notes import ERROR_HINT, with_hook_context
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SessionStore(tmp_path / "sessions")
+    session = store.create_session(
+        title="tool work",
+        metadata={"kind": "tui", "workspace": str(workspace)},
+    )
+    sid = session.session_id
+    output = "Error: " + "lint failed\n" * 100 + "2 issues"
+    store.append_message(sid, "user", "lint it")
+    store.append_message(sid, "assistant", "", metadata={"toolCalls": [{"id": "c1"}]})
+    store.append_message(
+        sid,
+        "tool",
+        with_hook_context(output + ERROR_HINT, ["ruff ran"]),
+        metadata={"toolCallId": "c1", "name": "bash"},
+    )
+    store.append_message(sid, "assistant", "two issues remain")
+
+    application = DeepCodeApplication.open(
+        tmp_path / "state.sqlite3",
+        session_store=store,
+    )
+    try:
+        application.threads.list()
+        with application.database.read() as connection:
+            items = [
+                item
+                for turn in TurnRepository(connection).list_for_thread(sid)
+                for item in ItemRepository(connection).list_for_turn(turn.id)
+            ]
+    finally:
+        application.close()
+
+    preview = next(
+        item.payload["resultPreview"]
+        for item in items
+        if item.kind is ItemKind.COMMAND_EXECUTION
+    )
+    assert preview.endswith("2 issues")
+    assert "Analyze the error" not in preview and "[hook]" not in preview
+    assert len(preview) <= 405
 
 
 def test_rebuild_from_jsonl_shows_tool_activity_and_stays_idempotent(
@@ -280,6 +330,41 @@ def test_projection_rebuild_restores_the_canonical_turn_security_snapshot(
         assert turns[0].execution_permission_mode is profile.permission_mode
         assert turns[0].goal_id == "goal_projection"
         assert turns[0].execution_class is ExecutionClass.SCHEDULED_AUTOMATION
+    finally:
+        application.close()
+
+
+def test_projection_rebuild_keeps_a_retried_goal_prompt_recognizable(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SessionStore(tmp_path / "sessions")
+    session = store.create_session(
+        title="goal",
+        metadata={"kind": "tui", "workspace": str(workspace)},
+    )
+    retry_of = {"turnId": "turn_0", "source": "goal_continuation", "client": "internal"}
+    store.append_message(
+        session.session_id,
+        "user",
+        "Continue working toward the active Thread Goal.",
+        metadata={"source": "retry", "client": "internal", "retryOf": retry_of},
+    )
+    store.append_message(session.session_id, "assistant", "done")
+
+    application = DeepCodeApplication.open(
+        tmp_path / "state.sqlite3",
+        session_store=store,
+    )
+    try:
+        with application.database.read() as connection:
+            items = ItemRepository(connection).conversation_for_thread(
+                session.session_id
+            )
+        prompt = next(item for item in items if item.kind is ItemKind.USER_MESSAGE)
+        assert prompt.payload["retryOf"] == retry_of
+        assert goal_prompt(prompt.payload) is GoalPrompt.REQUESTED
     finally:
         application.close()
 

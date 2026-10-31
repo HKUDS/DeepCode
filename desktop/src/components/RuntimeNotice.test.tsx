@@ -31,7 +31,7 @@ it.each(["en", "zh-CN"] as const)(
         runtime={stopped}
         error={null}
         busy={false}
-        reconnectOnly
+        browserHost
         onRestart={vi.fn()}
         onDismissError={vi.fn()}
       />,
@@ -52,14 +52,32 @@ it("keeps reconnection available for network failures", () => {
       runtime={{ ...stopped, errorCode: "CONNECTION_LOST", message: "Network unavailable" }}
       error={null}
       busy={false}
-      reconnectOnly
+      browserHost
       onRestart={reconnect}
       onDismissError={vi.fn()}
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
   expect(reconnect).toHaveBeenCalledOnce();
-  expect(screen.getByRole("alert").textContent).toContain("Network unavailable");
+  expect(screen.getByRole("alert").textContent).toContain(
+    "The service is unavailable. Reconnect when it is ready.",
+  );
+});
+
+it("says a request timed out, not that the connection was lost", () => {
+  render(
+    <RuntimeNotice
+      runtime={{ ...stopped, phase: "ready", errorCode: undefined }}
+      error={{ code: "RESPONSE_TIMEOUT", message: "timed out", retryable: true }}
+      busy={false}
+      browserHost
+      onRestart={vi.fn()}
+      onDismissError={vi.fn()}
+    />,
+  );
+  const alert = screen.getByRole("alert").textContent ?? "";
+  expect(alert).toContain("No response from DeepCode");
+  expect(alert).not.toContain("lost");
 });
 
 it("keeps native restart and ordinary application error dismissal", () => {
@@ -78,4 +96,24 @@ it("keeps native restart and ordinary application error dismissal", () => {
   fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }));
   expect(restart).toHaveBeenCalledOnce();
   expect(dismiss).toHaveBeenCalledOnce();
+});
+
+it("says an uncertain request plainly, without the method it was", () => {
+  render(
+    <RuntimeNotice
+      runtime={{ ...stopped, phase: "ready", errorCode: undefined }}
+      error={{
+        code: "RESULT_UNKNOWN",
+        message: "turn/start may have been applied. Reconnect and inspect its state before trying again.",
+        retryable: false,
+      }}
+      busy={false}
+      browserHost
+      onRestart={vi.fn()}
+      onDismissError={vi.fn()}
+    />,
+  );
+  const alert = screen.getByRole("alert").textContent ?? "";
+  expect(alert).toContain("The last action may have gone through");
+  expect(alert).not.toContain("turn/start");
 });

@@ -20,7 +20,7 @@ from cli.execution_options import parse_context_window
 from cli.transcript import TranscriptMode
 from cli.tui import theme
 from cli.tui.picker import Picker, PickerItem, PickerScope, PickerVariant
-from cli.tui.text import fit_head, short_path
+from cli.tui.text import effort_label, fit_head, short_path
 
 Handler = Callable[[Any, str], Awaitable[str | None]]
 # Candidate first arguments for tab completion: (app, typed prefix) -> values.
@@ -205,7 +205,7 @@ def _resume_picker_items(rows, *, show_origin: bool) -> list[PickerItem]:
                 value=row.session_id,
                 title=row.title or "(untitled)",
                 detail=detail,
-                disabled_reason="current session" if row.is_current else None,
+                disabled_reason="current Session" if row.is_current else None,
             )
         )
     return items
@@ -222,7 +222,7 @@ async def _resume_via_picker(app, *, prefer_all: bool) -> str | None:
         include_all=True,
     )
     if not every:
-        return "no stored sessions yet"
+        return "no stored Sessions yet"
     scopes = [
         PickerScope(
             f"this directory {_short_path(app.workspace)}",
@@ -236,7 +236,7 @@ async def _resume_via_picker(app, *, prefer_all: bool) -> str | None:
     initial = 1 if prefer_all or not local else 0
     chosen = await Picker(
         scopes,
-        title="Resume session",
+        title="Resume Session",
         initial_scope=initial,
     ).run()
     if chosen is None:
@@ -258,11 +258,11 @@ async def _cmd_resume(app, args: str) -> str | None:
         )
         if not rows:
             return (
-                "no stored sessions yet"
+                "no stored Sessions yet"
                 if show_all
-                else "no sessions for this directory — try /resume all"
+                else "no Sessions for this directory — try /resume all"
             )
-        scope = "all sessions" if show_all else f"sessions in {app.workspace}"
+        scope = "all Sessions" if show_all else f"Sessions in {app.workspace}"
         lines = ["", f"recent {scope} (resume with /resume <id or prefix>):"]
         lines.extend(_resume_row(row, show_origin=show_all) for row in rows)
         lines.append("")
@@ -270,7 +270,7 @@ async def _cmd_resume(app, args: str) -> str | None:
     resolved = _resolve_session_prefix(app, target)
     if isinstance(resolved, list):
         if len(resolved) > 1:
-            return f"ambiguous session id {target!r} — matches {', '.join(resolved)}"
+            return f"ambiguous Session ID {target!r} — matches {', '.join(resolved)}"
         resolved = target  # no listed match; let the store answer for exact ids
     return _resume_target(app, resolved)
 
@@ -294,10 +294,10 @@ async def _switch_model_report(
     status = (
         f"model switched to {app.model} on connection "
         f"{app.thread_client.execution_profile.connection_id} · effort "
-        f"{app.requested_reasoning_effort} (history preserved)"
+        f"{effort_label(app.requested_reasoning_effort)} (history preserved)"
     )
     if app.thread_client.has_active_turn():
-        status += "\nnote: the active turn keeps its model — applies from the next turn"
+        status += "\nnote: the active Turn keeps its model — applies from the next Turn"
     note = app.model_catalog_note()
     return f"{status}\n{note}" if note else status
 
@@ -311,7 +311,9 @@ def _effort_ladder(
     if not efforts:
         return (), 0
     ladder = ("auto", *dict.fromkeys(efforts))
-    variants = tuple(PickerVariant(value=level, label=level) for level in ladder)
+    variants = tuple(
+        PickerVariant(value=level, label=effort_label(level)) for level in ladder
+    )
     initial = ladder.index(current) if current in ladder else 0
     return variants, initial
 
@@ -452,8 +454,9 @@ async def _effort_via_picker(app) -> str | None:
     items = [
         PickerItem(
             value=level,
-            title=level,
+            title=effort_label(level),
             detail="current" if level == current else "",
+            keywords=level,
         )
         for level in dict.fromkeys(levels)
     ]
@@ -467,11 +470,7 @@ async def _effort_via_picker(app) -> str | None:
         await app.switch_reasoning_effort(str(chosen.value))
     except (OSError, RuntimeError, ValueError) as exc:
         return f"effort switch failed: {exc}"
-    effective = app.thread_client.execution_profile.reasoning_effort
-    return (
-        f"effort switched to {app.requested_reasoning_effort} "
-        f"(effective: {effective or 'provider default'}; history preserved)"
-    )
+    return _effort_switched(app)
 
 
 async def _cmd_effort(app, args: str) -> str | None:
@@ -482,18 +481,27 @@ async def _cmd_effort(app, args: str) -> str | None:
     if not wanted:
         if app.reader.interactive:
             return await _effort_via_picker(app)
-        profile = app.thread_client.execution_profile
-        effective = profile.reasoning_effort or "provider default"
-        return f"effort: {app.requested_reasoning_effort} · effective: {effective}"
+        return (
+            f"effort: {effort_label(app.requested_reasoning_effort)} · "
+            f"effective: {_effective_effort(app)}"
+        )
     try:
         await app.switch_reasoning_effort(wanted)
     except (OSError, RuntimeError, ValueError) as exc:
         return f"effort switch failed: {exc}"
-    profile = app.thread_client.execution_profile
-    effective = profile.reasoning_effort or "provider default"
+    return _effort_switched(app)
+
+
+def _effective_effort(app) -> str:
+    """The effort the provider is sent, or that it decides itself."""
+    effective = app.thread_client.execution_profile.reasoning_effort
+    return effort_label(effective) if effective else "provider default"
+
+
+def _effort_switched(app) -> str:
     return (
-        f"effort switched to {app.requested_reasoning_effort} "
-        f"(effective: {effective}; history preserved)"
+        f"effort switched to {effort_label(app.requested_reasoning_effort)} "
+        f"(effective: {_effective_effort(app)}; history preserved)"
     )
 
 
@@ -552,7 +560,7 @@ async def _permissions_via_picker(app) -> str | None:
         for name, description in _PERMISSION_PICKER_ROWS
     ]
     chosen = await Picker(
-        [PickerScope("session access", items)],
+        [PickerScope("Session access", items)],
         title="Permissions",
     ).run()
     if chosen is None:
@@ -684,20 +692,20 @@ async def _cmd_rename(app, args: str) -> str | None:
         thread = app.thread_client.rename_thread(title)
     except (OSError, RuntimeError, ValueError) as exc:
         return f"rename failed: {exc}"
-    return f"session renamed to {thread.title}"
+    return f"Session renamed to {thread.title}"
 
 
 async def _cmd_delete(app, args: str) -> str | None:
     target = args.strip()
     if not target:
-        return "usage: /delete <full session id> (see /resume all)"
+        return "usage: /delete <full Session ID> (see /resume all)"
     # Deletion is irreversible, so no prefix expansion here: the exact id
     # must be typed (tab completion fills it in).
     try:
         app.thread_client.delete_session(target)
     except (OSError, RuntimeError, ValueError) as exc:
         return str(exc)
-    return f"deleted session {target}"
+    return f"deleted Session {target}"
 
 
 async def _cmd_retry(app, args: str) -> str | None:
@@ -761,7 +769,7 @@ async def _skill_via_picker(app) -> str | None:
     if not items:
         return "no active Skills discovered"
     chosen = await Picker(
-        [PickerScope("next-turn skills", items)],
+        [PickerScope("next-Turn Skills", items)],
         title="Select Skill",
     ).run()
     if chosen is None:
@@ -825,20 +833,20 @@ REGISTRY: dict[str, Command] = {
         Command(
             "resume",
             "/resume [id|all]",
-            "list this directory's sessions / resume one (id prefix ok)",
+            "list this directory's Sessions / resume one (id prefix ok)",
             _cmd_resume,
             arguments=_session_id_completions,
         ),
         Command(
             "rename",
             "/rename <title>",
-            "rename this session",
+            "rename this Session",
             _cmd_rename,
         ),
         Command(
             "delete",
             "/delete <id>",
-            "permanently delete a stored session",
+            "permanently delete a stored Session",
             _cmd_delete,
             arguments=_session_id_completions,
         ),
@@ -872,7 +880,7 @@ REGISTRY: dict[str, Command] = {
         Command(
             "transcript",
             "/transcript [normal|verbose|summary]",
-            "show or switch transcript detail (ctrl-o cycles)",
+            "show or switch transcript detail (Ctrl+O cycles)",
             _cmd_transcript,
             arguments=_transcript_modes,
         ),
@@ -893,7 +901,7 @@ REGISTRY: dict[str, Command] = {
         Command(
             "skill",
             "/skill <id|name>",
-            "select a Skill for the next turn",
+            "select a Skill for the next Turn",
             _cmd_skill,
         ),
         Command("plugins", "/plugins", "list installed Plugins", _cmd_plugins),
@@ -926,10 +934,10 @@ REGISTRY: dict[str, Command] = {
         Command(
             "compact",
             "/compact",
-            "summarize older turns to free context",
+            "summarize older Turns to free context",
             _cmd_compact,
         ),
-        Command("exit", "/exit", "quit (ctrl-d also works)", _cmd_exit),
+        Command("exit", "/exit", "quit (Ctrl+D also works)", _cmd_exit),
     )
 }
 

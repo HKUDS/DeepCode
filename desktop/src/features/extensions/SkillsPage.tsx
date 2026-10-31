@@ -11,6 +11,8 @@ import { confirmAction } from "../../platform/confirmAction";
 import type { ClientRuntime } from "../../rpc/contracts";
 import styles from "../management/ManagementWorkspace.module.css";
 import { MarkdownContent } from "../thread/MarkdownContent";
+import { configScopeLabel } from "../../app/configScope";
+import { skillOriginLabel, skillStatusLabel } from "./skillPresentation";
 import { useSkillManagement } from "./useSkillManagement";
 
 interface SkillsPageProps {
@@ -76,9 +78,9 @@ export function SkillsPage({ runtime, project, onCreateSkill }: SkillsPageProps)
               onChange={(event) => setScope(event.target.value as ConfigScope)}
             >
               <option value="project">
-                {t("skills.scopeProject", "This project")}
+                {configScopeLabel("project", t)}
               </option>
-              <option value="user">{t("skills.scopeUser", "User settings")}</option>
+              <option value="user">{configScopeLabel("user", t)}</option>
             </select>
           </label>
           <button
@@ -148,8 +150,8 @@ export function SkillsPage({ runtime, project, onCreateSkill }: SkillsPageProps)
                     onClick={() => void catalog.selectSkill(skill.id)}
                   >
                     <span className={styles.skillRowMeta}>
-                      {skill.originLabel}
-                      <em data-status={skill.status}>{skill.status}</em>
+                      {skillOriginLabel(skill, t)}
+                      <em data-status={skill.status}>{skillStatusLabel(skill.status, t)}</em>
                     </span>
                     <strong>
                       {skill.displayName ??
@@ -174,7 +176,7 @@ export function SkillsPage({ runtime, project, onCreateSkill }: SkillsPageProps)
               {catalog.selectedSkill ? (
                 <>
                   <p className={styles.eyebrow}>
-                    {catalog.selectedSkill.originLabel}
+                    {skillOriginLabel(catalog.selectedSkill, t)}
                   </p>
                   <h2>
                     {catalog.selectedSkill.displayName ??
@@ -189,7 +191,7 @@ export function SkillsPage({ runtime, project, onCreateSkill }: SkillsPageProps)
                       className={styles.badge}
                       data-status={catalog.selectedSkill.status}
                     >
-                      {catalog.selectedSkill.status}
+                      {skillStatusLabel(catalog.selectedSkill.status, t)}
                     </span>
                     <button
                       type="button"

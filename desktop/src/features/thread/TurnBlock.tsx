@@ -15,26 +15,43 @@ import {
   ScrollText,
   Search,
   Sparkles,
+  Target,
   TerminalSquare,
   Wrench,
 } from "lucide-react";
 import type { TFunction } from "i18next";
-import { useEffect, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type {
   Approval,
   ApprovalDecision,
+  GoalOutcome,
   Item,
+  Turn,
 } from "../../generated/app-server";
 import type { DesktopInspectorTab } from "../../app/useDesktopUi";
 import { ApprovalCard } from "../execution/ApprovalCard";
-import { isWarning, presentItem } from "../execution/itemPresentation";
+import { effortLabel } from "../execution/effortLabel";
+import { GoalOutcomeView } from "../goal/GoalOutcomeView";
+import {
+  activityLabel,
+  approvalCategoryLabel,
+  approvalOutcome,
+  isWarning,
+  itemStatusText,
+  presentItem,
+} from "../execution/itemPresentation";
 import {
   formatTurnDuration,
+  goalPrompt,
+  itemActivity,
+  summarizeWork,
   turnDurationSeconds,
   type ConversationTurn,
-  type TimelineActivityGroup,
+  type GoalPrompt,
+  type TimelineWorkGroup,
+  type WorkTally,
 } from "./conversationModel";
 import { MarkdownContent } from "./MarkdownContent";
 import { ReasoningBlock } from "./ReasoningBlock";
@@ -46,6 +63,10 @@ interface TurnBlockProps {
   approvalsByItem: ReadonlyMap<string, Approval>;
   selectedItemId: string | null;
   transcriptMode: TranscriptMode;
+  /** Whether the conversation view follows its end (see ThreadConversation). */
+  following: boolean;
+  /** The Goal outcome this Turn decided, if it decided one. */
+  goalOutcome: GoalOutcome | null;
   busy: boolean;
   onSelectItem(itemId: string): void;
   onOpenInspector(tab?: DesktopInspectorTab): void;
@@ -68,30 +89,6 @@ interface SkillInvocationView {
   name: string;
   revision?: string;
   invocation?: string;
-}
-
-interface ItemActivityView {
-  kind: string;
-  label: string;
-  subject: string | null;
-}
-
-function itemActivity(item: Item): ItemActivityView | null {
-  const value = item.payload.activity;
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    Array.isArray(value) ||
-    typeof value.kind !== "string" ||
-    typeof value.label !== "string"
-  ) {
-    return null;
-  }
-  return {
-    kind: value.kind,
-    label: value.label,
-    subject: typeof value.subject === "string" ? value.subject : null,
-  };
 }
 
 function itemSkills(item: Item): SkillInvocationView[] {
@@ -155,38 +152,6 @@ function ActivityIcon({
       return <PackageOpen {...props} />;
     default:
       return <Wrench {...props} />;
-  }
-}
-
-function approvalOutcome(status: Approval["status"], t: TFunction): string {
-  switch (status) {
-    case "approved_once":
-      return t("turn.approval.allowedOnce", "Allowed once");
-    case "approved_session":
-      return t("turn.approval.allowedSession", "Allowed for this Session");
-    case "denied":
-      return t("turn.approval.denied", "Denied");
-    case "cancelled":
-      return t("turn.approval.cancelled", "Cancelled");
-    default:
-      return t("turn.approval.resolved", "Approval resolved");
-  }
-}
-
-function itemStatusText(status: Item["status"], t: TFunction): string {
-  switch (status) {
-    case "pending":
-      return t("turn.itemStatus.pending", "pending");
-    case "in_progress":
-      return t("turn.itemStatus.inProgress", "in progress");
-    case "completed":
-      return t("turn.itemStatus.completed", "completed");
-    case "failed":
-      return t("turn.itemStatus.failed", "failed");
-    case "declined":
-      return t("turn.itemStatus.declined", "declined");
-    default:
-      return String(status).replaceAll("_", " ");
   }
 }
 
@@ -279,7 +244,7 @@ function ActivityItem({
                 ? t("approval.label", "Approval required")
                 : approvalOutcome(approval.status, t)}
             </strong>
-            <small>{item.summary}</small>
+            <small>{approvalCategoryLabel(approval.category, t)}</small>
           </span>
         </div>
         {pending ? (
@@ -288,22 +253,18 @@ function ActivityItem({
             busy={busy}
             onRespond={onRespondToApproval}
           />
-        ) : (
-          <span className={styles.runApprovalDecision}>
-            {t("approval.decision", "Decision: {{status}}", {
-              status: approval.status.replaceAll("_", " "),
-            })}
-          </span>
-        )}
+        ) : null}
       </section>
     );
   }
 
-  const presentation = presentItem(item);
+  const presentation = presentItem(item, t);
   const activity = itemActivity(item);
   const warning = isWarning(item);
   const body = presentation.body;
   const hasBody = Boolean(body && body.trim() && body.trim() !== item.summary.trim());
+  const subject = stepSubject(item, t);
+  const label = stepLabel(item, t);
   const heading = (
     <>
       {warning ? (
@@ -312,10 +273,8 @@ function ActivityItem({
         <ActivityIcon kind={item.kind} activityKind={activity?.kind} />
       )}
       <span className={styles.runStepCopy}>
-        <strong>
-          {activity?.subject ?? (item.summary || presentation.label)}
-        </strong>
-        <small>{activity?.label ?? presentation.label}</small>
+        <strong>{subject}</strong>
+        {label !== subject ? <small>{label}</small> : null}
       </span>
       {warning ? null : (
         <span className={styles.runStepStatus}>
@@ -373,6 +332,39 @@ function ActivityItem({
   );
 }
 
+/** Stands in for the instruction the Goal runtime sent; the text is one click away. */
+function GoalPromptNote({
+  kind,
+  text,
+  transcriptMode,
+}: {
+  kind: GoalPrompt;
+  text: string;
+  transcriptMode: TranscriptMode;
+}) {
+  const { t } = useTranslation();
+  const label =
+    kind === "automatic"
+      ? t("turn.goalContinued", "Goal continued automatically")
+      : t("turn.goalRequested", "Working toward the Goal");
+  return (
+    <details
+      className={styles.goalPrompt}
+      open={transcriptMode === "verbose"}
+    >
+      <summary>
+        <Target size={12} aria-hidden="true" />
+        <span>{label}</span>
+        <ChevronDown size={12} aria-hidden="true" />
+      </summary>
+      <div className={styles.goalPromptText}>
+        <small>{t("turn.goalInstruction", "Instruction sent to the model")}</small>
+        <MarkdownContent>{text}</MarkdownContent>
+      </div>
+    </details>
+  );
+}
+
 function RunStatus({ group }: { group: ConversationTurn }) {
   const active = Boolean(
     group.turn && activeTurnStatuses.has(group.turn.status),
@@ -389,73 +381,223 @@ function RunStatus({ group }: { group: ConversationTurn }) {
   );
 }
 
-function ExplorationGroup({
-  group,
-  approvalsByItem,
-  selectedItemId,
-  busy,
-  onSelectItem,
-  onOpenInspector,
-  onRespondToApproval,
-  transcriptMode,
+const tallyLabels: Record<WorkTally, [key: string, fallback: string]> = {
+  commands: ["turn.work.commands", "Commands {{count}}"],
+  edits: ["turn.work.edits", "Edits {{count}}"],
+  reads: ["turn.work.reads", "Reads {{count}}"],
+  searches: ["turn.work.searches", "Searches {{count}}"],
+  tools: ["turn.work.tools", "Tools {{count}}"],
+};
+
+/**
+ * Why a Turn failed, in words. The agent's own stops have a fixed reason;
+ * any other failure keeps the service's message.
+ */
+function turnErrorText(turn: Turn, t: TFunction): string | null {
+  if (turn.errorCode !== "AGENT_TURN_FAILED") return turn.errorMessage;
+  switch (turn.stopReason) {
+    case "error":
+      return t("turn.failed.error", "The agent stopped because of an error.");
+    case "empty_final_response":
+      return t("turn.failed.empty", "The model returned an empty answer.");
+    case "busy":
+      return t("turn.failed.busy", "The Session was busy with another Turn.");
+    case "invalid_skill":
+      return t("turn.failed.invalidSkill", "A selected skill could not be loaded.");
+    default:
+      return turn.errorMessage;
+  }
+}
+
+/** How a skill came into a Turn, in words; its revision hash is not for people. */
+function skillInvocationText(
+  invocation: string | undefined,
+  t: TFunction,
+): string | undefined {
+  switch (invocation) {
+    case "explicit":
+      return t("turn.skill.explicit", "Selected for this Turn");
+    case "text_mention":
+      return t("turn.skill.mentioned", "Mentioned in the message");
+    case "implicit":
+      return t("turn.skill.implicit", "Loaded by the agent");
+    case "dependency":
+      return t("turn.skill.dependency", "Needed by another skill");
+    default:
+      return undefined;
+  }
+}
+
+/** What a step is about, for its row and for a group's live title. */
+function stepSubject(item: Item, t: TFunction): string {
+  if (item.kind === "reasoning_summary") {
+    return t("thread.reasoning.thinking", "Thinking");
+  }
+  const subject = itemActivity(item)?.subject;
+  if (subject) return subject;
+  // A step with nothing more to say is summarised by its tool's raw name.
+  const named = item.summary && item.summary !== item.payload.name;
+  return named ? item.summary : stepLabel(item, t);
+}
+
+/** What kind of step this is, in words. */
+function stepLabel(item: Item, t: TFunction): string {
+  const activity = itemActivity(item);
+  if (!activity) return presentItem(item, t).label;
+  const name = typeof item.payload.name === "string" ? item.payload.name : undefined;
+  return activityLabel(activity, t, name);
+}
+
+// A run opened on its own shows only its latest steps: a long one is hundreds.
+const AUTO_OPEN_STEPS = 20;
+// While the reader is away from the end the shown steps stay put, up to this
+// many; past that they slide again, so a run nobody watches stays cheap.
+const KEPT_STEPS_MAX = 2 * AUTO_OPEN_STEPS;
+
+/**
+ * Whether a run of steps is open, and from which step it shows.
+ *
+ * The run still at work at the end of a live Turn opens on its own, showing
+ * its latest steps as they come. It folds once the agent moves on, unless the
+ * reader is away from the end then: it is held open until they come back.
+ * While they are away the shown steps stay put and new ones join at the end,
+ * up to `KEPT_STEPS_MAX`.
+ * Opening or closing it by hand, or the verbose transcript, wins over all of
+ * that and shows every step.
+ */
+function useRunDisclosure({
+  live,
+  following,
+  verbose,
+  stepCount,
 }: {
-  group: TimelineActivityGroup;
-  approvalsByItem: ReadonlyMap<string, Approval>;
-  selectedItemId: string | null;
-  busy: boolean;
-  onSelectItem(itemId: string): void;
-  onOpenInspector(tab?: DesktopInspectorTab): void;
-  onRespondToApproval(approvalId: string, decision: ApprovalDecision): void;
+  live: boolean;
+  following: boolean;
+  verbose: boolean;
+  stepCount: number;
+}) {
+  const latestStart = Math.max(0, stepCount - AUTO_OPEN_STEPS);
+  const [chosen, setChosen] = useState<boolean | null>(null);
+  const [held, setHeld] = useState(false);
+  const [keptStart, setKeptStart] = useState<number | null>(
+    following ? null : latestStart,
+  );
+  const [wasLive, setWasLive] = useState(live);
+  const [wasFollowing, setWasFollowing] = useState(following);
+  if (wasLive !== live) {
+    setWasLive(live);
+    if (!live && !following) setHeld(true);
+  }
+  if (wasFollowing !== following) {
+    setWasFollowing(following);
+    if (following) setHeld(false);
+    setKeptStart(following ? null : latestStart);
+  }
+
+  const automatic = live || held;
+  const open = chosen ?? (verbose || automatic);
+  const showsLatest = chosen === null && !verbose && automatic;
+  return {
+    open,
+    firstShown: showsLatest
+      ? Math.max(keptStart ?? latestStart, stepCount - KEPT_STEPS_MAX)
+      : 0,
+    toggle: () => setChosen(!open),
+    showAll: () => setChosen(true),
+  };
+}
+
+/** A run of steps folded into one line that says what they did. */
+function WorkGroup({
+  group,
+  live,
+  following,
+  transcriptMode,
+  renderActivity,
+}: {
+  group: TimelineWorkGroup;
+  live: boolean;
+  following: boolean;
   transcriptMode: TranscriptMode;
+  renderActivity(item: Item): ReactNode;
 }) {
   const { t } = useTranslation();
-  const active = group.items.some(
-    (item) => item.status === "in_progress" || item.id === selectedItemId,
-  );
-  const completed = group.items.filter(
-    (item) => item.status === "completed",
-  ).length;
+  const summary = summarizeWork(group.items);
+  const disclosure = useRunDisclosure({
+    live,
+    following,
+    verbose: transcriptMode === "verbose",
+    stepCount: group.items.length,
+  });
+  const steps = group.items.slice(disclosure.firstShown);
+  const title = summary.current
+    ? t("turn.work.now", "Now: {{step}}", {
+        step: stepSubject(summary.current, t),
+      })
+    : live
+      ? t("turn.work.working", "Working")
+      : t("turn.work.steps", "Steps");
 
   return (
     <details
-      className={styles.activityGroup}
-      open={active || transcriptMode === "verbose"}
+      className={styles.workGroup}
+      data-status={live ? "in_progress" : undefined}
+      open={disclosure.open}
     >
-      <summary>
-        <Search size={14} aria-hidden="true" />
+      <summary
+        onClick={(event) => {
+          event.preventDefault();
+          disclosure.toggle();
+        }}
+      >
+        <Wrench size={14} aria-hidden="true" />
         <span>
-          <strong>{t("turn.explored", "Explored project context")}</strong>
-          <small>
-            {t("turn.activities", "{{completed}}/{{total}} activities", {
-              completed,
-              total: group.items.length,
+          <strong>{title}</strong>
+          <small className={styles.workTallies}>
+            {/* A live run's last update is not its end. */}
+            {summary.seconds && !live ? (
+              <span>{formatTurnDuration(summary.seconds)}</span>
+            ) : null}
+            {summary.tallies.map(([tally, count]) => {
+              const [key, fallback] = tallyLabels[tally];
+              return <span key={tally}>{t(key, fallback, { count })}</span>;
             })}
+            {summary.failed ? (
+              <span data-failed="true">
+                {t("turn.work.failed", "Failed {{count}}", {
+                  count: summary.failed,
+                })}
+              </span>
+            ) : null}
           </small>
         </span>
         <ChevronDown size={14} aria-hidden="true" />
       </summary>
-      <div className={styles.activityGroupItems}>
-        {group.items.map((item) => (
-          <ActivityItem
-            key={item.id}
-            item={item}
-            approval={approvalsByItem.get(item.id)}
-            active={item.id === selectedItemId}
-            busy={busy}
-            onSelectItem={onSelectItem}
-            onOpenInspector={onOpenInspector}
-            onRespondToApproval={onRespondToApproval}
-            transcriptMode={transcriptMode}
-          />
-        ))}
-      </div>
+      {disclosure.open ? (
+        <div className={styles.workGroupItems}>
+          {disclosure.firstShown > 0 ? (
+            <button
+              type="button"
+              className={styles.workGroupAll}
+              // Revealing steps above is reading them: see ThreadConversation.
+              data-reveals=""
+              onClick={disclosure.showAll}
+            >
+              {t("turn.work.showAll", "Show all {{count}} steps", {
+                count: group.items.length,
+              })}
+            </button>
+          ) : null}
+          {steps.map(renderActivity)}
+        </div>
+      ) : null}
     </details>
   );
 }
 
 function AssistantMessage({ item }: { item: Item }) {
   const { t } = useTranslation();
-  const presentation = presentItem(item);
+  const presentation = presentItem(item, t);
   const phase =
     item.payload.phase === "commentary" ? "commentary" : "final_answer";
   return (
@@ -502,6 +644,8 @@ export function TurnBlock({
   onRetryTurn,
   onCancelQueuedTurn,
   transcriptMode,
+  following,
+  goalOutcome,
 }: TurnBlockProps) {
   const { t } = useTranslation();
   const queued = group.turn?.status === "queued";
@@ -509,11 +653,19 @@ export function TurnBlock({
   const userMessages = group.userMessages.length
     ? group.userMessages.map((item) => ({
         id: item.id,
-        text: presentItem(item).body ?? item.summary,
+        text: presentItem(item, t).body ?? item.summary,
         skills: itemSkills(item),
+        goalPrompt: goalPrompt(item),
       }))
     : group.turn?.prompt
-      ? [{ id: `${group.id}-prompt`, text: group.turn.prompt, skills: [] }]
+      ? [
+          {
+            id: `${group.id}-prompt`,
+            text: group.turn.prompt,
+            skills: [],
+            goalPrompt: null,
+          },
+        ]
       : [];
   const orderedItems = timelineItems(group);
   const lastExecutionItem =
@@ -530,15 +682,56 @@ export function TurnBlock({
           "turn.restarted",
           "The previous process stopped. Retry from the same prompt.",
         )
-      : group.turn?.errorMessage;
+      : group.turn
+        ? turnErrorText(group.turn, t)
+        : null;
+
+  const live = activeTurnStatuses.has(group.turn?.status ?? "");
+  const goalOutcomeHeading = useId();
+  const renderActivity = (item: Item) => (
+    <ActivityItem
+      key={item.id}
+      item={item}
+      approval={approvalsByItem.get(item.id)}
+      active={item.id === selectedItemId}
+      busy={busy}
+      onSelectItem={onSelectItem}
+      onOpenInspector={onOpenInspector}
+      onRespondToApproval={onRespondToApproval}
+      transcriptMode={transcriptMode}
+    />
+  );
+  const renderItem = (item: Item) => {
+    if (transcriptMode === "summary" && !summaryVisibleItemKinds.has(item.kind)) {
+      return null;
+    }
+    return (
+      <div className={styles.activityEntry} key={item.id}>
+        {renderActivity(item)}
+      </div>
+    );
+  };
 
   return (
     <section className={styles.turnBlock} data-status={group.turn?.status}>
       {userMessages.map((message) => (
-        <article className={styles.userMessage} data-queued={queued} key={message.id}>
-          <div className={styles.userBubble}>
-            <MarkdownContent>{message.text}</MarkdownContent>
-          </div>
+        <article
+          className={styles.userMessage}
+          data-queued={queued}
+          data-goal-prompt={message.goalPrompt ?? undefined}
+          key={message.id}
+        >
+          {message.goalPrompt ? (
+            <GoalPromptNote
+              kind={message.goalPrompt}
+              text={message.text}
+              transcriptMode={transcriptMode}
+            />
+          ) : (
+            <div className={styles.userBubble}>
+              <MarkdownContent>{message.text}</MarkdownContent>
+            </div>
+          )}
           {message.skills.length ? (
             <div
               className={styles.userSkills}
@@ -547,7 +740,7 @@ export function TurnBlock({
               {message.skills.map((skill) => (
                 <span
                   key={skill.skillId}
-                  title={[skill.invocation, skill.revision].filter(Boolean).join(" · ")}
+                  title={skillInvocationText(skill.invocation, t)}
                 >
                   <Sparkles size={12} />
                   {skill.name}
@@ -579,7 +772,7 @@ export function TurnBlock({
           {group.turn.executionProfile.reasoningEffort ? (
             <small>
               {t("turn.thinking", "Thinking {{effort}}", {
-                effort: group.turn.executionProfile.reasoningEffort,
+                effort: effortLabel(group.turn.executionProfile.reasoningEffort, t),
               })}
             </small>
           ) : null}
@@ -589,20 +782,21 @@ export function TurnBlock({
       <RunStatus group={group} />
 
       <div className={styles.timeline}>
-        {group.timeline.map((entry) => {
-          if (entry.type === "activity_group") {
-            if (transcriptMode === "summary") return null;
+        {group.timeline.map((entry, index) => {
+          if (entry.type === "work_group") {
+            // The summary keeps a run's changes, not its steps.
+            if (transcriptMode === "summary") {
+              return <Fragment key={entry.id}>{entry.items.map(renderItem)}</Fragment>;
+            }
             return (
-              <ExplorationGroup
-                key={entry.id}
+              <WorkGroup
+                // A new transcript mode starts the group in that mode's state.
+                key={`${entry.id}:${transcriptMode}`}
                 group={entry}
-                approvalsByItem={approvalsByItem}
-                selectedItemId={selectedItemId}
-                busy={busy}
-                onSelectItem={onSelectItem}
-                onOpenInspector={onOpenInspector}
-                onRespondToApproval={onRespondToApproval}
+                live={live && index === group.timeline.length - 1}
+                following={following}
                 transcriptMode={transcriptMode}
+                renderActivity={renderActivity}
               />
             );
           }
@@ -615,26 +809,7 @@ export function TurnBlock({
             }
             return <AssistantMessage key={entry.id} item={entry.item} />;
           }
-          if (
-            transcriptMode === "summary" &&
-            !summaryVisibleItemKinds.has(entry.item.kind)
-          ) {
-            return null;
-          }
-          return (
-            <div className={styles.activityEntry} key={entry.id}>
-              <ActivityItem
-                item={entry.item}
-                approval={approvalsByItem.get(entry.item.id)}
-                active={entry.item.id === selectedItemId}
-                busy={busy}
-                onSelectItem={onSelectItem}
-                onOpenInspector={onOpenInspector}
-                onRespondToApproval={onRespondToApproval}
-                transcriptMode={transcriptMode}
-              />
-            </div>
-          );
+          return renderItem(entry.item);
         })}
       </div>
 
@@ -664,6 +839,25 @@ export function TurnBlock({
             </button>
           ) : null}
         </div>
+      ) : null}
+      {goalOutcome && !live ? (
+        <section
+          className={styles.goalOutcome}
+          data-status={goalOutcome.status}
+          aria-labelledby={goalOutcomeHeading}
+        >
+          <GoalOutcomeView
+            outcome={goalOutcome}
+            headingId={goalOutcomeHeading}
+            // The only runtime outcome a Turn decides is the block after it
+            // failed, and its reason is that Turn's error, shown above.
+            showReason={!(goalOutcome.source === "runtime" && errorMessage)}
+            onSelectEvidence={(itemId) => {
+              onSelectItem(itemId);
+              onOpenInspector("details");
+            }}
+          />
+        </section>
       ) : null}
     </section>
   );

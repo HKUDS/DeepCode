@@ -25,9 +25,22 @@ import type {
   McpServerInfo,
   Project,
 } from "../../generated/app-server";
+import { configScopeLabel } from "../../app/configScope";
 import { confirmAction } from "../../platform/confirmAction";
 import type { ClientRuntime } from "../../rpc/contracts";
 import styles from "../management/ManagementWorkspace.module.css";
+import {
+  mcpApprovalLabel,
+  mcpAuthLabel,
+  mcpCategoryLabel,
+  mcpConfigurationLabel,
+  mcpConfigurationText,
+  mcpRuntimeText,
+  mcpSourceLabel,
+  mcpStatus,
+  mcpStatusLabel,
+  mcpTransportLabel,
+} from "./mcpPresentation";
 import { useMcpCatalog } from "./useMcpCatalog";
 
 type Transport = "stdio" | "sse" | "streamableHttp";
@@ -48,7 +61,8 @@ interface Draft {
   urlParamEnv: string;
   enabledTools: string;
   disabledTools: string;
-  approvalMode: "auto" | "prompt" | "writes" | "approve";
+  // "approve" is loaded as "auto"; the editor never writes it.
+  approvalMode: "auto" | "prompt" | "writes";
   startupTimeout: string;
   toolTimeout: string;
   required: boolean;
@@ -183,7 +197,9 @@ export function McpPage({
       urlParamEnv: mapLines(server.envUrlParams),
       enabledTools: server.enabledTools?.join(", ") ?? "",
       disabledTools: server.disabledTools.join(", "),
-      approvalMode: server.approvalMode,
+      // "approve" adds no checks, exactly like "auto" (core/harness/permissions.py);
+      // the editor offers the one name for both.
+      approvalMode: server.approvalMode === "approve" ? "auto" : server.approvalMode,
       startupTimeout: String(server.startupTimeoutSeconds),
       toolTimeout: String(server.toolTimeoutSeconds),
       required: server.required,
@@ -259,21 +275,21 @@ export function McpPage({
             <article className={styles.card} key={`${server.source}:${server.id}`}>
             <header>
               <div>
-                <p className={styles.eyebrow}>{server.source} · {server.transport}</p>
+                <p className={styles.eyebrow}>{mcpSourceLabel(server.source, t)} · {mcpTransportLabel(server.transport, t)}</p>
                 <h2>{server.name}</h2>
               </div>
-              <span className={styles.badge} data-status={serverStatus(server)}>
-                {serverStatus(server)}
+              <span className={styles.badge} data-status={mcpStatus(server)}>
+                {mcpStatusLabel(server, t)}
               </span>
             </header>
-            <p>{server.configurationMessage}</p>
+            <p>{mcpConfigurationText(server, t)}</p>
             <dl className={styles.metadata}>
               <div><dt>{t("mcp.server.endpoint", "Endpoint")}</dt><dd>{server.command ?? server.url}</dd></div>
-              <div><dt>{t("mcp.server.configuration", "Configuration")}</dt><dd>{server.configurationState}</dd></div>
-              <div><dt>{t("mcp.server.authentication", "Authentication")}</dt><dd>{server.authState}</dd></div>
-              <div><dt>{t("mcp.server.lastCheck", "Last check")}</dt><dd>{server.runtimeMessage}</dd></div>
+              <div><dt>{t("mcp.server.configuration", "Configuration")}</dt><dd>{mcpConfigurationLabel(server.configurationState, t)}</dd></div>
+              <div><dt>{t("mcp.server.authentication", "Authentication")}</dt><dd>{mcpAuthLabel(server.authState, t)}</dd></div>
+              <div><dt>{t("mcp.server.lastCheck", "Last check")}</dt><dd>{mcpRuntimeText(server, t)}</dd></div>
               <div><dt>{t("mcp.server.capabilities", "Capabilities")}</dt><dd>{capabilitySummary(t, server.toolCount, server.resourceCount, server.promptCount)}</dd></div>
-              <div><dt>{t("mcp.server.approval", "Approval")}</dt><dd>{server.approvalMode}</dd></div>
+              <div><dt>{t("mcp.server.approval", "Approval")}</dt><dd>{mcpApprovalLabel(server.approvalMode, t)}</dd></div>
               {server.missingEnvKeys.length ? (
                 <div><dt>{t("mcp.server.missingEnvironment", "Missing environment")}</dt><dd>{server.missingEnvKeys.join(", ")}</dd></div>
               ) : null}
@@ -416,7 +432,7 @@ export function McpPage({
             <article className={styles.card} key={preset.id}>
               <header>
                 <div>
-                  <p className={styles.eyebrow}>{preset.category} · {preset.transport}</p>
+                  <p className={styles.eyebrow}>{mcpCategoryLabel(preset.category, t)} · {mcpTransportLabel(preset.transport, t)}</p>
                   <h2>{preset.displayName}</h2>
                 </div>
                 <span className={styles.badge} data-status={preset.configured ? "configured" : "available"}>
@@ -475,9 +491,9 @@ export function McpPage({
         </header>
         <div className={styles.formGrid}>
           <Field label={t("mcp.form.name", "Name")}><input value={draft.name} onChange={(event) => update(setDraft, "name", event.target.value)} /></Field>
-          <Field label={t("mcp.form.scope", "Scope")}><select value={draft.scope} onChange={(event) => update(setDraft, "scope", event.target.value as ConfigScope)}><option value="user">{t("mcp.form.scopeUser", "User")}</option><option value="project" disabled={!canUseProjectScope}>{t("mcp.form.scopeProject", "This project")}</option></select></Field>
-          <Field label={t("mcp.form.transport", "Transport")}><select value={draft.transport} onChange={(event) => update(setDraft, "transport", event.target.value as Transport)}><option value="stdio">{t("mcp.form.transportStdio", "Local stdio")}</option><option value="streamableHttp">Streamable HTTP</option><option value="sse">SSE</option></select></Field>
-          <Field label={t("mcp.form.approval", "Approval")}><select value={draft.approvalMode} onChange={(event) => update(setDraft, "approvalMode", event.target.value as Draft["approvalMode"])}><option value="writes">{t("mcp.form.approvalWrites", "Ask for writes")}</option><option value="prompt">{t("mcp.form.approvalPrompt", "Always ask")}</option><option value="auto">{t("mcp.form.approvalAuto", "Use global policy")}</option><option value="approve">{t("mcp.form.approvalApprove", "Approved when globally allowed")}</option></select></Field>
+          <Field label={t("mcp.form.scope", "Scope")}><select value={draft.scope} onChange={(event) => update(setDraft, "scope", event.target.value as ConfigScope)}><option value="user">{configScopeLabel("user", t)}</option><option value="project" disabled={!canUseProjectScope}>{configScopeLabel("project", t)}</option></select></Field>
+          <Field label={t("mcp.form.transport", "Transport")}><select value={draft.transport} onChange={(event) => update(setDraft, "transport", event.target.value as Transport)}><option value="stdio">{mcpTransportLabel("stdio", t)}</option><option value="streamableHttp">{mcpTransportLabel("streamableHttp", t)}</option><option value="sse">{mcpTransportLabel("sse", t)}</option></select></Field>
+          <Field label={t("mcp.form.approval", "Approval")}><select value={draft.approvalMode} onChange={(event) => update(setDraft, "approvalMode", event.target.value as Draft["approvalMode"])}><option value="writes">{mcpApprovalLabel("writes", t)}</option><option value="prompt">{mcpApprovalLabel("prompt", t)}</option><option value="auto">{mcpApprovalLabel("auto", t)}</option></select></Field>
           {draft.transport === "stdio" ? (
             <>
               <Field label={t("mcp.form.command", "Command")} wide><input value={draft.command} onChange={(event) => update(setDraft, "command", event.target.value)} placeholder={t("mcp.form.commandPlaceholder", "Executable or absolute path")} /></Field>
@@ -558,11 +574,6 @@ function stringMap(value: string): JsonObject {
 function numberValue(value: string, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function serverStatus(server: McpServerInfo): string {
-  if (!server.enabled) return "disabled";
-  return server.runtimeState;
 }
 
 function capabilitySummary(

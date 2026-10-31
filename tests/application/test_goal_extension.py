@@ -404,22 +404,42 @@ def test_outcome_projects_only_bounded_existing_items_from_deciding_turn(
             ordinal=ordinal,
             kind=(ItemKind.TEST_RESULT if ordinal % 2 else ItemKind.COMMAND_EXECUTION),
             status=ItemStatus.COMPLETED,
-            summary=("verified " + ("x" * 300)) if ordinal == 1 else f"step {ordinal}",
+            summary=("verified " + ("x" * 300)) if ordinal == 14 else f"step {ordinal}",
             payload={},
         )
         for ordinal in range(1, 15)
     )
-    unsupported = Item(
+    bookkeeping = Item(
         thread_id=session_id,
         turn_id=active.id,
         ordinal=15,
+        kind=ItemKind.TOOL_CALL,
+        status=ItemStatus.COMPLETED,
+        summary="get goal",
+        payload={"name": "get_goal"},
+    )
+    unsettled = Item(
+        thread_id=session_id,
+        turn_id=active.id,
+        ordinal=16,
+        kind=ItemKind.TOOL_CALL,
+        status=ItemStatus.IN_PROGRESS,
+        summary="still running",
+        payload={"name": "bash"},
+    )
+    unsupported = Item(
+        thread_id=session_id,
+        turn_id=active.id,
+        ordinal=17,
         kind=ItemKind.ASSISTANT_MESSAGE,
         status=ItemStatus.COMPLETED,
         summary="This narrative is not an evidence reference.",
         payload={"text": "done"},
     )
     turns.active = active
-    turns.snapshots[active.id] = _Snapshot(active, (*supported, unsupported))
+    turns.snapshots[active.id] = _Snapshot(
+        active, (*supported, bookkeeping, unsettled, unsupported)
+    )
 
     goals.update_goal(
         GoalRuntimeContext(
@@ -436,7 +456,12 @@ def test_outcome_projects_only_bounded_existing_items_from_deciding_turn(
     assert outcome.status is ThreadGoalStatus.COMPLETE
     assert outcome.reason == "The implementation and focused tests are complete."
     assert outcome.decided_by_turn_id == active.id
-    assert len(outcome.evidence_refs) == 12
+    # The work the completion check judged: the latest settled steps, without
+    # the Goal tools' own calls or work still running.
+    assert [evidence.summary for evidence in outcome.evidence_refs][:11] == [
+        f"step {ordinal}" for ordinal in range(3, 14)
+    ]
+    assert outcome.evidence_refs[-1].summary.startswith("verified ")
     assert {evidence.turn_id for evidence in outcome.evidence_refs} == {active.id}
     assert {evidence.kind for evidence in outcome.evidence_refs} <= {
         "test_result",

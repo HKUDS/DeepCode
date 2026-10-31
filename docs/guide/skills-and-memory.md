@@ -55,7 +55,7 @@ also include the Skill directly in a message:
 $SKILL_NAME review the changes on this branch
 ```
 
-Select the Skill again when you want to use it on another turn.
+Select the Skill again when you want to use it on another Turn.
 
 To create one, ask the bundled Skill Creator for help:
 

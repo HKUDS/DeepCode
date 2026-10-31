@@ -6,8 +6,11 @@ import json
 import re
 import time
 
+from rich.text import Text as RichText
+
+from cli.tui.text import wrap_text
 from tests.e2e.fake_model import Pause, Reasoning, Reply, Text, ToolCall
-from tests.e2e.terminal import CTRL_C, CTRL_O, ESC
+from tests.e2e.terminal import COLUMNS, CTRL_C, CTRL_O, ESC
 
 _INTERRUPTED = r"[Ii]nterrupt|[Ss]topped"
 
@@ -292,6 +295,79 @@ def test_a_long_url_is_never_split_by_an_inserted_newline(deepcode):
     assert f"The link: {url} works." in tui.text(start)
 
 
+def test_chinese_text_fills_each_line_and_hangs_under_its_mark(deepcode):
+    sentence = "先读取配置文件，确认 relic_offer 在哪里触发，再决定埋点放在哪个函数里。"
+    deepcode.model.on(
+        "wrap chinese",
+        Reply([Reasoning(sentence * 4), Pause(0.3), Text("- " + sentence * 4)]),
+    )
+    tui = deepcode.open_tui("--access", "read-only")
+    # Ctrl+O sent before the TUI reads the keyboard reaches the terminal
+    # instead, which on macOS then discards the program's output.
+    tui.wait_for_screen(r"Transcript: normal")
+    tui.send(CTRL_O, 0.3)  # verbose: the whole reasoning, under its card
+    tui.wait_for_screen(r"Transcript: verbose")
+
+    tui.submit("wrap chinese")
+    deepcode.wait_idle()
+    tui.wait_for_screen(r"\n· [\d.]+s · ")  # the Turn's footer, after the answer
+
+    lines = tui.screen().splitlines()
+    card = next(i for i, line in enumerate(lines) if "Thought for" in line)
+    thought = lines[card + 1 : lines.index("", card)]
+    item = next(i for i, line in enumerate(lines) if line.startswith(" • 先读取"))
+    answer = lines[item : lines.index("", item)]
+    for block, mark in ((thought, "  "), (answer, " • ")):
+        # Exactly the wrapped rows, the first after its mark, the rest under it.
+        rows = wrap_text(RichText(sentence * 4), COLUMNS - len(mark))
+        assert len(rows) >= 2
+        hang = " " * len(mark)
+        assert block == [
+            (mark if index == 0 else hang) + row.plain for index, row in enumerate(rows)
+        ]
+
+
+def test_resuming_mid_answer_shows_each_line_once_in_order(deepcode):
+    # Long enough that the second TUI attaches mid-answer even on a slow host.
+    lines = _numbered_lines(40, "Resumed")
+    deepcode.model.on("answer slowly", _slow_answer(lines, pause=0.25))
+    first = deepcode.open_tui("--access", "read-only")
+    session = re.search(r"Session ([0-9a-f]{8})", first.screen())[1]
+
+    first.submit("answer slowly")
+    first.wait_for(lines[6])
+    second = deepcode.open_tui("--access", "read-only", "--resume", session)
+    deepcode.wait_idle(timeout=30)
+    second.wait_for_screen(r"\n· [\d.]+s · ")  # the Turn's footer
+
+    # The lines streamed before it attached come first, then the rest; the
+    # end of the Turn adds no second copy.
+    screen = second.screen()
+    assert [screen.count(line) for line in lines] == [1] * len(lines), screen
+    positions = [screen.index(line) for line in lines]
+    assert positions == sorted(positions)
+
+
+def test_resuming_a_turn_that_waits_for_approval_shows_the_approval(deepcode):
+    deepcode.model.on(
+        "list the files",
+        Reply([ToolCall("bash", {"command": "ls"})]),
+        Reply([Text("Listed the files.")]),
+    )
+    first = deepcode.open_tui("--access", "ask")
+    session = re.search(r"Session ([0-9a-f]{8})", first.screen())[1]
+    first.submit("list the files")
+    first.wait_for(r"Approval needed")
+
+    second = deepcode.open_tui("--access", "ask", "--resume", session)
+    second.wait_for_screen(r"Approval needed")
+    # Answered here, as if it had been asked here.
+    second.submit("y")
+    deepcode.wait_idle(timeout=30)
+    second.wait_for_screen(r"Listed the files\.")
+    assert second.screen().count("Approval needed") == 1
+
+
 def test_an_approval_waits_still_holds_typing_and_always_allow_is_narrow(deepcode):
     deepcode.model.on(
         "list the files",
@@ -325,7 +401,7 @@ def test_an_approval_waits_still_holds_typing_and_always_allow_is_narrow(deepcod
     tui.send(CTRL_C)  # clear the message that came back to the prompt
 
     tui.submit("a")
-    tui.wait_for(r"Allowed `ls …` for the rest of this session\.", since=start)
+    tui.wait_for(r"Allowed `ls …` for the rest of this Session\.", since=start)
     tui.wait_for(r"Listed the files\.", since=start)
     deepcode.wait_idle()
 

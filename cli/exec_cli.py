@@ -17,6 +17,7 @@ from cli.execution_options import (
 from cli.thread_client import HeadlessTurnOptions
 from core.domain.turn import TurnStatus
 from cli.transcript import TranscriptMode
+from cli.tui.text import effort_label
 from core.application.errors import ApplicationError
 from core.config import ConfigError
 from core.domain.approval import Approval, ApprovalStatus
@@ -34,13 +35,13 @@ def _emit_human(event, transcript_mode: TranscriptMode) -> None:
     msg = event.msg
     event_type = msg.type
     if event_type == "turn_started":
-        print("· turn started", flush=True)
+        print("· Turn started", flush=True)
     elif event_type == "tool_started":
         if transcript_mode is not TranscriptMode.SUMMARY:
             print(f"  → {msg.name}", flush=True)
     elif event_type == "tool_completed":
         if transcript_mode is not TranscriptMode.SUMMARY:
-            mark = "✗" if msg.is_error else "✓"
+            mark = "⊘" if msg.denied else "✗" if msg.is_error else "✓"
             print(f"  {mark} {msg.name}", flush=True)
     elif event_type == "skill_loaded":
         if transcript_mode is not TranscriptMode.SUMMARY:
@@ -54,8 +55,7 @@ def _emit_human(event, transcript_mode: TranscriptMode) -> None:
         print(f"\n{msg.text}\n", flush=True)
     elif event_type == "agent_reasoning_started":
         if transcript_mode is not TranscriptMode.SUMMARY:
-            effort = (msg.effort or "auto").title()
-            print(f"  ◇ thinking · {effort}", flush=True)
+            print(f"  ◇ thinking · {effort_label(msg.effort)}", flush=True)
     elif event_type == "agent_reasoning_completed":
         if transcript_mode is TranscriptMode.SUMMARY:
             return
@@ -95,7 +95,7 @@ def _approval_decider(approval: Approval) -> ApprovalStatus:
     target = requested_session_target(request)
     print(
         f"\nApproval required for {tool}: {reason}\n"
-        f"  y = allow once · a = always allow {target} this session · "
+        f"  y = allow once · a = always allow {target} this Session · "
         "anything else = deny\n> ",
         end="",
         file=sys.stderr,

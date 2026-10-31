@@ -6,7 +6,7 @@ recurring task. Choose the option that fits your work:
 
 | What you want to do | Use |
 |---|---|
-| Keep working toward an objective across several turns | `/goal` in a conversation, or `deepcode loop` from the shell |
+| Keep working toward an objective across several Turns | `/goal` in a conversation, or `deepcode loop` from the shell |
 | Run one task from a script | `deepcode exec` |
 | Run a recurring task after you close the interface | An Automation |
 | Repeat a task while a scheduling command stays open | `deepcode schedule` |
@@ -94,11 +94,11 @@ deepcode automation create "Review TODOs" --workspace . --prompt "Summarize TODO
 deepcode automation list --workspace .
 ```
 
-Each Automation has its own Goal Thread. Before its first run, use **Open Thread**
-in Desktop/Web and select the intended connection/model in that thread's composer.
-You can also resume its Thread ID in the TUI and use `/model`. Without a thread
-selection, it uses the configured defaults; a model selected in your earlier demo
-Session is not automatically copied into this new thread.
+Each Automation has its own Goal Session. Before its first run, use **Open Session**
+in Desktop/Web and select the intended connection/model in that Session's composer.
+You can also resume its Session ID in the TUI and use `/model`. Without a model
+selected there, it uses the configured defaults; a model selected in your earlier demo
+Session is not automatically copied into this new one.
 
 Copy the Automation ID from the output and use it in place of `AUTO_ID` below.
 Run it once, inspect its run history, then enable the hourly schedule:
@@ -110,7 +110,7 @@ deepcode automation enable AUTO_ID
 ```
 
 To pause future runs, use `deepcode automation disable AUTO_ID`. A task already
-running will keep going; open its thread if you want to stop it. Review the
+running will keep going; open its Session if you want to stop it. Review the
 Project's permissions before unattended use, since tasks that need approval
 still require your response.
 
@@ -140,7 +140,7 @@ front of the model call. `python -m core.schedule.monitor` runs a script or
 fetches a URL, hashes the output, and reports `changed` only when it differs
 from the last run (the first run records a baseline). Unchanged ticks cost no
 model call. On a change it prints a context block with the diff to hand to the
-next turn:
+next Turn:
 
 ```console
 python -m core.schedule.monitor --job-id releases --url https://example.com/releases.json --json

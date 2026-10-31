@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import type { BridgeError, SidecarStatus } from "../rpc/contracts";
 import styles from "./RuntimeNotice.module.css";
+import { runtimeNoticeText } from "./runtimeNoticeText";
 
 interface RuntimeNoticeProps {
   runtime: SidecarStatus;
@@ -10,7 +11,7 @@ interface RuntimeNoticeProps {
   busy: boolean;
   onRestart(): void;
   onDismissError(): void;
-  reconnectOnly?: boolean;
+  browserHost?: boolean;
 }
 
 export function RuntimeNotice({
@@ -19,21 +20,28 @@ export function RuntimeNotice({
   busy,
   onRestart,
   onDismissError,
-  reconnectOnly = false,
+  browserHost = false,
 }: RuntimeNoticeProps) {
   const { t } = useTranslation();
   if (!error && runtime.phase !== "crashed" && runtime.phase !== "stopped") return null;
   const serviceOffline = runtime.phase === "crashed" || runtime.phase === "stopped";
   const code = runtime.errorCode ?? error?.code;
-  const authRequired = reconnectOnly && code === "AUTH_REQUIRED";
-  const message = authRequired
-    ? t("runtime.browserAuthHelp", "Run deepcode web in your terminal to open a new browser access link. No DeepCode account is needed.")
-    : (runtime.errorCode ? runtime.message : error?.message) ?? runtime.message ?? t("runtime.offline", "The local App Server is unavailable.");
+  const authRequired = browserHost && code === "AUTH_REQUIRED";
+  const serviceMessage =
+    (runtime.errorCode ? runtime.message : error?.message) ??
+    runtime.message ??
+    t("runtime.offline", "The local App Server is unavailable.");
+  const [title, message] = runtimeNoticeText(
+    code,
+    serviceMessage,
+    { serviceOffline, browser: browserHost },
+    t,
+  );
   return (
     <div className={styles.notice} role="alert">
       <AlertTriangle size={18} aria-hidden="true" />
       <div className={styles.copy}>
-        <strong>{authRequired ? t("runtime.browserAuthRequired", "Browser access required") : code ?? "APP_SERVER_OFFLINE"}</strong>
+        <strong>{title}</strong>
         <span>{message}</span>
       </div>
       <div className={styles.actions}>
@@ -42,7 +50,7 @@ export function RuntimeNotice({
             className={styles.dismiss}
             type="button"
             onClick={onDismissError}
-            aria-label="Dismiss error"
+            aria-label={t("runtime.dismissError", "Dismiss error")}
           >
             <X size={14} />
           </button>
@@ -50,7 +58,7 @@ export function RuntimeNotice({
         {serviceOffline && !authRequired ? (
           <button type="button" onClick={onRestart} disabled={busy}>
             <RotateCw size={14} />
-            {reconnectOnly || runtime.serverInfo?.serviceInfo?.shutdownScope === "connection"
+            {browserHost || runtime.serverInfo?.serviceInfo?.shutdownScope === "connection"
               ? t("runtime.reconnect", "Reconnect")
               : t("runtime.restart", "Restart service")}
           </button>

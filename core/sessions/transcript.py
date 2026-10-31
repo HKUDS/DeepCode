@@ -12,6 +12,7 @@ from copy import deepcopy
 from typing import Any, Iterable, Mapping
 
 from core.agent_runtime.context import EnvironmentContext
+from core.domain.message_provenance import TurnInputSource
 from core.sessions.continuation import session_message_history_entry
 from core.sessions.models import SessionMessage
 
@@ -78,6 +79,30 @@ def is_compaction_checkpoint(message: SessionMessage) -> bool:
     """
     marker = (message.metadata or {}).get(COMPACTION_META)
     return isinstance(marker, dict) and bool(marker.get("reset"))
+
+
+def is_context_note(message: SessionMessage) -> bool:
+    """True for runner-injected context, not a conversational turn.
+
+    The context-note sink stamps every note with a ``delivery`` marker
+    (``mid_turn``/``between_turns``). Notes are model-visible log entries
+    — repeat-guard reminders, sub-agent results, Goal updates — that sit
+    BETWEEN a Turn's user prompt and its assistant reply in the canonical
+    JSONL. Like a compaction checkpoint, a note rides a user-role record but
+    nobody said it: the projection timeline must skip it when pairing
+    Turns, and a transcript view must not show it as the user's words.
+
+    The marker an interrupted Turn leaves for the model is the same kind
+    of record: it closes that Turn, it does not open one.
+    """
+    if message.role != "user":
+        return False
+    metadata = message.metadata or {}
+    if metadata.get("source") == TurnInputSource.TURN_INTERRUPT.value:
+        return True
+    # User input also carries delivery provenance (current_turn/next_turn).
+    # Only the context-note sink's markers identify internal user-role notes.
+    return metadata.get("delivery") in ("mid_turn", "between_turns")
 
 
 def record_fingerprint(message: SessionMessage) -> tuple[Any, ...]:

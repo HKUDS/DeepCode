@@ -8,7 +8,7 @@ import logging
 import sqlite3
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -515,6 +515,7 @@ class TurnService:
         input_source: TurnInputSource = TurnInputSource.START,
         input_delivery: TurnInputDelivery = TurnInputDelivery.CURRENT_TURN,
         execution_class: ExecutionClass = ExecutionClass.INTERACTIVE,
+        retry_of: Mapping[str, str] | None = None,
         reservation_id: str | None = None,
         transaction_participant: (
             TurnTransactionParticipant[ParticipantResultT] | None
@@ -725,6 +726,7 @@ class TurnService:
                 "client": client_surface.value,
                 "delivery": input_delivery.value,
                 "source": input_source.value,
+                **({"retryOf": dict(retry_of)} if retry_of is not None else {}),
                 **(
                     {"messageId": input_message_id, "requestFingerprint": fingerprint}
                     if input_message_id is not None
@@ -828,7 +830,8 @@ class TurnService:
         *,
         use_current_selection: bool = False,
     ) -> TurnSnapshot:
-        original = self.read(turn_id).turn
+        snapshot = self.read(turn_id)
+        original = snapshot.turn
         if not original.status.is_terminal:
             raise ConflictError(
                 "only a completed, failed, or interrupted Turn can retry"
@@ -862,6 +865,7 @@ class TurnService:
                 client_surface=ClientSurface.INTERNAL,
                 input_source=TurnInputSource.RETRY,
                 execution_class=ExecutionClass.INTERACTIVE,
+                retry_of=_retry_origin(snapshot),
             )
         return self._activate_submission(submission).snapshot
 
@@ -1430,6 +1434,7 @@ class TurnService:
                         "client",
                         "delivery",
                         "source",
+                        "retryOf",
                     )
                     if key in initial_item.payload
                 }
@@ -2415,6 +2420,36 @@ class TurnService:
     def _publish(self, events: list[DomainEvent]) -> None:
         for event in events:
             self.broker.publish(event)
+
+
+def _retry_origin(snapshot: TurnSnapshot) -> dict[str, str]:
+    """Where a retried Turn's prompt came from.
+
+    A retry reuses the prompt but is its own input (``source: retry``), so
+    without this a client cannot tell a retried Goal instruction from words
+    the user typed. A retry of a retry points at the first Turn retried.
+    """
+    prompt = next(
+        (
+            item
+            for item in snapshot.items
+            if item.kind is ItemKind.USER_MESSAGE and item.ordinal == 1
+        ),
+        None,
+    )
+    payload = prompt.payload if prompt is not None else {}
+    if payload.get("source") == TurnInputSource.RETRY.value and isinstance(
+        payload.get("retryOf"), dict
+    ):
+        return dict(payload["retryOf"])
+    return {
+        "turnId": snapshot.turn.id,
+        **{
+            key: value
+            for key in ("source", "client")
+            if isinstance(value := payload.get(key), str)
+        },
+    }
 
 
 def _execution_class_for(source: TurnInputSource) -> ExecutionClass:
