@@ -5,6 +5,35 @@ Released versions are named in the entry title; the version on PyPI is
 [deepcode-hku](https://pypi.org/project/deepcode-hku/). 中文版见
 [CHANGELOG_ZH.md](CHANGELOG_ZH.md).
 
+## 2026-10-31 · Long tasks that read well, the interface in your language, and a narrow-window layout
+
+- **Long tasks read better on the Web.** A run of tool steps folds into one
+  group that says what it did ("Reads 3 · Commands 4"), the latest steps stay
+  in view while the agent works, and the view follows new output until you
+  scroll away. A finished Goal ends with its outcome and the work behind it,
+  and the Goal's automatic continuation is a note, not a message from you.
+  Long Sessions load in batches: a 40-Turn Session opens about seven times
+  faster.
+- **A declined tool says so.** A call you refused reads "Declined" (Web) or
+  "Denied by you" (TUI), not a red failure.
+- **The terminal UI shows more of what happened.** A command's result shows
+  its first and last lines, Ctrl+O confirms the detail level it switched to,
+  Chinese text wraps between characters without splitting English words,
+  and the full reasoning is indented under its card. Resuming a Session
+  whose Turn is still running shows what it has done so far once, and an
+  approval it is waiting for.
+- **The interface in Chinese has no stray English or raw values.** Tool
+  steps, approvals, Goal states, MCP servers, Skills, agent presets,
+  diagnostics and connection errors are all in the chosen language, and no
+  page shows internal ids.
+- **One word for each thing.** Desktop and Web say Session instead of
+  thread; the terminal UI writes keys, reasoning efforts, Sessions and Turns
+  the same way everywhere.
+- **Narrow windows.** The composer's controls wrap instead of being cut, the
+  sidebar becomes a drawer below 720 px, and the review panel that floats
+  over the conversation holds the keyboard like a dialog.
+- DeepCode now requires Rich 13.4 or later.
+
 ## 2026-10-29 · Lighter compaction, checked Goal completion, and folder browsing on the Web
 
 - **Clear old tool output first.** With `agents.defaults.microcompact` on,

@@ -377,6 +377,9 @@ vLLM。**Custom** 连接可以指向任何支持 OpenAI Chat Completions、OpenA
 
 ## 最近更新
 
+- **2026-10-31** — Web 端长任务更好读（步骤折叠、Goal 结果卡片、长会话打开更快）；
+  被拒绝的工具会说明是拒绝；终端界面中文按字换行、恢复运行中的会话不再重复；
+  中文界面不再出现英文；窄窗口下侧栏变成抽屉。
 - **2026-10-29** — 可选的 microcompact：总结之前先清掉旧的工具输出
   （`agents.defaults.microcompact`）；Goal 完成前的可选检查
   （`goal.completionVerifier`）；Web 客户端可以浏览文件夹；可选的风险检查
@@ -385,12 +388,11 @@ vLLM。**Custom** 连接可以指向任何支持 OpenAI Chat Completions、OpenA
   将改动什么；"始终允许"只覆盖同一类命令，不再是整个工具；信任文件夹前会先确认。
 - **2026-10-28** — Agent 预设可以用 `disallowed-tools` 去掉工具；文件工具写入
   hook 文件前会先询问；`deepcode mcp list` 会标出没有固定版本的 MCP 包。
-- **2026-10-21** — Windows 后台服务不再弹出终端窗口；Desktop 和 Web 可以给代码
-  单独设置字体。
 
 <details>
 <summary><strong>更早的更新</strong></summary>
 
+- **2026-10-21** — Windows 后台服务不再弹窗、代码可单独设字体，以及社区修复
 - **2026-10-14** — 会话保住历史、沙箱更严，Desktop 与 Web 有了中文界面
 - **2026-10-13** — 流式输出更顺、后台服务自我管理、Web 登录更安全
 - **2026-10-12** — DeepCode v2.3.1：TUI 边输出边渲染 Markdown、Windows 后台服务不再自行退出、`/compact` 能压缩写代码的会话，以及社区修复

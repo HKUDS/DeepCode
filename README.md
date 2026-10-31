@@ -418,6 +418,11 @@ vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## What's new
 
+- **2026-10-31** — Long tasks read better on the Web (folded steps, a Goal
+  outcome, faster long Sessions), declined tools say so, the terminal UI
+  wraps Chinese text and resumes a running Turn cleanly, the Chinese
+  interface has no stray English, and the sidebar becomes a drawer on a
+  narrow window.
 - **2026-10-29** — Optional microcompact that clears old tool output before
   summarizing (`agents.defaults.microcompact`), an optional check before a
   Goal completes (`goal.completionVerifier`), folder browsing in the Web
@@ -429,12 +434,11 @@ vulnerability, see [SECURITY.md](SECURITY.md).
 - **2026-10-28** — Agent presets can remove tools with `disallowed-tools`,
   file tools ask before writing hook files, and `deepcode mcp list` flags MCP
   packages without a fixed version.
-- **2026-10-21** — The Windows background service no longer opens console
-  windows, and Desktop and Web take a separate font for code.
 
 <details>
 <summary><strong>Earlier updates</strong></summary>
 
+- **2026-10-21** — A quiet Windows service, a separate code font, and community fixes
 - **2026-10-14** — Sessions that keep their history, a tighter sandbox, and the Desktop and Web apps in Chinese
 - **2026-10-13** — Smoother streaming, a self-managing background service, and safer Web sign-in
 - **2026-10-12** — DeepCode v2.3.1: Markdown answers in the TUI, a Windows service that stays up, `/compact` for coding sessions, and community fixes
