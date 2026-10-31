@@ -268,8 +268,8 @@ execution are available from the interactive CLI with `/goal`.
 ### Run an Automation
 
 Open **Automations** after selecting a trusted Project. A definition may be
-manual or interval-based and owns one canonical Goal Thread. **Run now**
-creates an idempotent Run; **Runs** shows its durable history; **Open Thread**
+manual or interval-based and owns one Goal Session. **Run now**
+creates an idempotent Run; **Runs** shows its durable history; **Open Session**
 opens the same conversation, tools, approvals, evidence, and continuation
 controls used by interactive work.
 

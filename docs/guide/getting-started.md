@@ -77,8 +77,8 @@ record that trust once for each project. DeepCode will still ask about tool
 actions that require your approval.
 
 **Using Desktop or Web?** Create the folder, add it as a Project, confirm that
-you trust it, and click **New thread**. A thread is a saved conversation about
-your project. You will also see it called a Session in the TUI.
+you trust it, and click **New Session**. A Session is a saved conversation
+about your project, the same in Desktop, Web and the TUI.
 
 Before sending the task, check the selected model. In the TUI, `/model` opens
 the model picker; Desktop and Web show the selection beside the message box.
@@ -156,7 +156,7 @@ deepcode --resume SESSION_ID
 ```
 
 Replace `SESSION_ID` with your conversation's ID. In Desktop/Web, open the
-project and select the conversation from its thread list. Try switching to
+project and select the conversation from its Session list. Try switching to
 another interface—you can continue the same conversation there.
 
 Closing the interface leaves a running task in the background. To stop work,

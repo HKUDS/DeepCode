@@ -206,7 +206,7 @@ export function DesktopSidebar({
             disabled={busy || !canCreateThread}
           >
             <Plus size={16} strokeWidth={1.9} />
-            {t("sidebar.newThread", "New thread")}
+            {t("sidebar.newThread", "New Session")}
             <kbd>⌘N</kbd>
           </button>
 
@@ -238,7 +238,7 @@ export function DesktopSidebar({
           onClick={() => onDestination("threads")}
         >
           <MessageSquare size={16} />
-          {t("sidebar.threads", "Threads")}
+          {t("sidebar.threads", "Sessions")}
         </button>
         <button
           type="button"

@@ -50,7 +50,7 @@ export function ThreadHeader({
 }: ThreadHeaderProps) {
   const { t } = useTranslation();
   const recoveredHistory = isRecoveredHistoryProject(project);
-  const title = thread?.title ?? t("thread.startThread", "Start a local coding thread");
+  const title = thread?.title ?? t("thread.startThread", "Start a local coding Session");
   const root = recoveredHistory
     ? t("thread.previousSessions", "Previous sessions")
     : (project?.displayName ?? "DeepCode");
@@ -116,7 +116,7 @@ export function ThreadHeader({
                 type="button"
                 onClick={onCreatePaperThread}
                 disabled={busy || hasActiveWork}
-                title={t("thread.paperTooltip", "Create a Paper2Code thread")}
+                title={t("thread.paperTooltip", "Create a Paper2Code Session")}
               >
                 <ScrollText size={16} />
                 {t("thread.paper", "Paper")}

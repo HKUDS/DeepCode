@@ -922,7 +922,7 @@ const ZH_CN: Record<string, string> = {
   "thread.empty.title": "从一个任务开始。",
   "thread.empty.body": "描述期望的结果、约束条件，以及 DeepCode 应如何验证结果。",
   "thread.empty.note": "对话、工具、审批和审查都保留在此会话中。",
-  "thread.conversation": "会话对话",
+  "thread.conversation": "对话",
   "thread.latest": "最新",
   "thread.earlierTurns": "显示更早的 Turn（还有 {{count}} 个）",
   "thread.plan.title": "执行计划",

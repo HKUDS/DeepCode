@@ -124,7 +124,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
         : selectedProject.trustState !== "trusted"
           ? t("app.disabled.untrusted", "Trust this folder before agent execution.")
           : !selectedThread
-            ? t("app.disabled.noThread", "Create a thread to begin.")
+            ? t("app.disabled.noThread", "Create a Session to begin.")
             : threadUnreadable
               ? t(
                   "app.disabled.unreadable",
@@ -299,7 +299,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
                       }}
                     >
                       <MessageSquarePlus size={16} />
-                      {t("app.noSessions.newThread", "New thread")}
+                      {t("app.noSessions.newThread", "New Session")}
                     </button>
                     <span>
                       {t("app.noSessions.shortcut", "⌘N from anywhere")}

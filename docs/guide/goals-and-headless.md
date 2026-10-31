@@ -94,11 +94,11 @@ deepcode automation create "Review TODOs" --workspace . --prompt "Summarize TODO
 deepcode automation list --workspace .
 ```
 
-Each Automation has its own Goal Thread. Before its first run, use **Open Thread**
-in Desktop/Web and select the intended connection/model in that thread's composer.
-You can also resume its Thread ID in the TUI and use `/model`. Without a thread
-selection, it uses the configured defaults; a model selected in your earlier demo
-Session is not automatically copied into this new thread.
+Each Automation has its own Goal Session. Before its first run, use **Open Session**
+in Desktop/Web and select the intended connection/model in that Session's composer.
+You can also resume its Session ID in the TUI and use `/model`. Without a model
+selected there, it uses the configured defaults; a model selected in your earlier demo
+Session is not automatically copied into this new one.
 
 Copy the Automation ID from the output and use it in place of `AUTO_ID` below.
 Run it once, inspect its run history, then enable the hourly schedule:
@@ -110,7 +110,7 @@ deepcode automation enable AUTO_ID
 ```
 
 To pause future runs, use `deepcode automation disable AUTO_ID`. A task already
-running will keep going; open its thread if you want to stop it. Review the
+running will keep going; open its Session if you want to stop it. Review the
 Project's permissions before unattended use, since tasks that need approval
 still require your response.
 

@@ -475,7 +475,7 @@ describe("AutomationsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(runtime.count("automation/remove")).toBe(1));
     expect(window.confirm).toHaveBeenCalledWith(
-      "Remove the automation “Updated caretaker”? Its Goal Thread and Session history will be kept.",
+      "Remove the automation “Updated caretaker”? Its Goal Session and its history will be kept.",
     );
     await waitFor(() =>
       expect(

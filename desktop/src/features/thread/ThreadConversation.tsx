@@ -250,7 +250,7 @@ export function ThreadConversation({
       <div
         className={styles.conversationScroller}
         role="region"
-        aria-label={t("thread.conversation", "Thread conversation")}
+        aria-label={t("thread.conversation", "Conversation")}
         ref={scrollViewportRef}
         // Focus lands here when the control a reader used goes away.
         tabIndex={-1}

@@ -2,8 +2,8 @@
 
 DeepCode saves your conversations so you can return to a task without explaining
 it again. Each conversation belongs to a project folder and includes your
-messages, DeepCode's replies, and its tool activity. The TUI calls this a
-**Session**; Desktop and Web call it a **thread**.
+messages, DeepCode's replies, and its tool activity. DeepCode calls this a
+**Session** in every interface.
 
 ## Resume
 
@@ -14,7 +14,7 @@ Open DeepCode in your project folder and enter:
 ```
 
 Choose a conversation from the list. To search conversations from other projects,
-use `/resume all`. In Desktop/Web, select a saved thread under its Project.
+use `/resume all`. In Desktop/Web, select a saved Session under its Project.
 
 If you know the Session ID, you can open it directly from your terminal:
 
@@ -56,7 +56,7 @@ stopped before sending it again. See [Troubleshooting](troubleshooting.md).
 
 | What you want to do | Desktop / Web | TUI |
 |---|---|---|
-| Start a Session | **New thread** | `/new [title]` |
+| Start a Session | **New Session** | `/new [title]` |
 | Resume local history | Select it under the Project | `/resume` |
 | Find history from every Project | Browse the project list | `/resume all` |
 | Attach a file | Composer attachment | `@path/to/file` |

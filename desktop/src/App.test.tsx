@@ -1805,7 +1805,7 @@ describe("desktop command center", () => {
     render(<App runtime={new TestRuntime()} />);
 
     expect(
-      screen.getByRole("heading", { name: "Start a local coding thread" }),
+      screen.getByRole("heading", { name: "Start a local coding Session" }),
     ).toBeTruthy();
     expect(
       screen.getAllByRole("button", { name: "Open project folder" }),
@@ -1945,7 +1945,7 @@ describe("desktop command center", () => {
     ).toContain("Skill Creator");
   });
 
-  it("runs and manages a durable automation backed by a Goal Thread", async () => {
+  it("runs and manages a durable automation backed by a Goal Session", async () => {
     const runtime = new TestRuntime([project], [thread, goalThread], []);
     render(<App runtime={runtime} />);
 
@@ -1977,7 +1977,7 @@ describe("desktop command center", () => {
       expect(request).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Thread" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Session" }));
     await screen.findByRole("heading", { name: "Repository caretaker" });
     expect(
       runtime.requests.filter(
@@ -3167,7 +3167,7 @@ describe("desktop command center", () => {
     expect(
       (
         screen.getByRole("button", {
-          name: /New thread/,
+          name: /New Session/,
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(true);
@@ -3964,7 +3964,7 @@ describe("a Session whose file can't be read", () => {
 
     runtime.unreadable.delete(thread.id);
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    await screen.findByLabelText("Thread conversation");
+    await screen.findByLabelText("Conversation");
     expect(
       screen.queryByRole("heading", {
         name: "This Session can't be read right now.",

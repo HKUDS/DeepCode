@@ -145,7 +145,7 @@ describe("ThreadConversation", () => {
     const { rerender } = render(conversation([], []));
     showItems = (next) => rerender(conversation([turn], next));
     showItems(items);
-    const viewport = screen.getByLabelText("Thread conversation");
+    const viewport = screen.getByLabelText("Conversation");
     layOut(viewport, () => height);
     // The history lays out after it arrives.
     FakeResizeObserver.resize();
@@ -388,7 +388,7 @@ describe("ThreadConversation", () => {
   it("keeps the reader in place and focused when earlier Turns load", () => {
     const { turns, items } = longSession();
     render(conversation(turns, items));
-    const viewport = screen.getByLabelText("Thread conversation");
+    const viewport = screen.getByLabelText("Conversation");
     // Each Turn shown is 1000px tall.
     layOut(viewport, () => viewport.querySelectorAll("section[data-status]").length * 1000);
     userScrollsTo(viewport, 300);

@@ -214,7 +214,7 @@ test("packaged browser: project, approval, reconnect, upload, diff and terminal"
     );
     await composer.press("Enter");
     if (live) {
-      await expect(page.getByLabel("Thread conversation")).toContainText(
+      await expect(page.getByLabel("Conversation")).toContainText(
         "Create arithmetic.py",
       );
       await page.reload();
