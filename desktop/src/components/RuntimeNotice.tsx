@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import type { BridgeError, SidecarStatus } from "../rpc/contracts";
 import styles from "./RuntimeNotice.module.css";
+import { runtimeNoticeText } from "./runtimeNoticeText";
 
 interface RuntimeNoticeProps {
   runtime: SidecarStatus;
@@ -30,31 +31,12 @@ export function RuntimeNotice({
     (runtime.errorCode ? runtime.message : error?.message) ??
     runtime.message ??
     t("runtime.offline", "The local App Server is unavailable.");
-  // What the browser's own connection reports is said here, in the user's
-  // language; anything else is the service's own message.
-  const [title, message] = authRequired
-    ? [
-        t("runtime.browserAuthRequired", "Browser access required"),
-        t("runtime.browserAuthHelp", "Run deepcode web in your terminal to open a new browser access link. No DeepCode account is needed."),
-      ]
-    : code === "RESPONSE_TIMEOUT"
-      ? [
-          t("runtime.responseTimeout", "No response from DeepCode"),
-          t("runtime.responseTimeoutHelp", "The response timed out; the task may still be running."),
-        ]
-      : code === "CONNECTION_LOST"
-        ? [
-            t("runtime.connectionLost", "Connection to DeepCode lost"),
-            serviceOffline
-              ? t("runtime.connectionLostOffline", "The service is unavailable. Reconnect when it is ready.")
-              : t("runtime.connectionLostHelp", "Connection lost; the service may still be running."),
-          ]
-        : [
-            serviceOffline
-              ? t("runtime.serviceUnavailable", "Local service unavailable")
-              : t("runtime.requestFailed", "Request failed"),
-            serviceMessage,
-          ];
+  const [title, message] = runtimeNoticeText(
+    code,
+    serviceMessage,
+    { serviceOffline, reconnectOnly },
+    t,
+  );
   return (
     <div className={styles.notice} role="alert">
       <AlertTriangle size={18} aria-hidden="true" />

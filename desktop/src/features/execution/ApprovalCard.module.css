@@ -29,8 +29,7 @@
   font-size: var(--text-2xs);
 }
 
-.card p,
-.resolution {
+.card p {
   margin: 0;
   color: var(--text-secondary);
   font-size: var(--text-xs);
@@ -92,10 +91,4 @@
 .actions .danger {
   border-color: color-mix(in srgb, var(--danger) 25%, var(--border-subtle));
   color: var(--danger);
-}
-
-.resolution {
-  margin-top: 10px;
-  color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
 }

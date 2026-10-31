@@ -32,6 +32,7 @@ import type {
 } from "../../generated/app-server";
 import type { DesktopInspectorTab } from "../../app/useDesktopUi";
 import { ApprovalCard } from "../execution/ApprovalCard";
+import { effortLabel } from "../execution/effortLabel";
 import { GoalOutcomeView } from "../goal/GoalOutcomeView";
 import {
   activityLabel,
@@ -771,7 +772,7 @@ export function TurnBlock({
           {group.turn.executionProfile.reasoningEffort ? (
             <small>
               {t("turn.thinking", "Thinking {{effort}}", {
-                effort: group.turn.executionProfile.reasoningEffort,
+                effort: effortLabel(group.turn.executionProfile.reasoningEffort, t),
               })}
             </small>
           ) : null}

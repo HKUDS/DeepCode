@@ -96,3 +96,22 @@ it("keeps native restart and ordinary application error dismissal", () => {
   expect(restart).toHaveBeenCalledOnce();
   expect(dismiss).toHaveBeenCalledOnce();
 });
+
+it("says an uncertain request plainly, without the method it was", () => {
+  render(
+    <RuntimeNotice
+      runtime={{ ...stopped, phase: "ready", errorCode: undefined }}
+      error={{
+        code: "RESULT_UNKNOWN",
+        message: "turn/start may have been applied. Reconnect and inspect its state before trying again.",
+        retryable: false,
+      }}
+      busy={false}
+      onRestart={vi.fn()}
+      onDismissError={vi.fn()}
+    />,
+  );
+  const alert = screen.getByRole("alert").textContent ?? "";
+  expect(alert).toContain("The last action may have gone through");
+  expect(alert).not.toContain("turn/start");
+});

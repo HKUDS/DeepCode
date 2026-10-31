@@ -8,10 +8,11 @@ import {
 import { useTranslation } from "react-i18next";
 
 import type { Approval, ApprovalDecision } from "../../generated/app-server";
-import { approvalCategoryLabel, approvalOutcome } from "./itemPresentation";
+import { approvalCategoryLabel } from "./itemPresentation";
 import styles from "./ApprovalCard.module.css";
 
 interface ApprovalCardProps {
+  /** A pending approval: once answered, its row says the outcome. */
   approval: Approval;
   busy: boolean;
   onRespond(approvalId: string, decision: ApprovalDecision): void;
@@ -76,13 +77,6 @@ function CategoryIcon({ category }: { category: Approval["category"] }) {
 
 export function ApprovalCard({ approval, busy, onRespond }: ApprovalCardProps) {
   const { t } = useTranslation();
-  if (approval.status !== "pending") {
-    return (
-      <p className={styles.resolution}>
-        {t("approval.decision", "Decision: {{status}}", { status: approvalOutcome(approval.status, t) })}
-      </p>
-    );
-  }
   const argumentsPreview = requestArguments(approval);
   return (
     <div className={styles.card} aria-label={t("approval.label", "Approval required")}>
