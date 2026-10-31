@@ -27,7 +27,7 @@ describe("ApprovalCard", () => {
   });
   afterEach(cleanup);
 
-  it("names what allowing for the session covers", () => {
+  it("names what allowing for the Session covers", () => {
     render(
       <ApprovalCard
         approval={approval({
@@ -45,7 +45,7 @@ describe("ApprovalCard", () => {
       />,
     );
     expect(
-      screen.getByRole("button", { name: "Always allow `git status …` this session" }),
+      screen.getByRole("button", { name: "Always allow `git status …` this Session" }),
     ).toBeTruthy();
     expect(screen.getByText("Running a command needs your approval.")).toBeTruthy();
   });

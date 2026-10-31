@@ -33,7 +33,7 @@ function sessionLabel(approval: Approval, t: (key: string, defaultValue: string,
   const target =
     typeof scope === "object" && scope !== null && !Array.isArray(scope) ? scope.target : undefined;
   if (typeof target === "string" && target) {
-    return t("approval.allowSessionScope", "Always allow {{target}} this session", { target });
+    return t("approval.allowSessionScope", "Always allow {{target}} this Session", { target });
   }
   return t("approval.allowSession", "Allow for Session");
 }

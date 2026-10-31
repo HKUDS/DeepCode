@@ -68,7 +68,7 @@ export class ThreadEventStream {
         if (!this.active) return;
         if (this.observedHead > this.cursor && before === this.cursor) {
           throw new Error(
-            "event/replay cannot recover an observed event; reload the Thread",
+            "event/replay cannot recover an observed event; reload the Session",
           );
         }
         if (revision === this.revision && this.observedHead <= this.cursor) {

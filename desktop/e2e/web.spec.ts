@@ -186,7 +186,7 @@ test("packaged browser: project, approval, reconnect, upload, diff and terminal"
   ).toBeVisible();
   // Source-controlled labels make this independent of generated CSS names.
   await page
-    .getByRole("button", { name: /New (thread|session|task)/i })
+    .getByRole("button", { name: /New (session|task)/i })
     .first()
     .click();
   const composer = page

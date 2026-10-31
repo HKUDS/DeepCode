@@ -47,7 +47,7 @@ export async function replayThreadHistory(
         result.headSequence < after ||
         (through !== undefined && through !== result.headSequence)
       ) {
-        throw new Error("event/replay history changed; reload the Thread");
+        throw new Error("event/replay history changed; reload the Session");
       }
       through = result.headSequence;
     }
@@ -60,7 +60,7 @@ export async function replayThreadHistory(
         (through !== undefined && event.sequence > through)
       ) {
         throw new Error(
-          "event/replay returned a non-contiguous Thread history",
+          "event/replay returned a non-contiguous Session history",
         );
       }
       accept(event);

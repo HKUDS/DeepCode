@@ -17,8 +17,8 @@ interface PresetPickerProps {
 }
 
 const LOCKED_HINT =
-  "This session already started; its agent preset is fixed. Start a new session to use a different one.";
-const PICK_HINT = "Agent preset for this session";
+  "This Session already started; its agent preset is fixed. Start a new Session to use a different one.";
+const PICK_HINT = "Agent preset for this Session";
 const DEFAULT_DESCRIPTION = "Full tool set and the built-in prompt.";
 
 /** Agent-preset control for the composer toolbar.
@@ -101,7 +101,7 @@ export function PresetPicker({
           aria-label={t("presets.menu", "Choose an agent preset")}
         >
           <header>
-            <strong>{t("presets.menuTitle", "Agent for this session")}</strong>
+            <strong>{t("presets.menuTitle", "Agent for this Session")}</strong>
             <span>
               {t(
                 "presets.menuHint",

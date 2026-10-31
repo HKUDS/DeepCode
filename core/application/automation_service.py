@@ -214,7 +214,7 @@ class AutomationService:
             return
         if context.goal_id != open_run.goal_id:
             raise ConflictError(
-                "The Automation Goal Thread is reserved by its open Run"
+                "The Automation Goal Session is reserved by its open Run"
             )
         if open_run.turn_id is not None:
             terminal_turn_ids = tuple(
@@ -237,7 +237,7 @@ class AutomationService:
         ):
             return
         raise ConflictError(
-            "Automation is reserving the Goal Thread for its initial Turn"
+            "Automation is reserving the Goal Session for its initial Turn"
         )
 
     def list(
@@ -876,7 +876,7 @@ class AutomationService:
                 self._transition_run(
                     current,
                     status=AutomationRunStatus.FAILED,
-                    detail="Automation Goal Thread is missing",
+                    detail="Automation Goal Session is missing",
                     terminal=True,
                 ),
                 None,
@@ -901,7 +901,7 @@ class AutomationService:
                     current,
                     status=AutomationRunStatus.BLOCKED,
                     detail=(
-                        "Automation Goal Thread currently owns a different "
+                        "Automation Goal Session currently owns a different "
                         f"Goal ({existing_goal.id})"
                     ),
                 )
@@ -1039,7 +1039,7 @@ class AutomationService:
             blocked = self._transition_run(
                 current,
                 status=AutomationRunStatus.BLOCKED,
-                detail="Goal Thread is executing unrelated work",
+                detail="Goal Session is executing unrelated work",
             )
             return AutomationExecution(blocked, None)
         except Exception as exc:  # noqa: BLE001 - durable state is reconciled below
@@ -1080,7 +1080,7 @@ class AutomationService:
             failed = self._transition_run(
                 current,
                 status=AutomationRunStatus.FAILED,
-                detail="Automation Goal Thread became unavailable during provisioning",
+                detail="Automation Goal Session became unavailable during provisioning",
                 terminal=True,
             )
             return AutomationExecution(failed, None)
@@ -1202,7 +1202,7 @@ class AutomationService:
             return replace(
                 run,
                 status=AutomationRunStatus.BLOCKED,
-                detail=f"Unrelated Turn {active.id} is active in the Goal Thread",
+                detail=f"Unrelated Turn {active.id} is active in the Goal Session",
                 updated_at=now,
                 completed_at=None,
             )
@@ -1323,7 +1323,7 @@ class AutomationService:
         return replace(
             run,
             status=AutomationRunStatus.BLOCKED,
-            detail="Goal is active but idle; continue it from the Goal Thread",
+            detail="Goal is active but idle; continue it from the Goal Session",
             updated_at=now,
             completed_at=None,
         )

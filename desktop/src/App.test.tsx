@@ -3150,7 +3150,7 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Session 77f8ff1b" });
 
-    expect(screen.getAllByText("Previous sessions").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Previous Sessions").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Folder unavailable").length).toBeGreaterThan(0);
     expect(
       screen.getByText(

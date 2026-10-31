@@ -143,7 +143,7 @@ export function DesktopSidebar({
       regularGroups.push({
         key: "recovered-history",
         project: null,
-        displayName: t("sidebar.previousSessions", "Previous sessions"),
+        displayName: t("sidebar.previousSessions", "Previous Sessions"),
         description: t("sidebar.folderUnavailable", "Original folders unavailable"),
         threads: recoveredThreads,
         active: recoveredThreads.some(
