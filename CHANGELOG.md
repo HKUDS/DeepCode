@@ -7,6 +7,8 @@ Released versions are named in the entry title; the version on PyPI is
 
 ## 2026-10-31 · Long tasks that read well, the interface in your language, and a narrow-window layout
 
+- The Paper2Code loop detector now honors `max_repeats` values above ten;
+  a longer configured repeat limit no longer disables repeated-call detection.
 - **Long tasks read better on the Web.** A run of tool steps folds into one
   group that says what it did ("Reads 3 · Commands 4"), the latest steps stay
   in view while the agent works, and the view follows new output until you
