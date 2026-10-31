@@ -47,9 +47,6 @@ export function PresetsSection({ runtime, project }: SettingsSectionProps) {
     <section className={styles.section}>
       <header className={styles.sectionHeader}>
         <div>
-          <p className={styles.eyebrow}>
-            {t("settings.presets.eyebrow", "Session compositions")}
-          </p>
           <h2>{t("settings.presets.title", "Agent presets")}</h2>
         </div>
       </header>

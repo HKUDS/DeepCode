@@ -4,35 +4,28 @@
   width: 100%;
   grid-template-columns: minmax(0, 1fr) 28px;
   align-items: center;
-  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
 }
 
 .row:hover {
-  background: color-mix(in srgb, var(--surface-raised) 58%, transparent);
+  background: var(--surface-hover);
   color: var(--text-primary);
 }
 
 .row[data-active="true"] {
-  border-color: var(--border-subtle);
-  background: var(--surface-raised);
+  background: var(--surface-selected);
   color: var(--text-primary);
-  box-shadow: var(--shadow-soft);
-}
-
-.row[data-active="true"]::before {
-  display: none;
 }
 
 .sessionButton {
   display: grid;
   min-width: 0;
-  min-height: 34px;
+  min-height: 30px;
   grid-template-columns: 9px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
-  padding: 4px 2px 4px 9px;
+  padding: 0 2px 0 9px;
   color: inherit;
   text-align: left;
 }
@@ -100,7 +93,7 @@
 }
 
 .moreButton:hover:not(:disabled) {
-  background: var(--surface-raised);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
   color: var(--text-primary);
 }
 

@@ -5,12 +5,13 @@
 .trigger {
   display: flex;
   max-width: 168px;
-  min-height: 34px;
+  height: 30px;
   align-items: center;
-  gap: 7px;
-  padding: 4px 8px;
-  border-radius: var(--radius-sm);
+  gap: 6px;
+  padding: 0 8px 0 9px;
+  border-radius: var(--radius-xs);
   color: var(--text-tertiary);
+  font-size: var(--text-xs);
   text-align: left;
 }
 
@@ -43,28 +44,12 @@
   mask-size: contain;
 }
 
-.trigger > span:not(.robotIcon) {
-  display: grid;
-  min-width: 0;
-  gap: 1px;
-}
-
-.trigger small,
 .trigger strong {
   overflow: hidden;
+  color: var(--text-secondary);
+  font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.trigger small {
-  color: var(--text-tertiary);
-  font: var(--text-micro)/1.1 var(--font-mono);
-}
-
-.trigger strong {
-  color: var(--text-secondary);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-semibold);
 }
 
 .menu {
@@ -145,7 +130,7 @@
 
 .options strong small {
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
   font-weight: var(--weight-regular);
 }
 

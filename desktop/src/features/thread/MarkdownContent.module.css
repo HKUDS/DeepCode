@@ -32,21 +32,21 @@
   margin: 24px 0 9px;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-weight: var(--weight-display);
-  line-height: 1.28;
+  font-weight: var(--weight-semibold);
+  line-height: 1.35;
   letter-spacing: var(--tracking-tight);
 }
 
 .markdown h1 {
-  font-size: 1.36em;
+  font-size: 1.25em;
 }
 
 .markdown h2 {
-  font-size: 1.2em;
+  font-size: 1.14em;
 }
 
 .markdown h3 {
-  font-size: 1.1em;
+  font-size: 1.05em;
 }
 
 .markdown h4,
@@ -95,12 +95,12 @@
 }
 
 .markdown :not(pre) > code {
-  padding: 2px 6px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-xs);
-  background: var(--surface-code);
+  padding: 0.12em 0.38em;
+  border-radius: var(--radius-2xs);
+  background: color-mix(in srgb, var(--text-primary) 6.5%, transparent);
   color: var(--text-primary);
-  font: 0.87em/1.4 var(--font-mono);
+  font: 0.86em/1 var(--font-mono);
+  letter-spacing: -0.01em;
 }
 
 .markdown table {
@@ -165,7 +165,7 @@
   padding: 0 10px 0 13px;
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text-tertiary);
-  font: var(--text-2xs) var(--font-mono);
+  font: var(--text-xs) var(--font-ui);
   text-transform: lowercase;
 }
 
@@ -177,7 +177,7 @@
   padding: 0 8px;
   border-radius: var(--radius-xs);
   color: var(--text-tertiary);
-  font: var(--text-2xs) var(--font-mono);
+  font: var(--text-xs) var(--font-ui);
 }
 
 .codeBlock figcaption button:hover {

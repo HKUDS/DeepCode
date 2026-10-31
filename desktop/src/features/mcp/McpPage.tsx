@@ -210,9 +210,6 @@ export function McpPage({
     <section className={styles.page} aria-labelledby="mcp-title">
       <header className={styles.pageHeader}>
         <div>
-          <p className={styles.eyebrow}>
-            {t("mcp.eyebrow", "Agent capabilities")}
-          </p>
           <h1 id="mcp-title">{t("mcp.title", "MCP Servers")}</h1>
           <p>
             {t(
@@ -256,13 +253,10 @@ export function McpPage({
         </p>
       ) : null}
 
-      <article className={styles.formCard}>
-        <header>
+      <section className={styles.section}>
+        <header className={styles.sectionHeader}>
           <div>
-            <p className={styles.eyebrow}>
-              {t("mcp.configured.eyebrow", "Configured servers")}
-            </p>
-            <h2>{t("mcp.configured.title", "Available to DeepCode")}</h2>
+            <h2>{t("mcp.configured.title", "Configured servers")}</h2>
           </div>
           <span>
             {t("mcp.configured.total", "{{total}} configured", {
@@ -405,14 +399,11 @@ export function McpPage({
           </article>
         )}
         </div>
-      </article>
+      </section>
 
-      <article className={styles.formCard}>
-        <header>
+      <section className={styles.section}>
+        <header className={styles.sectionHeader}>
           <div>
-            <p className={styles.eyebrow}>
-              {t("mcp.templates.eyebrow", "Bundled catalog")}
-            </p>
             <h2>{t("mcp.templates.title", "Reviewed MCP templates")}</h2>
             <p className={styles.cardDescription}>
               {t(
@@ -475,7 +466,7 @@ export function McpPage({
             </article>
           ))}
         </div>
-      </article>
+      </section>
 
       <article className={styles.formCard}>
         <header>

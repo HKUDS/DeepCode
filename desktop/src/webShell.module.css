@@ -9,9 +9,9 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--border-subtle);
-  font-size: 12px;
+  padding: 0 12px 0 16px;
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
 }
 .bar button {
   margin-left: auto;
@@ -96,8 +96,17 @@
   gap: 12px;
   margin-top: 24px;
 }
-.dialog button,
 .bar button {
+  padding: 3px 8px;
+  border-radius: var(--radius-xs);
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+}
+.bar button:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.dialog button {
   padding: 5px 10px;
   border: 1px solid var(--border-subtle);
   border-radius: 5px;

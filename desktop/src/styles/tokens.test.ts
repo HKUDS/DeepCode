@@ -184,14 +184,20 @@ describe("appearance variables", () => {
   });
 
   it("routes the root font through both variables", () => {
-    expect(rootDeclarations.get("font-family")).toContain(
+    // The root reads the interface stack, and that stack starts with the
+    // preference; titles use their own stack, which must start with it too.
+    expect(rootDeclarations.get("font-family")).toBe("var(--font-ui)");
+    expect(rootDeclarations.get("--font-ui")).toContain(
+      "var(--font-ui-preferred)",
+    );
+    expect(rootDeclarations.get("--font-display")).toContain(
       "var(--font-ui-preferred)",
     );
     expect(rootDeclarations.get("font-size")).toBe("var(--font-size-base)");
   });
 
   it("routes the monospace stack through its own variable", () => {
-    // Code, terminal output and the small metadata text use --font-mono, so a
+    // Code, commands, paths and terminal output use --font-mono, so a
     // monospace preference that is not part of this stack would look applied
     // and change nothing.
     expect(rootDeclarations.get("--font-mono")).toContain(

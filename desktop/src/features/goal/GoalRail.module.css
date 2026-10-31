@@ -11,16 +11,15 @@
   align-items: center;
   gap: 7px;
   padding: 0 12px;
-  border: 1px solid color-mix(in srgb, var(--signal) 15%, var(--border-subtle));
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--surface-raised) 84%, transparent);
   color: var(--text-secondary);
-  box-shadow: var(--shadow-soft);
   backdrop-filter: blur(14px);
 }
 
 .emptyRail:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--signal) 28%, var(--border-subtle));
+  border-color: var(--border-strong);
   background: var(--surface-raised);
   color: var(--text-primary);
 }
@@ -30,8 +29,8 @@
 }
 
 .emptyRail span {
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-bold);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
 }
 
 .emptyRail small {
@@ -49,21 +48,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--surface-raised) 91%, transparent);
-  box-shadow: var(--shadow-soft);
   backdrop-filter: blur(16px);
-}
-
-.rail[data-status="active"] {
-  border-color: color-mix(in srgb, var(--signal) 24%, var(--border-subtle));
-}
-
-.rail[data-status="complete"] {
-  border-color: color-mix(in srgb, var(--success) 25%, var(--border-subtle));
-}
-
-.rail[data-status="blocked"],
-.rail[data-status="budget_limited"] {
-  border-color: color-mix(in srgb, var(--attention) 28%, var(--border-subtle));
 }
 
 .summary {
@@ -113,8 +98,8 @@
 .summaryText strong {
   overflow: hidden;
   color: var(--text-primary);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-bold);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -125,7 +110,7 @@
   align-items: center;
   gap: 4px;
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
 }
 
 .summaryText i {
@@ -233,7 +218,7 @@
 
 .outcome > small {
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
 }
 
 .outcome > small code {
@@ -359,7 +344,7 @@
 
 .editor legend small {
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
 }
 
 .skillList {

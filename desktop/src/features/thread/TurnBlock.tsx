@@ -55,6 +55,7 @@ import {
 } from "./conversationModel";
 import { MarkdownContent } from "./MarkdownContent";
 import { ReasoningBlock } from "./ReasoningBlock";
+import { readableCommand, useSessionFolder } from "./sessionFolder";
 import type { TranscriptMode } from "./transcriptMode";
 import styles from "./ThreadConversation.module.css";
 
@@ -225,6 +226,7 @@ function ActivityItem({
   transcriptMode: TranscriptMode;
 }) {
   const { t } = useTranslation();
+  const folder = useSessionFolder();
   if (item.kind === "reasoning_summary") {
     return <ReasoningBlock item={item} mode={transcriptMode} />;
   }
@@ -263,8 +265,14 @@ function ActivityItem({
   const warning = isWarning(item);
   const body = presentation.body;
   const hasBody = Boolean(body && body.trim() && body.trim() !== item.summary.trim());
-  const subject = stepSubject(item, t);
+  const subject = readableCommand(stepSubject(item, t), folder);
   const label = stepLabel(item, t);
+  // Commands and paths read as code; a search or a tool's name as words.
+  const literal =
+    activity?.kind === "run" ||
+    activity?.kind === "read" ||
+    activity?.kind === "edit" ||
+    activity?.kind === "list";
   const heading = (
     <>
       {warning ? (
@@ -272,8 +280,8 @@ function ActivityItem({
       ) : (
         <ActivityIcon kind={item.kind} activityKind={activity?.kind} />
       )}
-      <span className={styles.runStepCopy}>
-        <strong>{subject}</strong>
+      <span className={styles.runStepCopy} data-literal={literal || undefined}>
+        <strong title={subject}>{subject}</strong>
         {label !== subject ? <small>{label}</small> : null}
       </span>
       {warning ? null : (

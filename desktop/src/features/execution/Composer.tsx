@@ -1,6 +1,7 @@
 import {
   ArrowUp,
   Check,
+  ChevronDown,
   Mic,
   Paperclip,
   ShieldCheck,
@@ -774,10 +775,7 @@ export function Composer({
                   : t("composer.access.newTitle", "Tool access for new submissions")
               }
             >
-              <ShieldCheck size={12} />
-              <small className={styles.selectorCaption}>
-                {t("composer.access.newCaption", "New")}
-              </small>
+              <ShieldCheck size={13} />
               <select
                 aria-label={t("composer.access.newLabel", "New submissions access")}
                 value={accessPresetOverride ?? ""}
@@ -800,6 +798,7 @@ export function Composer({
                   </option>
                 ))}
               </select>
+              <ChevronDown size={12} aria-hidden="true" />
             </label>
           </div>
           {active ? (

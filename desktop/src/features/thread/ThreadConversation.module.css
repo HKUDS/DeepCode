@@ -29,7 +29,7 @@
 .earlierTurns,
 .workGroupAll {
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
 }
 
 .earlierTurns:hover,
@@ -130,7 +130,7 @@
   display: block;
   margin-bottom: 6px;
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
 }
 
 .userSkills {
@@ -152,7 +152,7 @@
   border-radius: var(--radius-pill);
   background: var(--signal-faint);
   color: var(--text-secondary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
 }
 
 .userSkills svg {
@@ -165,7 +165,7 @@
   gap: 5px;
   margin-top: 8px;
   color: var(--text-tertiary);
-  font: var(--text-2xs) var(--font-mono);
+  font: var(--text-xs) var(--font-ui);
 }
 
 .queueState button {
@@ -189,7 +189,7 @@
   gap: 5px;
   margin: -19px 0 22px auto;
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
 }
 
 .executionBadge span,
@@ -219,11 +219,10 @@
 
 .runStatus {
   display: flex;
-  min-height: 36px;
+  min-height: 30px;
   align-items: center;
   gap: 7px;
-  margin: 1px 0 8px;
-  border-bottom: 1px solid var(--border-subtle);
+  margin: 0 0 4px;
   color: var(--text-tertiary);
   font-size: var(--text-xs);
 }
@@ -245,33 +244,15 @@
 
 .timeline {
   display: grid;
-  gap: 5px;
+  gap: 2px;
 }
 
 .activityEntry {
   position: relative;
-  padding-left: 18px;
-}
-
-.activityEntry::before {
-  position: absolute;
-  top: -9px;
-  bottom: -9px;
-  left: 6px;
-  width: 1px;
-  background: var(--border-subtle);
-  content: "";
-}
-
-.activityEntry:first-child::before {
-  top: 18px;
-}
-
-.activityEntry:last-child::before {
-  bottom: calc(100% - 19px);
 }
 
 .runStepChevron {
+  grid-column: 4;
   transition: transform 150ms ease;
 }
 
@@ -282,9 +263,9 @@
 .runStep,
 .runStep summary {
   display: grid;
-  min-height: 34px;
-  grid-template-columns: 17px minmax(0, 1fr) auto 14px;
-  align-items: start;
+  min-height: 30px;
+  grid-template-columns: 16px minmax(0, 1fr) auto 14px;
+  align-items: center;
   gap: 8px;
 }
 
@@ -299,7 +280,7 @@ details.runStep {
 }
 
 .runStep summary {
-  padding: 6px 9px;
+  padding: 4px 8px;
   cursor: pointer;
   list-style: none;
 }
@@ -309,20 +290,7 @@ details.runStep {
 }
 
 div.runStep {
-  padding: 6px 9px;
-}
-
-.runStep::before {
-  position: absolute;
-  z-index: 1;
-  top: 16px;
-  left: -11px;
-  width: 6px;
-  height: 6px;
-  border: 2px solid var(--surface-canvas);
-  border-radius: 50%;
-  background: var(--border-emphasis);
-  content: "";
+  padding: 4px 8px;
 }
 
 .runStep:hover,
@@ -334,60 +302,72 @@ div.runStep {
   color: var(--signal);
 }
 
-.runStep[data-status="in_progress"]::before {
-  background: var(--signal);
-  box-shadow: 0 0 0 3px var(--signal-soft);
-}
-
 .runStep[data-status="failed"] {
   color: var(--danger);
-}
-
-.runStep[data-status="failed"]::before {
-  background: var(--danger);
 }
 
 .runStep[data-warning="true"] {
   color: var(--attention);
 }
 
-.runStep[data-warning="true"]::before {
-  background: var(--attention);
-}
-
 .runStepCopy {
-  display: grid;
+  display: flex;
   min-width: 0;
-  gap: 2px;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .runStepCopy strong {
-  color: var(--text-primary);
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
   font-size: var(--text-xs);
-  font-weight: var(--weight-bold);
-  line-height: 1.42;
-  overflow-wrap: anywhere;
+  font-weight: var(--weight-regular);
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A command or a path reads as code. */
+.runStepCopy[data-literal="true"] strong {
+  font-family: var(--font-mono);
+  letter-spacing: -0.01em;
+}
+
+.runStep[data-status="in_progress"] .runStepCopy strong,
+.runStep[data-active="true"] .runStepCopy strong {
+  color: var(--text-primary);
+}
+
+.runStepCopy small {
+  flex: 0 0 auto;
 }
 
 .runStepCopy small,
 .runStepStatus {
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
 }
 
 .runStepStatus {
-  padding-top: 2px;
+  grid-column: 3;
   text-transform: capitalize;
+}
+
+/* A finished step needs no word for it; one still running, failed or
+   declined says so. The chevron keeps its column either way. */
+.runStep[data-status="completed"] .runStepStatus {
+  display: none;
 }
 
 .runStep > svg:first-child,
 .runStep summary > svg:first-child,
 .runStepChevron {
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 .runStepDetail {
-  margin: 1px 9px 9px 27px;
+  margin: 2px 8px 8px 32px;
   overflow: hidden;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
@@ -428,17 +408,16 @@ div.runStep {
 .workGroup {
   overflow: hidden;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--surface-raised) 66%, transparent);
+  border-radius: var(--radius-sm);
 }
 
 .workGroup > summary {
   display: grid;
-  min-height: 42px;
-  grid-template-columns: 18px minmax(0, 1fr) 16px;
+  min-height: 38px;
+  grid-template-columns: 16px minmax(0, 1fr) 16px;
   align-items: center;
   gap: 8px;
-  padding: 0 12px;
+  padding: 0 10px;
   color: var(--text-tertiary);
   cursor: pointer;
   list-style: none;
@@ -466,7 +445,7 @@ div.runStep {
   overflow: hidden;
   color: var(--text-secondary);
   font-size: var(--text-xs);
-  font-weight: var(--weight-bold);
+  font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -482,7 +461,7 @@ div.runStep {
   flex-wrap: wrap;
   gap: 2px 10px;
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
 }
 
 .workTallies > [data-failed="true"] {
@@ -606,9 +585,8 @@ div.runStep {
 
 .runError {
   margin: 7px 7px 7px 0;
-  padding: 9px 11px;
-  border-radius: var(--radius-sm);
-  background: var(--danger-soft);
+  padding: 1px 0 1px 10px;
+  border-left: 2px solid var(--danger);
   color: var(--danger);
   font-size: var(--text-xs);
   line-height: 1.55;
@@ -684,24 +662,20 @@ div.runStep {
   z-index: 13;
   bottom: calc(var(--composer-clearance, 148px) + 12px);
   left: 50%;
-  display: inline-flex;
-  min-height: 36px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 13px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-pill);
-  background: var(--surface-overlay);
-  box-shadow: var(--shadow-float);
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: 50%;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-menu);
   color: var(--text-secondary);
-  font-size: var(--text-xs);
   transform: translateX(-50%);
-  backdrop-filter: blur(14px);
 }
 
 .jumpToLatest:hover {
   color: var(--text-primary);
-  transform: translate(-50%, -1px);
 }
 
 .planProgressDock {
@@ -739,54 +713,18 @@ div.runStep {
   text-align: left;
 }
 
-.emptyRail {
-  position: relative;
-  display: flex;
-  width: 78px;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 24px;
-}
-
-.emptyRail::before {
-  position: absolute;
-  right: 4px;
-  left: 4px;
-  height: 1px;
-  background: var(--border-strong);
-  content: "";
-}
-
-.emptyRail i {
-  position: relative;
-  width: 8px;
-  height: 8px;
-  border: 1px solid var(--border-emphasis);
-  border-radius: 50%;
-  background: var(--surface-canvas);
-}
-
-.emptyRail i:first-child {
-  border-color: var(--signal);
-  background: var(--signal);
-}
-
-.emptyRail i:last-child {
-  border-color: var(--success);
-}
-
 .empty h2 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: var(--text-3xl);
-  font-weight: var(--weight-display);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-semibold);
   letter-spacing: var(--tracking-display);
-  line-height: 1.1;
+  line-height: 1.2;
 }
 
 .empty > p {
   max-width: 520px;
-  margin: 16px 0 11px;
+  margin: 10px 0 8px;
   color: var(--text-secondary);
   font-size: var(--text-base);
   line-height: 1.68;
@@ -794,7 +732,7 @@ div.runStep {
 
 .empty small {
   color: var(--text-tertiary);
-  font: var(--text-2xs) var(--font-mono);
+  font: var(--text-xs) var(--font-ui);
 }
 
 @media (max-width: 680px) {

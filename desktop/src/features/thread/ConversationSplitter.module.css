@@ -29,7 +29,7 @@
   transform: translate(-50%, -50%);
   border-radius: var(--radius-pill);
   background: var(--border-strong);
-  opacity: 0.55;
+  opacity: 0;
   /* Not repeated in a reduced-motion block: tokens.css already forces
      `transition-duration: 0.01ms` on everything under that preference. */
   transition:

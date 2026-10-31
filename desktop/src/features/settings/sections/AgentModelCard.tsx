@@ -165,9 +165,6 @@ export function AgentModelCard({
     <section className={`${styles.formCard} ${styles.fullWidthCard}`}>
       <header>
         <div>
-          <p className={styles.eyebrow}>
-            {t("settings.agentModel.eyebrow", "Default route")}
-          </p>
           <h2>{t("settings.agentModel.title", "Agent model")}</h2>
           <p className={styles.cardDescription}>
             {t(

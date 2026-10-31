@@ -87,10 +87,7 @@ export function PresetPicker({
         }
       >
         <span className={styles.robotIcon} aria-hidden="true" />
-        <span>
-          <small>{t("presets.agent", "Agent")}</small>
-          <strong>{currentLabel}</strong>
-        </span>
+        <strong>{currentLabel}</strong>
         {locked ? null : <ChevronDown size={12} />}
       </button>
 

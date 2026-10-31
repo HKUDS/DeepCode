@@ -15,9 +15,6 @@ export function LanguageCard() {
     <section className={styles.formCard}>
       <header>
         <div>
-          <p className={styles.eyebrow}>
-            {t("settings.language.eyebrow", "Interface language")}
-          </p>
           <h2>{t("settings.language.title", "Language")}</h2>
         </div>
       </header>

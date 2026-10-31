@@ -21,7 +21,7 @@
 
 .verification > header span {
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
 }
 
 .stages {

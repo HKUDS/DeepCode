@@ -87,9 +87,6 @@ export function PermissionCard({
     <section className={styles.formCard}>
       <header>
         <div>
-          <p className={styles.eyebrow}>
-            {t("settings.permissions.eyebrow", "Safety policy")}
-          </p>
           <h2>{t("settings.permissions.title", "Permissions")}</h2>
         </div>
       </header>

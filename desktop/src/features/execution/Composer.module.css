@@ -70,13 +70,13 @@
 
 .toolbar {
   display: flex;
-  min-height: 45px;
+  min-height: 44px;
   /* When the controls wrap onto a second line, the send button stays at the
      end of the last one. */
   align-items: flex-end;
   justify-content: space-between;
-  gap: 12px;
-  padding: 5px 9px 8px 14px;
+  gap: 10px;
+  padding: 4px 8px 8px 8px;
 }
 
 .attachments {
@@ -230,7 +230,7 @@
 
 .skillOptions em {
   color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
   font-style: normal;
 }
 
@@ -420,7 +420,7 @@
   min-width: 0;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   overflow: visible;
 }
 
@@ -431,11 +431,11 @@
 .attachButton,
 .skillButton {
   display: grid;
-  width: 31px;
-  height: 31px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   color: var(--text-tertiary);
 }
 
@@ -500,7 +500,7 @@
   border-radius: var(--radius-pill);
   background: var(--signal);
   color: var(--text-inverse);
-  font: var(--text-micro) var(--font-mono);
+  font: var(--text-2xs) var(--font-ui);
 }
 
 /* Toolbar labels only. A picker's popover sits inside the toolbar too, but
@@ -519,20 +519,28 @@
 }
 
 .context > span {
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  padding: 0 8px;
   overflow: hidden;
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .selector {
   display: inline-flex;
   min-width: 0;
+  height: 30px;
   align-items: center;
-  gap: 4px;
-  padding: 5px 7px;
+  gap: 6px;
+  padding: 0 9px;
   border-radius: var(--radius-xs);
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
 }
 
 /* Its select draws no outline; the label shows the keyboard focus instead. */
@@ -549,8 +557,7 @@
    on purpose, so it has to stay conspicuous — but in red it sat in the
    composer looking like a failed request rather than a standing permission. */
 .selector[data-access="full_access"] {
-  border: 1px solid color-mix(in srgb, var(--attention) 34%, transparent);
-  background: var(--attention-soft);
+  background: color-mix(in srgb, var(--attention) 9%, transparent);
   color: var(--attention);
 }
 
@@ -564,25 +571,23 @@
 }
 
 .selector select {
-  /* Shrinks on a phone, but never so far that the choice disappears. */
+  /* Shrinks on a phone, but never so far that the choice disappears. As wide
+     as the chosen option where the browser can size a select to it. */
+  field-sizing: content;
   min-width: 3em;
   max-width: 180px;
+  /* The arrow is the icon after the select, not the stylesheet's
+     background image, so the padding kept for that image goes too. */
+  padding: 0;
   border: 0;
   outline: 0;
   appearance: none;
   background: transparent;
   color: inherit;
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
   text-overflow: ellipsis;
 }
 
-.selectorCaption {
-  white-space: nowrap;
-  color: var(--text-tertiary);
-  font: var(--text-micro) var(--font-mono);
-  letter-spacing: var(--tracking-wide);
-  text-transform: uppercase;
-}
 
 .sendButton,
 .stopButton,
@@ -623,16 +628,22 @@
 }
 
 .sendButton {
-  width: 38px;
-  height: 38px;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
   background: var(--text-primary);
   color: var(--text-inverse);
-  box-shadow: 0 5px 13px rgb(27 34 30 / 16%);
 }
 
 .sendButton:hover:not(:disabled) {
-  transform: translateY(-1px);
-  background: color-mix(in srgb, var(--text-primary) 88%, var(--signal));
+  background: color-mix(in srgb, var(--text-primary) 86%, var(--signal));
+}
+
+/* Nothing to send yet: a quiet tile, not a faded black button. */
+.sendButton:disabled {
+  background: var(--surface-inset);
+  color: var(--text-tertiary);
+  opacity: 1;
 }
 
 .stopButton {
@@ -653,13 +664,13 @@
   gap: 12px;
   margin: 7px auto 0;
   color: var(--text-tertiary);
-  font-size: var(--text-micro);
+  font-size: var(--text-2xs);
   pointer-events: auto;
 }
 
 .hint span {
   flex: 0 0 auto;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
 }
 
 @media (max-width: 680px) {

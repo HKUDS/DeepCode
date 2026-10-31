@@ -73,9 +73,6 @@ export function DefaultPresetCard({
     <section className={styles.formCard}>
       <header>
         <div>
-          <p className={styles.eyebrow}>
-            {t("settings.preset.eyebrow", "Session defaults")}
-          </p>
           <h2>{t("settings.preset.title", "Agent preset")}</h2>
         </div>
       </header>

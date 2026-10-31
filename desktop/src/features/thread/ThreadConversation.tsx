@@ -218,11 +218,6 @@ export function ThreadConversation({
       <div className={styles.conversationFrame}>
         <div className={styles.conversationScroller}>
           <div className={styles.empty}>
-            <span className={styles.emptyRail} aria-hidden="true">
-              <i />
-              <i />
-              <i />
-            </span>
             <h2>{t("thread.empty.title", "Start with a task.")}</h2>
             <p>
               {t(
@@ -306,9 +301,10 @@ export function ThreadConversation({
           type="button"
           className={styles.jumpToLatest}
           onClick={followLatest}
+          aria-label={t("thread.latest", "Latest")}
+          title={t("thread.latest", "Latest")}
         >
-          <ArrowDown size={14} />
-          {t("thread.latest", "Latest")}
+          <ArrowDown size={16} />
         </button>
       ) : null}
     </div>
