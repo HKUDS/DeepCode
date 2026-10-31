@@ -7,6 +7,7 @@ import type {
   WorkflowRun,
   WorkflowStartParams,
 } from "../../generated/app-server";
+import { attachmentErrorText } from "../../components/runtimeNoticeText";
 import styles from "./WorkflowComposer.module.css";
 
 type SourceType = WorkflowStartParams["sourceType"];
@@ -73,7 +74,7 @@ export function WorkflowComposer({
       const path = await onPickFile();
       if (path) setSource(path);
     } catch (error) {
-      setFileError(error instanceof Error ? error.message : String(error));
+      setFileError(attachmentErrorText(error, t));
     }
   };
 

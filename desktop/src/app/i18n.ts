@@ -259,8 +259,6 @@ const ZH_CN: Record<string, string> = {
   "runtime.noThreadHelp": "上传文件前，请先选择一个已信任的工作区。",
   "runtime.uploadTooLarge": "文件太大",
   "runtime.uploadTooLargeHelp": "最多选择 8 个文件，每个不超过 10 MiB。",
-  "runtime.hostAction": "需要在服务所在的电脑上更新",
-  "runtime.hostActionHelp": "请在运行服务的机器上更新 DeepCode。",
   "runtime.dismissError": "关闭错误提示",
   "runtime.browserAuthHelp": "请在终端运行 deepcode web，打开新生成的浏览器访问链接。无需 DeepCode 账号。",
   "service.title": "后台服务",

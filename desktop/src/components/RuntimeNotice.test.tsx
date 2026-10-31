@@ -70,6 +70,7 @@ it("says a request timed out, not that the connection was lost", () => {
       runtime={{ ...stopped, phase: "ready", errorCode: undefined }}
       error={{ code: "RESPONSE_TIMEOUT", message: "timed out", retryable: true }}
       busy={false}
+      reconnectOnly
       onRestart={vi.fn()}
       onDismissError={vi.fn()}
     />,
@@ -107,6 +108,7 @@ it("says an uncertain request plainly, without the method it was", () => {
         retryable: false,
       }}
       busy={false}
+      reconnectOnly
       onRestart={vi.fn()}
       onDismissError={vi.fn()}
     />,

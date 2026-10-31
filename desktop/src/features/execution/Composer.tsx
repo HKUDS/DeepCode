@@ -50,6 +50,7 @@ import {
   type ComposerCommand,
 } from "./commands";
 import styles from "./Composer.module.css";
+import { attachmentErrorText } from "../../components/runtimeNoticeText";
 import { useDictation } from "./useDictation";
 import { usePromptDraft } from "./usePromptDraft";
 import { ModelPicker } from "./ModelPicker";
@@ -373,7 +374,7 @@ export function Composer({
       }
       addAttachments(accepted);
     } catch (error) {
-      setContextError(error instanceof Error ? error.message : String(error));
+      setContextError(attachmentErrorText(error, t));
     }
   };
 

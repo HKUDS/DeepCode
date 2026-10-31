@@ -34,7 +34,8 @@ export function RuntimeNotice({
   const [title, message] = runtimeNoticeText(
     code,
     serviceMessage,
-    { serviceOffline, reconnectOnly },
+    // reconnectOnly is the browser host, whose connection reports are its own.
+    { serviceOffline, browser: reconnectOnly },
     t,
   );
   return (

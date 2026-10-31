@@ -1,19 +1,18 @@
 import type { TFunction } from "i18next";
 
 /**
- * The title and text of the runtime banner. What the browser's own
- * connection reports (its codes are fixed, src/rpc/browserRuntime.ts) is
- * said in the user's language; anything else is the service's message.
+ * What the browser's own connection reports, by the codes it raises itself
+ * (src/rpc/browserRuntime.ts): a title and a text in the user's language.
+ * Only the browser host raises these meanings; the Desktop relay reuses some
+ * codes for a slow service, and its message says so.
  */
-export function runtimeNoticeText(
+function browserReport(
   code: string | null | undefined,
-  serviceMessage: string,
-  { serviceOffline, reconnectOnly }: { serviceOffline: boolean; reconnectOnly: boolean },
+  serviceOffline: boolean,
   t: TFunction,
-): [title: string, message: string] {
+): [title: string, message: string] | null {
   switch (code) {
     case "AUTH_REQUIRED":
-      if (!reconnectOnly) break;
       return [
         t("runtime.browserAuthRequired", "Browser access required"),
         t("runtime.browserAuthHelp", "Run deepcode web in your terminal to open a new browser access link. No DeepCode account is needed."),
@@ -66,16 +65,33 @@ export function runtimeNoticeText(
         t("runtime.uploadTooLarge", "Files too large"),
         t("runtime.uploadTooLargeHelp", "Choose up to 8 files, each at most 10 MiB."),
       ];
-    case "HOST_ACTION":
-      return [
-        t("runtime.hostAction", "Update on the service's computer"),
-        t("runtime.hostActionHelp", "Update the DeepCode installation on the machine that runs the service."),
-      ];
   }
-  return [
-    serviceOffline
-      ? t("runtime.serviceUnavailable", "Local service unavailable")
-      : t("runtime.requestFailed", "Request failed"),
-    serviceMessage,
-  ];
+  return null;
+}
+
+/** The title and text of the runtime banner. */
+export function runtimeNoticeText(
+  code: string | null | undefined,
+  serviceMessage: string,
+  { serviceOffline, browser }: { serviceOffline: boolean; browser: boolean },
+  t: TFunction,
+): [title: string, message: string] {
+  const report = browser ? browserReport(code, serviceOffline, t) : null;
+  return (
+    report ?? [
+      serviceOffline
+        ? t("runtime.serviceUnavailable", "Local service unavailable")
+        : t("runtime.requestFailed", "Request failed"),
+      serviceMessage,
+    ]
+  );
+}
+
+/** Why attaching files failed, in words: the browser's upload limits, or the error's message. */
+export function attachmentErrorText(error: unknown, t: TFunction): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === "NO_THREAD" || code === "UPLOAD_TOO_LARGE") {
+    return browserReport(code, false, t)![1];
+  }
+  return error instanceof Error ? error.message : String(error);
 }
