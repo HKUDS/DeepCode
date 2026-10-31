@@ -60,17 +60,17 @@ stopped before sending it again. See [Troubleshooting](troubleshooting.md).
 | Resume local history | Select it under the Project | `/resume` |
 | Find history from every Project | Browse the project list | `/resume all` |
 | Attach a file | Composer attachment | `@path/to/file` |
-| Change the next turn's model | Composer model picker | `/model` |
+| Change the next Turn's model | Composer model picker | `/model` |
 | Adjust reasoning effort | Composer effort picker | `/effort` |
 | Cap the Session's context window | Model picker context control | `/context` |
 | Choose tool access | Composer access picker | `/permissions` |
 | Pick an agent preset | Preset picker | `/preset` |
-| Load Skills for the next turn | Composer Skills control | `/skill <name>` |
+| Load Skills for the next Turn | Composer Skills control | `/skill <name>` |
 | Create a reusable Skill | **Skills → Create Skill** | `$skill-creator` |
 | Set or revise a durable Goal | Goal panel | `/goal` |
-| Queue the next instruction | Composer while a turn runs | `/queue <text>` |
-| Stop the active turn | Stop control | `/stop` |
-| Re-run the last turn | Retry control on the turn | `/retry` |
+| Queue the next instruction | Composer while a Turn runs | `/queue <text>` |
+| Stop the active Turn | Stop control | `/stop` |
+| Re-run the last Turn | Retry control on the Turn | `/retry` |
 | Compact a long conversation | Automatic under pressure | `/compact` (also automatic) |
 | Change transcript detail | Transcript detail menu | `/transcript` or `Ctrl+O` |
 | Rename or delete a Session | Session menu | `/rename <title>` · `/delete <id>` |

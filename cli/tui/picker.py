@@ -50,8 +50,14 @@ class PickerItem:
     initial_variant: int = 0
 
     def matches(self, query: str) -> bool:
+        """Whether typing ``query`` keeps this row: by its title, its detail, or
+        a text value as the user would type it (an effort titled "Extra high"
+        is found by ``xhigh``)."""
         needle = query.casefold()
-        return needle in self.title.casefold() or needle in self.detail.casefold()
+        typed = self.value if isinstance(self.value, str) else ""
+        return any(
+            needle in text.casefold() for text in (self.title, self.detail, typed)
+        )
 
 
 @dataclass(frozen=True, slots=True)

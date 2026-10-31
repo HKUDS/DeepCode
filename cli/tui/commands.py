@@ -270,7 +270,7 @@ async def _cmd_resume(app, args: str) -> str | None:
     resolved = _resolve_session_prefix(app, target)
     if isinstance(resolved, list):
         if len(resolved) > 1:
-            return f"ambiguous Session id {target!r} — matches {', '.join(resolved)}"
+            return f"ambiguous Session ID {target!r} — matches {', '.join(resolved)}"
         resolved = target  # no listed match; let the store answer for exact ids
     return _resume_target(app, resolved)
 
@@ -697,7 +697,7 @@ async def _cmd_rename(app, args: str) -> str | None:
 async def _cmd_delete(app, args: str) -> str | None:
     target = args.strip()
     if not target:
-        return "usage: /delete <full Session id> (see /resume all)"
+        return "usage: /delete <full Session ID> (see /resume all)"
     # Deletion is irreversible, so no prefix expansion here: the exact id
     # must be typed (tab completion fills it in).
     try:

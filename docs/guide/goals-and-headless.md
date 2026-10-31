@@ -6,7 +6,7 @@ recurring task. Choose the option that fits your work:
 
 | What you want to do | Use |
 |---|---|
-| Keep working toward an objective across several turns | `/goal` in a conversation, or `deepcode loop` from the shell |
+| Keep working toward an objective across several Turns | `/goal` in a conversation, or `deepcode loop` from the shell |
 | Run one task from a script | `deepcode exec` |
 | Run a recurring task after you close the interface | An Automation |
 | Repeat a task while a scheduling command stays open | `deepcode schedule` |
@@ -140,7 +140,7 @@ front of the model call. `python -m core.schedule.monitor` runs a script or
 fetches a URL, hashes the output, and reports `changed` only when it differs
 from the last run (the first run records a baseline). Unchanged ticks cost no
 model call. On a change it prints a context block with the diff to hand to the
-next turn:
+next Turn:
 
 ```console
 python -m core.schedule.monitor --job-id releases --url https://example.com/releases.json --json

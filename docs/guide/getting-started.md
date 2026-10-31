@@ -168,4 +168,4 @@ follow [Troubleshooting](troubleshooting.md) to return to the task.
 - [Use the terminal UI](the-tui.md): attach files, choose Skills, and queue tasks.
 - [Manage conversations](sessions.md): resume work and make room in long chats.
 - [Add project instructions](skills-and-memory.md): teach DeepCode your conventions.
-- [Work on larger goals](goals-and-headless.md): continue a task across turns or run it on a schedule.
+- [Work on larger goals](goals-and-headless.md): continue a task across Turns or run it on a schedule.

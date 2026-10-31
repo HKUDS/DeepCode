@@ -2251,11 +2251,16 @@ def test_tui_text_names_keys_one_way():
     """Ctrl+O, Esc, Enter, Shift+Tab — as the guide and the status line write them."""
     import ast
 
-    lowercase_keys = re.compile(
-        r"\b(?:ctrl[-+][a-z]|Ctrl-[A-Z]|shift\+tab)\b|\b(?:esc|enter|tab) (?:cancel|select|interrupts|scope)\b"
-    )
+    # Any spelling of a modifier key or Esc; only the guide's forms pass.
+    key = re.compile(r"(?i)\b(?:ctrl|shift|alt)[-+]\w+|\besc\b")
+    allowed = re.compile(r"Ctrl\+[A-Z]|Shift\+Tab|Alt\+[A-Z]|Esc")
+    sources = [
+        *Path(ROOT, "cli", "tui").glob("*.py"),
+        Path(ROOT, "cli", "exec_cli.py"),
+        Path(ROOT, "cli", "automation_foreground.py"),
+    ]
     offenders = []
-    for path in Path(ROOT, "cli", "tui").glob("*.py"):
+    for path in sources:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         docstrings = {
             id(node.body[0].value)
@@ -2268,12 +2273,21 @@ def test_tui_text_names_keys_one_way():
             and isinstance(node.body[0].value, ast.Constant)
         }
         offenders += [
-            f"{path.name}:{node.lineno}: {node.value!r}"
+            f"{path.name}:{node.lineno}: {match.group()!r} in {node.value!r}"
             for node in ast.walk(tree)
             if isinstance(node, ast.Constant)
             and isinstance(node.value, str)
             and id(node) not in docstrings
-            and " " in node.value
-            and lowercase_keys.search(node.value)
+            for match in key.finditer(node.value)
+            if not allowed.fullmatch(match.group())
         ]
     assert offenders == []
+
+
+def test_a_picker_row_is_found_by_the_value_you_would_type():
+    """The effort picker shows "Extra high"; Tab completion offers ``xhigh``."""
+    from cli.tui.picker import PickerItem
+
+    row = PickerItem(value="xhigh", title="Extra high")
+    assert row.matches("xhigh") and row.matches("extra")
+    assert not row.matches("medium")

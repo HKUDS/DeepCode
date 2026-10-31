@@ -1449,7 +1449,7 @@ class TuiApp:
 def main(argv: list[str] | None = None, *, shared_service: bool = True) -> int:
     parser = argparse.ArgumentParser(
         prog="deepcode",
-        description="Interactive DeepCode coding agent (multi-Turn TUI).",
+        description="Interactive DeepCode coding agent (multi-turn TUI).",
     )
     parser.add_argument("--workspace", "-w", default=os.getcwd())
     parser.add_argument("--model", "-m", default=None)
@@ -1457,7 +1457,7 @@ def main(argv: list[str] | None = None, *, shared_service: bool = True) -> int:
     add_reasoning_effort_argument(parser)
     add_access_preset_argument(parser)
     add_workspace_trust_argument(parser)
-    parser.add_argument("--resume", "-r", default=None, help="Session id to resume.")
+    parser.add_argument("--resume", "-r", default=None, help="Session ID to resume.")
     parser.set_defaults(max_iterations=None)
     if not shared_service:
         parser.add_argument(

@@ -42,7 +42,7 @@ This asks the model to use a small local test tool; it does not run shell comman
 or edit your files. Read the result for each check. If one is skipped, that
 capability has not been tested. These checks use your provider's API quota.
 
-## Select a model, then switch future turns
+## Select a model, then switch future Turns
 
 Use `/model` to open the TUI picker or specify both connection and model:
 

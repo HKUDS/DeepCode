@@ -29,8 +29,8 @@ Other commands may show their current setting or require an argument;
 | `/rename <title>` | Rename this Session |
 | `/delete <id>` | Permanently delete a stored Session |
 | `/model [connection] [id]` | Show or switch connection/model — the picker shows every configured connection's full catalog |
-| `/effort [auto\|off\|level]` | Reasoning effort for the *next* Turns |
-| `/context [auto\|tokens]` | Context-window cap for the *next* Turns — `64k`, `1m`, or `auto` to follow the model's published window |
+| `/effort [auto\|off\|level]` | Reasoning effort for future Turns |
+| `/context [auto\|tokens]` | Context-window cap for future Turns — `64k`, `1m`, or `auto` to follow the model's published window |
 | `/permissions [preset]` | Tool access: `ask` · `read-only` · `full-access` · `inherit` |
 | `/transcript [mode]` | Same three modes `Ctrl+O` cycles |
 | `/raw [on\|off]` | Print answers exactly as the model wrote them, without Markdown styling or wrapping, for copying — see [How answers are shown](#how-answers-are-shown) |
@@ -39,7 +39,7 @@ Other commands may show their current setting or require an argument;
 | `/skill <id\|name>` | Choose a Skill for your next message |
 | `/plugins` | List installed plugins |
 | `/mcp [action]` | List, add, test, authorize MCP servers |
-| `/goal …` | A durable goal for this Session — see [Goals](goals-and-headless.md) |
+| `/goal …` | A durable Goal for this Session — see [Goals](goals-and-headless.md) |
 | `/queue <instruction>` | Save an instruction to run after the current task |
 | `/stop` | Interrupt the active Turn (same as `Esc`) |
 | `/retry` | Re-run the last finished Turn with the current model |

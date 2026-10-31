@@ -37,12 +37,12 @@ kept in `~/.deepcode/credentials.json`, not in `deepcode_config.json`.
 
 | Key | Values (default) | What it does |
 |---|---|---|
-| `security.accessPreset` | `ask`, `read_only`, `full_access` | Tool access for new turns. See [Security and data](security.md#access-presets). |
+| `security.accessPreset` | `ask`, `read_only`, `full_access` | Tool access for new Turns. See [Security and data](security.md#access-presets). |
 | `security.permissions` | object (`{}`) | Per-tool rules, see below. |
-| `agents.defaults.connection` / `agents.defaults.model` | connection id / model id | Default connection and model for new sessions. |
+| `agents.defaults.connection` / `agents.defaults.model` | connection id / model id | Default connection and model for new Sessions. |
 | `agents.defaults.reasoningEffort` | a level the model supports | Default reasoning effort. |
-| `agents.defaults.defaultPreset` | preset id | Agent preset for new sessions. |
-| `agents.defaults.microcompact` | `true` / `false` (`false`) | When a long session nears its context limit, replace stale tool results with a short placeholder (keeping paths to saved output) before asking the model for a summary. |
+| `agents.defaults.defaultPreset` | preset id | Agent preset for new Sessions. |
+| `agents.defaults.microcompact` | `true` / `false` (`false`) | When a long Session nears its context limit, replace stale tool results with a short placeholder (keeping paths to saved output) before asking the model for a summary. |
 | `goal.completionVerifier` | `"off"` / `"rule"` (`"off"`) | With `"rule"`, a claim that a Goal is complete is turned back while the latest check failed or no work was done. |
 | `goal.maxRejections` | integer ≥ 1 (`3`) | After this many rejected completion claims, the Goal is marked blocked. |
 | `providers.egress` | object | Limits which hosts receive model requests; see below. |
@@ -119,21 +119,21 @@ Review the change for correctness and explain each finding.
 | `tools` | Allow list of tools. Absent or `*` means all tools. |
 | `disallowed-tools` | Tools to remove. Also accepted as `disallowedTools`. Removing `write`, `edit` or `multi_edit` also removes `apply_patch`. `*` and rules such as `Bash(rm:*)` are rejected. |
 | `prompt-mode` | `append` (default) or `replace` the base system prompt. |
-| `allow-spawn` | Whether the session may start sub-agents. |
+| `allow-spawn` | Whether the Session may start sub-agents. |
 | `model` | Suggested model. |
 | `order` | Position in the picker. |
 
 Pick a preset with `/preset` in the TUI or the preset picker in Desktop and
-Web. A preset is fixed when the session is created; editing the file later
-does not change existing sessions. Presets do not change the access preset or
+Web. A preset is fixed when the Session is created; editing the file later
+does not change existing Sessions. Presets do not change the access preset or
 the model route.
 
 ## Environment variables
 
 | Variable | Default | Effect |
 |---|---|---|
-| `DEEPCODE_HOME` | `~/.deepcode` | Where configuration, credentials, sessions, state and logs live. |
-| `DEEPCODE_SESSIONS_DIR` | `$DEEPCODE_HOME/sessions` | Where session files are stored. |
+| `DEEPCODE_HOME` | `~/.deepcode` | Where configuration, credentials, Sessions, state and logs live. |
+| `DEEPCODE_SESSIONS_DIR` | `$DEEPCODE_HOME/sessions` | Where Session files are stored. |
 | `DEEPCODE_RISK_EVALUATOR` | off | `1` screens a tool call that would run without asking; a risky call asks for approval instead. Not used under Full access. |
 | `DEEPCODE_COMMAND_SCREEN` | not set | `strict` adds screens for piping downloads into a shell and for package installs from unusual indexes or with look-alike names. The destructive-command screen is always on. |
 | `DEEPCODE_ALLOW_REMOTE_SCRIPT` | off | `1` lets one deliberate run pass the download-into-shell screen. |
