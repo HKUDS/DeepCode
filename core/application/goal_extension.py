@@ -725,7 +725,7 @@ class GoalExtension(GoalRuntimeHandler):
                     # No turn id: a runtime entry with one settles that Turn,
                     # and the Turn's own usage must still be charged.
                 )
-            except (ThreadGoalConflictError, ValueError) as exc:
+            except Exception as exc:  # noqa: BLE001 - best effort, see above
                 logger.info(
                     "Completion review tokens were not charged to Goal %s: %s",
                     context.goal_id,

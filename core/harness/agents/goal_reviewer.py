@@ -232,6 +232,10 @@ class AgentReviewVerifier:
                 self._run_review(REVIEWER_PROMPT, review_task(request), on_usage),
                 timeout=self._timeout_seconds,
             )
+        except asyncio.CancelledError as exc:
+            # The Goal runtime charges what was spent before the stop.
+            exc.tokens = spent  # type: ignore[attr-defined]
+            raise
         except TimeoutError as exc:
             raise ReviewFailed(
                 "the independent review took longer than "

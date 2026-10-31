@@ -509,3 +509,104 @@ async def test_an_objective_edited_during_the_review_is_not_marked_complete() ->
         await runtime.request(status="complete", reason="Done.")
     assert handler.requests == []
     assert handler.charged == [10]  # the review still cost what it cost
+
+
+class _Verdict:
+    """A verifier returning a fixed verdict, optionally editing the Goal first."""
+
+    def __init__(self, verdict: GoalVerdict, before=None) -> None:
+        self.verdict = verdict
+        self.before = before
+
+    async def __call__(self, request: GoalCompletionRequest) -> GoalVerdict:
+        if self.before is not None:
+            self.before()
+        return self.verdict
+
+
+def _armed(handler, verifier, **kwargs) -> GoalRuntimeRouter:
+    runtime = GoalRuntimeRouter()
+    runtime.configure(handler)
+    runtime.configure_completion_verifier(verifier, **kwargs)
+    runtime.activate(_context())
+    return runtime
+
+
+@pytest.mark.asyncio
+async def test_a_stale_impossible_verdict_does_not_block_an_edited_goal() -> None:
+    handler = FakeGoalHandler(objective="Ship the feature.")
+    edit = lambda: setattr(handler, "objective", "Ship something else.")  # noqa: E731
+    runtime = _armed(
+        handler,
+        _Verdict(
+            GoalVerdict(confirmed=False, justification="no", impossible=True), edit
+        ),
+    )
+
+    with pytest.raises(ValueError, match="objective changed"):
+        await runtime.request(status="complete", reason="Done.")
+    assert handler.requests == []
+
+
+@pytest.mark.asyncio
+async def test_a_rejection_that_ends_the_goal_says_so_and_blocks_nothing() -> None:
+    class BudgetHandler(FakeGoalHandler):
+        active = True
+
+        def read_goal(self, context):
+            return {**super().read_goal(context), "canUpdate": self.active}
+
+        def record_verification_tokens(self, context, tokens):
+            super().record_verification_tokens(context, tokens)
+            self.active = False  # the review used up the budget
+
+    handler = BudgetHandler()
+    runtime = _armed(
+        handler,
+        _Verdict(GoalVerdict(confirmed=False, justification="no", tokens=99)),
+        max_rejections=1,
+    )
+
+    result = await runtime.request(status="complete", reason="Done.")
+    assert result["updated"] is False and "autoBlocked" not in result
+    assert (
+        "cannot be claimed complete in this Turn" in result["verdict"]["justification"]
+    )
+    assert handler.requests == [] and handler.charged == [99]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_charge_never_hides_the_decision() -> None:
+    class Broken(FakeGoalHandler):
+        def record_verification_tokens(self, context, tokens):
+            raise OSError("disk full")
+
+    handler = Broken()
+    runtime = _armed(
+        handler, _Verdict(GoalVerdict(confirmed=True, justification="ok", tokens=5))
+    )
+    result = await runtime.request(status="complete", reason="Done.")
+    assert result["verdict"]["confirmed"] is True
+    assert [r["status"] for r in handler.requests] == ["complete"]
+    assert runtime.visible_tool_names(("update_goal",)) == ()
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_review_still_charges_what_it_spent() -> None:
+    from core.harness.agents.goal_reviewer import AgentReviewVerifier
+
+    started = asyncio.Event()
+
+    async def run(section, task, on_usage):
+        on_usage(70)
+        started.set()
+        await asyncio.sleep(30)
+
+    handler = FakeGoalHandler()
+    runtime = _armed(handler, AgentReviewVerifier(run))
+    task = asyncio.create_task(runtime.request(status="complete", reason="Done."))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert handler.charged == [70] and handler.requests == []

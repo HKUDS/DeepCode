@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import threading
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -14,6 +16,8 @@ if TYPE_CHECKING:
         GoalVerdict,
     )
 
+
+logger = logging.getLogger(__name__)
 
 GOAL_TOOL_NAMES = frozenset({"get_goal", "update_goal"})
 # The Goal ledger's reason limit (GOAL_OUTCOME_REASON_MAX_CHARS); a longer
@@ -183,15 +187,24 @@ class GoalRuntimeRouter:
                 claim = handler.completion_request(context, reason=reason)
                 judged_objective = claim.objective
                 verdict = await verifier(claim)
+            except asyncio.CancelledError as exc:
+                # Stopped mid-review: what it spent so far is still spent.
+                self._charge(handler, context, getattr(exc, "tokens", 0))
+                raise
             except Exception as exc:  # noqa: BLE001 - fail closed, report to the model
                 verdict = GoalVerdict(
                     confirmed=False,
                     justification=f"Completion verification failed: {exc}",
                     tokens=getattr(exc, "tokens", 0),
                 )
+            if not verdict.confirmed:
+                # Charged first, so the rejection can say when the review
+                # used up the budget.
+                self._charge(handler, context, verdict.tokens)
+                return self._reject_completion(
+                    handler, context, verdict, judged_objective
+                )
             try:
-                if not verdict.confirmed:
-                    return self._reject_completion(handler, context, verdict)
                 result = handler.update_goal(
                     context,
                     status=status,
@@ -199,8 +212,9 @@ class GoalRuntimeRouter:
                     expected_objective=judged_objective,
                 )
             finally:
-                if verdict.tokens > 0:
-                    handler.record_verification_tokens(context, verdict.tokens)
+                # After the decision: charging first could end the budget
+                # and refuse a completion the review just confirmed.
+                self._charge(handler, context, verdict.tokens)
         else:
             result = handler.update_goal(
                 context,
@@ -222,11 +236,27 @@ class GoalRuntimeRouter:
             }
         return result
 
+    @staticmethod
+    def _charge(
+        handler: GoalRuntimeHandler,
+        context: GoalRuntimeContext,
+        tokens: int,
+    ) -> None:
+        """Charge a review's tokens; best effort, never hides the decision."""
+
+        if tokens <= 0:
+            return
+        try:
+            handler.record_verification_tokens(context, tokens)
+        except Exception:  # noqa: BLE001 - accounting must not change the outcome
+            logger.exception("completion review tokens were not charged")
+
     def _reject_completion(
         self,
         handler: GoalRuntimeHandler,
         context: GoalRuntimeContext,
         verdict: GoalVerdict,
+        judged_objective: str | None = None,
     ) -> dict[str, Any]:
         """Return a rejection to the model; auto-block after N rejections."""
 
@@ -248,6 +278,14 @@ class GoalRuntimeRouter:
             "rejections": count,
             "maxRejections": max_rejections,
         }
+        if not handler.read_goal(context).get("canUpdate", True):
+            # Paused, or the review used up the token budget: no later claim
+            # in this Turn can be recorded, and nothing is left to block.
+            rejection["verdict"]["justification"] += (
+                "\nThe Goal is no longer active (its token budget is used up or "
+                "it was paused), so it cannot be claimed complete in this Turn."
+            )
+            return rejection
         if not exhausted:
             return rejection
 
@@ -265,6 +303,9 @@ class GoalRuntimeRouter:
                     f"completion claims. Last rejection: {verdict.justification}"
                 )
             )[:_AUTO_BLOCK_REASON_MAX_CHARS],
+            # A verdict about an objective the user has since edited must
+            # not block the edited Goal either.
+            expected_objective=judged_objective,
         )
         with self._lock:
             if self._context != context:
