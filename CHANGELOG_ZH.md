@@ -4,6 +4,11 @@ DeepCode 的主要变化，最新的在前，每天一条。正式版本号写�
 PyPI 上的包名是 [deepcode-hku](https://pypi.org/project/deepcode-hku/)。
 English: [CHANGELOG.md](CHANGELOG.md).
 
+## 2026-10-31 · 保留论文章节中的代码示例
+
+- **代码注释不再变成论文章节。** 反引号或波浪线代码块中的 Python 注释等
+  井号行保持为代码，不再生成错误标题或拆坏传给工作流的论文上下文。
+
 ## 2026-10-29 · 更轻的上下文压缩、目标完成前先检查、Web 端可浏览文件夹
 
 - **先清掉旧的工具输出。** 打开 `agents.defaults.microcompact` 后，长会话接近

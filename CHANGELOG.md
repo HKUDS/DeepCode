@@ -5,6 +5,12 @@ Released versions are named in the entry title; the version on PyPI is
 [deepcode-hku](https://pypi.org/project/deepcode-hku/). 中文版见
 [CHANGELOG_ZH.md](CHANGELOG_ZH.md).
 
+## 2026-10-31 · Preserve code examples in paper sections
+
+- **Keep fenced code in its real paper section.** Python comments and other
+  hash-prefixed lines inside backtick or tilde code blocks no longer create
+  false headings or break the paper context passed to the workflow.
+
 ## 2026-10-29 · Lighter compaction, checked Goal completion, and folder browsing on the Web
 
 - **Clear old tool output first.** With `agents.defaults.microcompact` on,
