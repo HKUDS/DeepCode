@@ -535,6 +535,11 @@
   color: var(--text-tertiary);
 }
 
+/* Its select draws no outline; the label shows the keyboard focus instead. */
+.selector:has(select:focus-visible) {
+  box-shadow: 0 0 0 2px var(--signal-soft);
+}
+
 .selector:hover {
   background: var(--surface-hover);
   color: var(--text-secondary);

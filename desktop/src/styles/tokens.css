@@ -32,9 +32,12 @@
   --font-display:
     ui-rounded, "SF Pro Rounded", "Avenir Next", "Segoe UI Variable Display",
     -apple-system, BlinkMacSystemFont, sans-serif;
+  /* ui-monospace and "SFMono-Regular" reach SF Mono only in Safari; Chromium
+     on macOS needs Menlo or Monaco, or it falls back to Courier. */
   --font-mono:
-    var(--font-mono-preferred) "SFMono-Regular", ui-monospace, "Cascadia Code",
-    Consolas, monospace;
+    var(--font-mono-preferred) ui-monospace, "SFMono-Regular", "SF Mono", Menlo,
+    Monaco, "Cascadia Code", Consolas, "Liberation Mono", "DejaVu Sans Mono",
+    monospace;
 
   /* Type scale.
      Every step is `rem`, so it resolves against the root font-size — which is
