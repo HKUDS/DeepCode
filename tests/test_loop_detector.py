@@ -80,3 +80,21 @@ def test_different_tool_restarts_a_long_repeat_sequence(max_repeats):
     for _ in range(max_repeats - 1):
         assert detector.check_tool_call("write_file")["should_stop"] is False
     assert detector.check_tool_call("write_file")["status"] == "loop_detected"
+
+
+@pytest.mark.parametrize(("max_repeats", "history_bound"), [(5, 10), (12, 12)])
+def test_history_stays_bounded_without_a_repeated_tool(max_repeats, history_bound):
+    detector = LoopDetector(max_repeats=max_repeats)
+
+    for index in range(200):
+        tool = "write_file" if index % 2 == 0 else "read_file"
+        assert detector.check_tool_call(tool)["should_stop"] is False
+        assert len(detector.tool_history) <= history_bound
+
+    assert detector.get_status_summary()["recent_tools"] == [
+        "read_file",
+        "write_file",
+        "read_file",
+        "write_file",
+        "read_file",
+    ]
