@@ -669,9 +669,6 @@
   gap: 14px;
   margin: 0;
   padding: 30px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--surface-sidebar) 38%, transparent);
   text-align: center;
 }
 

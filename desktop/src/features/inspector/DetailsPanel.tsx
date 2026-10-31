@@ -2,18 +2,22 @@ import { useTranslation } from "react-i18next";
 
 import type { Item } from "../../generated/app-server";
 import { itemStatusText, presentItem } from "../execution/itemPresentation";
+import { readableCommand } from "../thread/sessionFolder";
 import { InspectorEmpty } from "./InspectorEmpty";
 import styles from "./Inspector.module.css";
 
 interface DetailsPanelProps {
   selected: Item | null;
   items: Item[];
+  /** The Session's folder, left out of a leading `cd` in the title. */
+  folder: string | null;
   onSelectItem(itemId: string): void;
 }
 
 export function DetailsPanel({
   selected,
   items,
+  folder,
   onSelectItem,
 }: DetailsPanelProps) {
   const { t } = useTranslation();
@@ -31,7 +35,7 @@ export function DetailsPanel({
             type="button"
             onClick={() => onSelectItem(item.id)}
           >
-            {item.summary}
+            {readableCommand(item.summary, folder)}
           </button>
         ))}
       </div>
@@ -42,7 +46,9 @@ export function DetailsPanel({
   return (
     <div className={styles.content}>
       <p className={styles.eyebrow}>{presentation.stage}</p>
-      <h2>{selected.summary}</h2>
+      <h2 className={styles.detailTitle}>
+        {readableCommand(selected.summary, folder)}
+      </h2>
       <dl className={styles.metadata}>
         <div>
           <dt>{t("inspector.details.kind", "Kind")}</dt>

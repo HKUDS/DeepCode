@@ -9,9 +9,9 @@
   align-items: center;
   gap: 11px;
   padding: 14px 15px;
-  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border-subtle));
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--surface-raised) 92%, var(--danger-soft));
+  background: var(--surface-raised);
   box-shadow: var(--shadow-menu);
   color: var(--danger);
 }
@@ -24,7 +24,7 @@
 
 .copy strong {
   color: var(--text-primary);
-  font: var(--text-xs) var(--font-ui);
+  font: var(--weight-medium) var(--text-sm) var(--font-ui);
 }
 
 .copy span {
@@ -42,20 +42,20 @@
 
 .actions button {
   display: inline-flex;
-  min-height: 35px;
+  min-height: 30px;
   align-items: center;
   gap: 5px;
   padding: 0 10px;
-  border: 1px solid color-mix(in srgb, var(--danger) 24%, var(--border-subtle));
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
   background: var(--surface-raised);
-  color: var(--danger);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-bold);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
 }
 
 .actions button:hover:not(:disabled) {
-  border-color: var(--danger);
+  background: var(--surface-hover);
 }
 
 .actions .dismiss {

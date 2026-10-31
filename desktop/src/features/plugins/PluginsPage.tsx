@@ -79,10 +79,10 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
         </details>
       ) : null}
 
-      <div className={styles.splitView}>
-        <div className={styles.listPane}>
-          {catalog.plugins.length ? (
-            catalog.plugins.map((plugin) => (
+      {catalog.plugins.length ? (
+        <div className={styles.splitView}>
+          <div className={styles.listPane}>
+            {catalog.plugins.map((plugin) => (
               <button
                 type="button"
                 key={plugin.id}
@@ -97,139 +97,141 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
                 <strong>{plugin.name}</strong>
                 <small>{plugin.description || plugin.error}</small>
               </button>
-            ))
-          ) : (
-            <p className={styles.emptyCopy}>
-              {t(
-                "plugins.empty",
-                "No Plugins registered. Add a trusted folder containing plugin.json and an optional fixed skills directory.",
-              )}
-            </p>
-          )}
-        </div>
-        <article className={styles.detailPane}>
-          {catalog.selected ? (
-            <>
-              <h2>{catalog.selected.name}</h2>
-              <p>
-                {catalog.selected.description ||
-                  t("plugins.detail.unresolved", "Manifest could not be resolved.")}
-              </p>
-              <div className={styles.skillActions}>
-                <span className={styles.badge} data-status={catalog.selected.status}>
-                  {pluginStatusLabel(catalog.selected.status, t)}
-                </span>
-                <button
-                  type="button"
-                  disabled={catalog.loading || catalog.selected.status === "invalid"}
-                  onClick={() =>
-                    void catalog.setEnabled(
-                      catalog.selected!.id,
-                      !catalog.selected!.enabled,
-                    )
-                  }
-                >
-                  <Power size={14} />
-                  {catalog.selected.enabled
-                    ? t("plugins.disable", "Disable")
-                    : t("plugins.enable", "Enable")}
-                </button>
-                <button
-                  type="button"
-                  className={styles.dangerButton}
-                  disabled={catalog.loading}
-                  onClick={() => {
-                    const selected = catalog.selected;
-                    if (!selected) return;
-                    void (async () => {
-                      if (
-                        await confirmAction(
-                          t(
-                            "plugins.unregisterConfirm",
-                            "Unregister “{{name}}”? Its source files will not be deleted.",
-                            { name: selected.name },
-                          ),
-                          {
-                            destructive: true,
-                            confirmLabel: t("plugins.unregister", "Unregister"),
-                          },
-                        )
-                      ) {
-                        await catalog.remove(selected.id);
-                      }
-                    })();
-                  }}
-                >
-                  <Trash2 size={14} />
-                  {t("plugins.unregister", "Unregister")}
-                </button>
-              </div>
-              <dl className={styles.metadata}>
-                <div>
-                  <dt>{t("plugins.detail.version", "Version")}</dt>
-                  <dd>
-                    {catalog.selected.version ??
-                      t("plugins.detail.versionUnavailable", "Unavailable")}
-                  </dd>
-                </div>
-                <div>
-                  <dt>{t("plugins.detail.source", "Source")}</dt>
-                  <dd>{catalog.selected.path}</dd>
-                </div>
-                <div>
-                  <dt>{t("plugins.detail.manifest", "Manifest")}</dt>
-                  <dd>{catalog.selected.manifestPath}</dd>
-                </div>
-                <div>
-                  <dt>{t("plugins.detail.schema", "Schema")}</dt>
-                  <dd>
-                    {catalog.selected.schema ??
-                      t("plugins.detail.schemaUnresolved", "Manifest unresolved")}
-                  </dd>
-                </div>
-                <div>
-                  <dt>{t("plugins.detail.components", "Components")}</dt>
-                  <dd>
-                    {catalog.selected.components
-                      .map(
-                        (component) =>
-                          `${pluginComponentLabel(component, t)}${
-                            component.itemCount === null
-                              ? ""
-                              : ` (${component.itemCount})`
-                          }`,
+            ))}
+          </div>
+          <article className={styles.detailPane}>
+            {catalog.selected ? (
+              <>
+                <h2>{catalog.selected.name}</h2>
+                <p>
+                  {catalog.selected.description ||
+                    t("plugins.detail.unresolved", "Manifest could not be resolved.")}
+                </p>
+                <div className={styles.skillActions}>
+                  <span className={styles.badge} data-status={catalog.selected.status}>
+                    {pluginStatusLabel(catalog.selected.status, t)}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={catalog.loading || catalog.selected.status === "invalid"}
+                    onClick={() =>
+                      void catalog.setEnabled(
+                        catalog.selected!.id,
+                        !catalog.selected!.enabled,
                       )
-                      .join(", ") ||
-                      t("plugins.detail.noComponents", "No components discovered")}
-                  </dd>
+                    }
+                  >
+                    <Power size={14} />
+                    {catalog.selected.enabled
+                      ? t("plugins.disable", "Disable")
+                      : t("plugins.enable", "Enable")}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.dangerButton}
+                    disabled={catalog.loading}
+                    onClick={() => {
+                      const selected = catalog.selected;
+                      if (!selected) return;
+                      void (async () => {
+                        if (
+                          await confirmAction(
+                            t(
+                              "plugins.unregisterConfirm",
+                              "Unregister “{{name}}”? Its source files will not be deleted.",
+                              { name: selected.name },
+                            ),
+                            {
+                              destructive: true,
+                              confirmLabel: t("plugins.unregister", "Unregister"),
+                            },
+                          )
+                        ) {
+                          await catalog.remove(selected.id);
+                        }
+                      })();
+                    }}
+                  >
+                    <Trash2 size={14} />
+                    {t("plugins.unregister", "Unregister")}
+                  </button>
                 </div>
-              </dl>
-              {catalog.selected.error ? (
-                <p className={styles.errorBanner}>{catalog.selected.error}</p>
-              ) : null}
-              {catalog.selected.diagnostics.length ? (
-                <details className={styles.warningBlock}>
-                  <summary>
-                    {t("plugins.detail.packageDiagnostics", "Package diagnostics")}
-                  </summary>
-                  {catalog.selected.diagnostics.map((diagnostic, index) => (
-                    <p key={`${diagnostic.code}-${index}`}>
-                      {pluginSeverityLabel(diagnostic.severity, t)}: {diagnostic.message}
-                    </p>
-                  ))}
-                </details>
-              ) : null}
-            </>
-          ) : (
-            <p className={styles.emptyCopy}>
-              {t(
-                "plugins.selectHint",
-                "Select a Plugin to inspect its manifest and activation state.",
-              )}
-            </p>
-          )}
-        </article>
-      </div>
+                <dl className={styles.metadata}>
+                  <div>
+                    <dt>{t("plugins.detail.version", "Version")}</dt>
+                    <dd>
+                      {catalog.selected.version ??
+                        t("plugins.detail.versionUnavailable", "Unavailable")}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{t("plugins.detail.source", "Source")}</dt>
+                    <dd>{catalog.selected.path}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("plugins.detail.manifest", "Manifest")}</dt>
+                    <dd>{catalog.selected.manifestPath}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("plugins.detail.schema", "Schema")}</dt>
+                    <dd>
+                      {catalog.selected.schema ??
+                        t("plugins.detail.schemaUnresolved", "Manifest unresolved")}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{t("plugins.detail.components", "Components")}</dt>
+                    <dd>
+                      {catalog.selected.components
+                        .map(
+                          (component) =>
+                            `${pluginComponentLabel(component, t)}${
+                              component.itemCount === null
+                                ? ""
+                                : ` (${component.itemCount})`
+                            }`,
+                        )
+                        .join(", ") ||
+                        t("plugins.detail.noComponents", "No components discovered")}
+                    </dd>
+                  </div>
+                </dl>
+                {catalog.selected.error ? (
+                  <p className={styles.errorBanner}>{catalog.selected.error}</p>
+                ) : null}
+                {catalog.selected.diagnostics.length ? (
+                  <details className={styles.warningBlock}>
+                    <summary>
+                      {t("plugins.detail.packageDiagnostics", "Package diagnostics")}
+                    </summary>
+                    {catalog.selected.diagnostics.map((diagnostic, index) => (
+                      <p key={`${diagnostic.code}-${index}`}>
+                        {pluginSeverityLabel(diagnostic.severity, t)}: {diagnostic.message}
+                      </p>
+                    ))}
+                  </details>
+                ) : null}
+              </>
+            ) : (
+              <p className={styles.emptyCopy}>
+                {t(
+                  "plugins.selectHint",
+                  "Select a Plugin to inspect its manifest and activation state.",
+                )}
+              </p>
+            )}
+          </article>
+        </div>
+      ) : (
+        <div className={styles.cardList}>
+          <p className={styles.emptyCopy}>
+            {t(
+              "plugins.empty",
+              "No Plugins registered. Add a trusted folder containing plugin.json and an optional fixed skills directory.",
+            )}
+          </p>
+        </div>
+      )}
     </section>
   );
 }

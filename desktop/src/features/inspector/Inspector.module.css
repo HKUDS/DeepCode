@@ -14,7 +14,7 @@
   min-width: 0;
   align-items: center;
   gap: 4px;
-  padding: 7px 46px 7px 10px;
+  padding: 7px 10px;
   overflow-x: auto;
   border-bottom: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--surface-sidebar) 68%, var(--surface-raised));
@@ -25,22 +25,31 @@
   display: none;
 }
 
+/* Room for the close button at the end of the row. Padding on a scrolling
+   row is not kept at the scroll end, so the last tab slid under the button
+   on a phone; a spacer item is. */
+.tabs::after {
+  flex: 0 0 32px;
+  content: "";
+}
+
 .tabs button {
   flex: 0 0 auto;
-  min-height: 34px;
+  min-height: 30px;
   padding: 0 9px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   color: var(--text-tertiary);
   font: var(--text-xs) var(--font-ui);
   text-transform: capitalize;
 }
 
-.tabs button[aria-selected="true"] {
-  border-color: var(--border-subtle);
-  background: var(--surface-raised);
+.tabs button:hover {
   color: var(--text-primary);
-  box-shadow: var(--shadow-soft);
+}
+
+.tabs button[aria-selected="true"] {
+  background: var(--surface-selected);
+  color: var(--text-primary);
 }
 
 .close {
@@ -159,8 +168,6 @@
   margin: 0 0 6px;
   color: var(--text-tertiary);
   font: var(--text-2xs) var(--font-ui);
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
 }
 
 .worktreeControl {
@@ -559,6 +566,17 @@
   color: var(--text-secondary);
   font: var(--text-micro)/1.55 var(--font-mono);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* An activity's summary is often a whole command: body size, wrapping
+   anywhere, rather than a display heading. */
+.content h2.detailTitle {
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0;
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
 

@@ -218,6 +218,7 @@ export function Inspector({
           <DetailsPanel
             selected={selected}
             items={items}
+            folder={thread?.workspacePath ?? null}
             onSelectItem={onSelectItem}
           />
         ) : null}

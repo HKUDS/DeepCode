@@ -585,9 +585,8 @@ div.runStep {
 
 .runError {
   margin: 7px 7px 7px 0;
-  padding: 9px 11px;
-  border-radius: var(--radius-sm);
-  background: var(--danger-soft);
+  padding: 1px 0 1px 10px;
+  border-left: 2px solid var(--danger);
   color: var(--danger);
   font-size: var(--text-xs);
   line-height: 1.55;
@@ -663,24 +662,20 @@ div.runStep {
   z-index: 13;
   bottom: calc(var(--composer-clearance, 148px) + 12px);
   left: 50%;
-  display: inline-flex;
-  min-height: 36px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 13px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-pill);
-  background: var(--surface-overlay);
-  box-shadow: var(--shadow-float);
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: 50%;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-menu);
   color: var(--text-secondary);
-  font-size: var(--text-xs);
   transform: translateX(-50%);
-  backdrop-filter: blur(14px);
 }
 
 .jumpToLatest:hover {
   color: var(--text-primary);
-  transform: translate(-50%, -1px);
 }
 
 .planProgressDock {
@@ -718,54 +713,18 @@ div.runStep {
   text-align: left;
 }
 
-.emptyRail {
-  position: relative;
-  display: flex;
-  width: 78px;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 24px;
-}
-
-.emptyRail::before {
-  position: absolute;
-  right: 4px;
-  left: 4px;
-  height: 1px;
-  background: var(--border-strong);
-  content: "";
-}
-
-.emptyRail i {
-  position: relative;
-  width: 8px;
-  height: 8px;
-  border: 1px solid var(--border-emphasis);
-  border-radius: 50%;
-  background: var(--surface-canvas);
-}
-
-.emptyRail i:first-child {
-  border-color: var(--signal);
-  background: var(--signal);
-}
-
-.emptyRail i:last-child {
-  border-color: var(--success);
-}
-
 .empty h2 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: var(--text-3xl);
-  font-weight: var(--weight-display);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-semibold);
   letter-spacing: var(--tracking-display);
-  line-height: 1.1;
+  line-height: 1.2;
 }
 
 .empty > p {
   max-width: 520px;
-  margin: 16px 0 11px;
+  margin: 10px 0 8px;
   color: var(--text-secondary);
   font-size: var(--text-base);
   line-height: 1.68;
