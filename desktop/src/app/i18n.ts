@@ -80,16 +80,13 @@ const ZH_CN: Record<string, string> = {
   "settings.close": "关闭设置",
   // General rows
   "settings.preset.title": "智能体预设",
-  "settings.preset.eyebrow": "会话默认值",
   "settings.preset.label": "新会话默认使用",
   "settings.preset.none": "无 · 默认组合",
   "settings.preset.save": "保存预设默认值",
   "settings.permissions.title": "权限",
-  "settings.permissions.eyebrow": "安全策略",
   "settings.permissions.label": "会话默认权限",
   "settings.permissions.save": "保存安全设置",
   "settings.appearance.title": "外观",
-  "settings.appearance.eyebrow": "显示",
   "settings.appearance.light": "浅色",
   "settings.appearance.dark": "深色",
   "settings.appearance.system": "跟随系统",
@@ -123,18 +120,15 @@ const ZH_CN: Record<string, string> = {
     "这些显示设置仅保存在本机，会立即生效，不属于项目配置。",
   "settings.appearance.reset": "恢复默认设置",
   "settings.language.title": "语言",
-  "settings.language.eyebrow": "界面语言",
   "settings.language.label": "界面语言",
   "settings.language.note": "立即生效,仅保存在本机。英文原文是所有文案的事实来源。",
   "settings.composer.title": "忙碌时的 Enter 行为",
-  "settings.composer.eyebrow": "输入框",
   "settings.composer.label": "当 Turn 正在运行时,Enter 会…",
   "settings.composer.steer": "引导当前 Turn",
   "settings.composer.queue": "排队为下一个 Turn",
   "settings.composer.note":
     "仅在忙碌时生效;Cmd/Ctrl+Enter 执行另一种行为。空闲时 Enter 始终发送。本设置立即生效,仅保存在本机。",
   // Updates card
-  "settings.updates.eyebrow": "签名发布通道",
   "settings.updates.title": "应用更新",
   "settings.updates.check": "检查更新",
   "settings.updates.checking": "正在检查…",
@@ -149,7 +143,6 @@ const ZH_CN: Record<string, string> = {
     "仅在手动请求时检查更新。开发版本可能未配置发布通道。",
   "settings.updates.checkingNote": "正在检查签名发布通道。",
   // Diagnostics card
-  "settings.diagnostics.eyebrow": "故障排除",
   "settings.diagnostics.title": "诊断",
   "settings.diagnostics.export": "导出报告",
   "settings.diagnostics.exporting": "导出中…",
@@ -329,7 +322,6 @@ const ZH_CN: Record<string, string> = {
   "settings.credits.body":
     "部分线性强调图标由 The Icon Tree 设计，来自 Flaticon。插件与技能的空状态图标来自 Phosphor Icons（MIT）。",
   // Settings: agent presets section
-  "settings.presets.eyebrow": "会话组合",
   "settings.presets.title": "智能体预设",
   "settings.presets.description":
     "预设打包了系统提示词和工具策略。请在对话开始前于输入框中为每个会话选择一个；选择会以快照形式写入会话，之后修改预设文件不会改变进行中的对话。",
@@ -383,7 +375,6 @@ const ZH_CN: Record<string, string> = {
   "settings.diagnostics.automations": "自动化",
   "settings.diagnostics.projectConfig": "项目配置",
   // Settings: agent model
-  "settings.agentModel.eyebrow": "默认路由",
   "settings.agentModel.title": "智能体模型",
   "settings.agentModel.description":
     "新会话会继承此模型。会话之后可以切换模型，而不会丢失对话历史。",
@@ -555,15 +546,13 @@ const ZH_CN: Record<string, string> = {
   "settings.appearance.importFailed": "无法导入该主题。",
   "settings.appearance.importedNamed": "导入的主题 · {{name}}",
   // MCP
-  "mcp.eyebrow": "智能体能力",
   "mcp.title": "MCP 服务器",
   "mcp.description":
     "添加 MCP 服务器，测试连接，然后启用。任务需要时，已启用的工具会自动提供给编码智能体。",
   "mcp.refresh": "刷新",
   "mcp.browserDidNotOpen": "浏览器没有打开？",
   "mcp.continueAuthorization": "继续授权",
-  "mcp.configured.eyebrow": "已配置的服务器",
-  "mcp.configured.title": "可供 DeepCode 使用",
+  "mcp.configured.title": "已配置的服务器",
   "mcp.configured.total": "已配置 {{total}} 个",
   "mcp.server.endpoint": "端点",
   "mcp.server.configuration": "配置",
@@ -663,7 +652,6 @@ const ZH_CN: Record<string, string> = {
     "已添加 {{name}}，处于停用状态。未下载任何软件包，也未启动任何进程。启用前请先测试。",
   "mcp.empty.title": "尚未配置 MCP 服务器",
   "mcp.empty.hint": "添加一个已审核的模板，或在下方配置自定义服务器。",
-  "mcp.templates.eyebrow": "内置目录",
   "mcp.templates.title": "已审核的 MCP 模板",
   "mcp.templates.description": "添加模板只保存配置，不会下载软件包、启动进程或启用工具。",
   "mcp.templates.total": "{{total}} 个模板",
@@ -702,7 +690,6 @@ const ZH_CN: Record<string, string> = {
   "mcp.form.saveChanges": "保存更改",
   "mcp.form.add": "添加自定义服务器",
   // Plugins
-  "plugins.eyebrow": "本地扩展",
   "plugins.title": "插件",
   "plugins.description":
     "注册受信任的本地插件文件夹。其中的技能会加入共享目录，MCP 服务器会加入共享工具运行时。",
@@ -717,7 +704,6 @@ const ZH_CN: Record<string, string> = {
   "plugins.disable": "停用",
   "plugins.unregister": "取消注册",
   "plugins.unregisterConfirm": "取消注册“{{name}}”？其源文件不会被删除。",
-  "plugins.detail.eyebrow": "本地插件",
   "plugins.detail.unresolved": "无法解析清单。",
   "plugins.detail.version": "版本",
   "plugins.detail.versionUnavailable": "不可用",
@@ -730,7 +716,6 @@ const ZH_CN: Record<string, string> = {
   "plugins.detail.packageDiagnostics": "包诊断",
   "plugins.selectHint": "选择一个插件以查看其清单和启用状态。",
   // Skills
-  "skills.eyebrow": "可复用工作流",
   "skills.title": "技能",
   "skills.description": "导入、查看并启用 Desktop 与 CLI 的 Turn 共用的项目技能或用户技能。",
   "skills.storeChangesIn": "更改保存到",
@@ -759,7 +744,6 @@ const ZH_CN: Record<string, string> = {
   "skills.noProject.title": "打开一个项目以管理其技能。",
   "skills.noProject.hint": "项目技能与用户技能通过同一个智能体运行时解析。",
   // Automations
-  "automations.eyebrow": "本地周期任务",
   "automations.title": "自动化",
   "automations.description":
     "每个自动化拥有一个固定的目标会话，并通过与交互式工作相同的权限、审批、Hook 和会话生命周期提交普通的智能体 Turn。",

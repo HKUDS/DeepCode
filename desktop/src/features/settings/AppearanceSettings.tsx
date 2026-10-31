@@ -124,9 +124,6 @@ export function AppearanceSettings() {
     <section className={styles.formCard}>
       <header>
         <div>
-          <p className={styles.eyebrow}>
-            {t("settings.appearance.eyebrow", "Display")}
-          </p>
           <h2>{t("settings.appearance.title", "Appearance")}</h2>
         </div>
       </header>

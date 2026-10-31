@@ -42,7 +42,6 @@ export function DiagnosticsCard({
     <section className={styles.section}>
       <header className={styles.sectionHeader}>
         <div>
-          <p className={styles.eyebrow}>{t("settings.diagnostics.eyebrow", "Troubleshooting")}</p>
           <h2>{t("settings.diagnostics.title", "Diagnostics")}</h2>
         </div>
         <div className={styles.headerActions}>

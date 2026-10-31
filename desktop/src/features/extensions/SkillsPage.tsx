@@ -54,9 +54,6 @@ export function SkillsPage({ runtime, project, onCreateSkill }: SkillsPageProps)
     <section className={styles.page} aria-labelledby="skills-title">
       <header className={styles.pageHeader}>
         <div>
-          <p className={styles.eyebrow}>
-            {t("skills.eyebrow", "Reusable workflows")}
-          </p>
           <h1 id="skills-title">{t("skills.title", "Skills")}</h1>
           <p>
             {t(

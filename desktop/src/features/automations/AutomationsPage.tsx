@@ -183,9 +183,6 @@ export function AutomationsPage({
     <section className={styles.page} aria-labelledby="automations-title">
       <header className={styles.pageHeader}>
         <div>
-          <p className={styles.eyebrow}>
-            {t("automations.eyebrow", "Recurring local work")}
-          </p>
           <h1 id="automations-title">{t("automations.title", "Automations")}</h1>
           <p>
             {t(

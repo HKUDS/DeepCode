@@ -56,7 +56,6 @@ export function UpdatesCard({ runtime }: { runtime: ClientRuntime }) {
     <section className={styles.section}>
       <header className={styles.sectionHeader}>
         <div>
-          <p className={styles.eyebrow}>{t("settings.updates.eyebrow", "Signed release channel")}</p>
           <h2>{t("settings.updates.title", "Application updates")}</h2>
         </div>
         <div className={styles.headerActions}>

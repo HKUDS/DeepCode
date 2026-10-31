@@ -2,7 +2,7 @@
   width: min(1120px, 100%);
   height: 100%;
   margin: 0 auto;
-  padding: 42px clamp(28px, 5vw, 64px) 82px;
+  padding: 36px clamp(28px, 5vw, 64px) 72px;
   overflow-y: auto;
 }
 
@@ -17,15 +17,15 @@
 }
 
 .pageHeader {
-  margin-bottom: 30px;
+  margin-bottom: 20px;
 }
 
 .pageHeader h1 {
-  margin: 7px 0 11px;
+  margin: 0 0 6px;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-size: var(--text-3xl);
-  font-weight: var(--weight-display);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
   letter-spacing: var(--tracking-display);
 }
 
@@ -34,16 +34,15 @@
   max-width: 660px;
   margin: 0;
   color: var(--text-secondary);
-  font-size: var(--text-base);
-  line-height: 1.68;
+  font-size: var(--text-sm);
+  line-height: 1.6;
 }
 
+/* A line of facts above a card's name: where it comes from, how it runs. */
 .eyebrow {
   margin: 0;
   color: var(--text-tertiary);
-  font: var(--weight-bold) var(--text-xs) var(--font-ui);
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
+  font: var(--text-2xs) var(--font-ui);
 }
 
 .headerActions,
@@ -61,17 +60,17 @@
 .formCard > header > button,
 .inlineForm button {
   display: inline-flex;
-  min-height: 39px;
+  min-height: 32px;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  padding: 0 14px;
+  gap: 6px;
+  padding: 0 11px;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   background: var(--surface-raised);
   color: var(--text-secondary);
   font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
+  font-weight: var(--weight-medium);
   white-space: nowrap;
 }
 
@@ -79,7 +78,6 @@
   border-color: var(--text-primary);
   background: var(--text-primary);
   color: var(--text-inverse);
-  box-shadow: 0 5px 14px rgb(27 34 30 / 12%);
 }
 
 .secondaryButton:hover:not(:disabled),
@@ -93,15 +91,12 @@
 .contextBar,
 .scopeBar {
   display: flex;
-  min-height: 48px;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 22px;
-  padding: 8px 14px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--surface-sidebar) 64%, var(--surface-raised));
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .contextBar strong {
@@ -145,13 +140,12 @@
   grid-template-columns: minmax(220px, 0.38fr) minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: var(--surface-raised);
-  box-shadow: var(--shadow-soft);
 }
 
 .listPane {
-  padding: 11px;
+  padding: 8px;
   overflow-y: auto;
   border-right: 1px solid var(--border-subtle);
   background: var(--surface-sidebar);
@@ -160,22 +154,18 @@
 .listPane button {
   display: grid;
   width: 100%;
-  gap: 5px;
-  padding: 13px;
-  border: 1px solid transparent;
+  gap: 3px;
+  padding: 10px 12px;
   border-radius: var(--radius-sm);
   text-align: left;
 }
 
-.listPane button:hover,
-.listPane button[data-active="true"] {
+.listPane button:hover {
   background: var(--surface-hover);
 }
 
 .listPane button[data-active="true"] {
-  border-color: var(--border-subtle);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-soft);
+  background: var(--surface-selected);
 }
 
 .listPane span {
@@ -187,10 +177,15 @@
   font-size: var(--text-sm);
 }
 
+/* Two lines in the list; the full description is in the detail pane. */
 .listPane small {
+  display: -webkit-box;
+  overflow: hidden;
   color: var(--text-secondary);
   font-size: var(--text-xs);
   line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .detailPane {
@@ -204,8 +199,11 @@
    the same mark the card lists use, so the two empty states read as one
    pattern rather than two accidents. */
 .detailPane > .emptyCopy {
+  /* The pane grows with a long list; keep the prompt in view at its top. */
+  position: sticky;
+  top: 0;
   display: grid;
-  min-height: 100%;
+  min-height: min(100%, 480px);
   align-content: center;
   justify-items: center;
   gap: 14px;
@@ -222,12 +220,21 @@
 .sectionHeader h2,
 .formCard h2,
 .card h2 {
-  margin: 4px 0 9px;
+  margin: 2px 0 6px;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-size: var(--text-xl);
-  font-weight: var(--weight-display);
-  letter-spacing: var(--tracking-display);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+}
+
+.detailPane h2,
+.sectionHeader h2 {
+  font-size: var(--text-lg);
+}
+
+.sectionHeader > span {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
 }
 
 .detailPane > p,
@@ -247,11 +254,10 @@
 .card,
 .formCard {
   min-width: 0;
-  padding: 19px;
+  padding: 18px;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: var(--surface-raised);
-  box-shadow: var(--shadow-soft);
 }
 
 .card > code {
@@ -268,45 +274,19 @@
 }
 
 .badge {
-  padding: 5px 8px;
-  border: 1px solid var(--border-strong);
+  padding: 2px 8px;
   border-radius: var(--radius-pill);
   color: var(--text-tertiary);
-  background: var(--surface-code);
-  font: var(--text-2xs) var(--font-ui);
-  text-transform: uppercase;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font: var(--weight-medium) var(--text-2xs) var(--font-ui);
+  white-space: nowrap;
 }
 
-.badge[data-status="configured"] {
-  border-color: color-mix(in srgb, var(--success) 45%, var(--border-subtle));
-  color: var(--success);
-}
-
+.badge[data-status="configured"],
 .badge[data-status="tested"],
-.badge[data-status="connected"] {
-  border-color: color-mix(in srgb, var(--success) 45%, var(--border-subtle));
-  color: var(--success);
-}
-
-.badge[data-status="neutral"] {
-  border-color: var(--border-strong);
-  color: var(--text-tertiary);
-}
-
-.badge[data-status="invalid"] {
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--border-subtle));
-  color: var(--danger);
-}
-
-.badge[data-status="blocked"],
-.badge[data-status="disabled"] {
-  border-color: color-mix(in srgb, var(--attention) 45%, var(--border-subtle));
-  color: var(--attention);
-}
-
+.badge[data-status="connected"],
 .badge[data-status="completed"],
 .badge[data-status="enabled"] {
-  border-color: color-mix(in srgb, var(--success) 45%, var(--border-subtle));
   color: var(--success);
 }
 
@@ -314,19 +294,19 @@
 .badge[data-status="queued"],
 .badge[data-status="connecting"],
 .badge[data-status="waiting"] {
-  border-color: color-mix(in srgb, var(--signal) 45%, var(--border-subtle));
   color: var(--signal);
 }
 
+.badge[data-status="blocked"],
+.badge[data-status="disabled"],
 .badge[data-status="paused"],
 .badge[data-status="skipped"],
 .badge[data-status="interrupted"] {
-  border-color: color-mix(in srgb, var(--attention) 45%, var(--border-subtle));
   color: var(--attention);
 }
 
+.badge[data-status="invalid"],
 .badge[data-status="failed"] {
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--border-subtle));
   color: var(--danger);
 }
 
@@ -439,8 +419,8 @@
 .inlineForm input {
   width: 100%;
   min-width: 0;
-  min-height: 41px;
-  padding: 9px 12px;
+  min-height: 36px;
+  padding: 7px 11px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   outline: 0;
@@ -491,6 +471,14 @@
   margin-top: 18px;
   padding-top: 14px;
   border-top: 1px solid var(--border-subtle);
+}
+
+/* In a page header the actions sit beside the title, without the rule a
+   form's footer has. */
+.pageHeader .formActions {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 
 .formActions > span {
@@ -766,11 +754,11 @@
 }
 
 .emptyState h2 {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-size: var(--text-2xl);
-  font-weight: var(--weight-display);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
 }
 
 .emptyState p {
@@ -834,7 +822,7 @@
 
 .compactSelect {
   display: inline-flex;
-  min-height: 39px;
+  min-height: 32px;
   align-items: center;
   gap: 7px;
   padding: 0 10px;
@@ -876,7 +864,6 @@
   color: var(--text-tertiary);
   font: var(--text-2xs) var(--font-ui);
   font-style: normal;
-  text-transform: uppercase;
 }
 
 .skillRowMeta em[data-status="active"] {
@@ -929,18 +916,14 @@
 }
 
 .skillActions .badge[data-status="active"] {
-  border-color: color-mix(in srgb, var(--signal) 24%, var(--border-strong));
-  background: var(--signal-faint);
   color: var(--signal);
 }
 
 .skillActions .badge[data-status="disabled"] {
-  border-color: color-mix(in srgb, var(--attention) 45%, var(--border-subtle));
   color: var(--attention);
 }
 
 .skillActions .badge[data-status="invalid"] {
-  background: var(--danger-soft);
   color: var(--danger);
 }
 

@@ -24,9 +24,6 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
     <section className={styles.page} aria-labelledby="plugins-title">
       <header className={styles.pageHeader}>
         <div>
-          <p className={styles.eyebrow}>
-            {t("plugins.eyebrow", "Local extensions")}
-          </p>
           <h1 id="plugins-title">{t("plugins.title", "Plugins")}</h1>
           <p>
             {t(
@@ -113,9 +110,6 @@ export function PluginsPage({ runtime }: { runtime: ClientRuntime }) {
         <article className={styles.detailPane}>
           {catalog.selected ? (
             <>
-              <p className={styles.eyebrow}>
-                {t("plugins.detail.eyebrow", "Local Plugin")}
-              </p>
               <h2>{catalog.selected.name}</h2>
               <p>
                 {catalog.selected.description ||

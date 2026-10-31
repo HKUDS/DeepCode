@@ -24,9 +24,6 @@ export function ComposerBehaviorCard() {
     <section className={styles.formCard}>
       <header>
         <div>
-          <p className={styles.eyebrow}>
-            {t("settings.composer.eyebrow", "Composer")}
-          </p>
           <h2>{t("settings.composer.title", "Enter behavior while busy")}</h2>
         </div>
       </header>
