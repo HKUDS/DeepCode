@@ -1,7 +1,7 @@
 """
 Paper Code Implementation Workflow — unified on the core AgentRunner kernel.
 
-P0 unification (see DEEPCODE_V2_MASTER_PLAN.md):
+P0 unification:
 - The former hand-rolled ``_pure_code_implementation_loop`` (800-iteration
   while loop with a bespoke text protocol) is gone. The implementation
   phase now runs on ``core.agent_runtime.runner.AgentRunner`` — the same

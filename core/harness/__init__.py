@@ -1,6 +1,6 @@
 """Harness services layered on top of the agent kernel.
 
-P1 security base (see DEEPCODE_V2_MASTER_PLAN.md §4.3):
+Security base (see docs/P1_SECURITY_BASE.md):
 - :mod:`core.harness.permissions` — three-valued permission engine
   (allow / ask / deny) with a non-overridable sensitive-path denylist,
   two-dimensional wildcard rules and default / plan / full_auto modes.

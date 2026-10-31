@@ -1,7 +1,7 @@
 """SQ/EQ protocol — the wire between any UI and the engine (L1).
 
 Two decoupled directions, mirroring the pattern proven by Codex/Claude
-Code (DEEPCODE_V2_MASTER_PLAN.md §4.2):
+Code:
 
 - **Submission Queue (UI → engine)** carries :class:`Submission` ``{id, op}``
   where :data:`Op` is a small, extensible command union (``UserInput`` /

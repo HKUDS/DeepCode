@@ -11,7 +11,7 @@ The flow mirrors what a real SWE-bench prediction run does:
 
 The agent invocation is injected (:func:`default_exec_runner` shells out to
 ``python -m cli.exec_cli``) so the pure diff/prepare logic is testable without
-a model — mechanism over hardcoding (DEEPCODE_V2_MASTER_PLAN.md §3.4).
+a model — mechanism over hardcoding.
 """
 
 from __future__ import annotations
