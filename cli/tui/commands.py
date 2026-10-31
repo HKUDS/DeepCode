@@ -456,6 +456,7 @@ async def _effort_via_picker(app) -> str | None:
             value=level,
             title=effort_label(level),
             detail="current" if level == current else "",
+            keywords=level,
         )
         for level in dict.fromkeys(levels)
     ]

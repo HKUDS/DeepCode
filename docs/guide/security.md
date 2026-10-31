@@ -125,7 +125,7 @@ File tools ask before writing those hook files, except under Full access.
 
 MCP servers run with your user's rights, outside the command sandbox. Adding a
 server from the bundled catalog copies a disabled entry. An enabled server
-starts inside an agent session, or when you test the connection.
+starts when a Session's agent runs, or when you test the connection.
 `deepcode mcp list` flags `npx` and `uvx` servers whose package version is not
 fixed. Plugin manifests that contain secret-like literal values produce a
 warning. See the [MCP guide](../integrations/MCP.md) and

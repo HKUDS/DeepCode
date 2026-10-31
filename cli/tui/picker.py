@@ -44,19 +44,19 @@ class PickerItem:
     title: str
     detail: str = ""
     disabled_reason: str | None = None
+    # Text a row is also found by, though not shown: what the user would type
+    # for it (an effort titled "Extra high" is found by "xhigh").
+    keywords: str = ""
     # Shift+Tab cycles these on the highlighted row (dsh's model/effort
     # pairing); empty means the item has no cycled dimension.
     variants: tuple[PickerVariant, ...] = ()
     initial_variant: int = 0
 
     def matches(self, query: str) -> bool:
-        """Whether typing ``query`` keeps this row: by its title, its detail, or
-        a text value as the user would type it (an effort titled "Extra high"
-        is found by ``xhigh``)."""
         needle = query.casefold()
-        typed = self.value if isinstance(self.value, str) else ""
         return any(
-            needle in text.casefold() for text in (self.title, self.detail, typed)
+            needle in text.casefold()
+            for text in (self.title, self.detail, self.keywords)
         )
 
 

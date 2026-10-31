@@ -2252,8 +2252,13 @@ def test_tui_text_names_keys_one_way():
     import ast
 
     # Any spelling of a modifier key or Esc; only the guide's forms pass.
-    key = re.compile(r"(?i)\b(?:ctrl|shift|alt)[-+]\w+|\besc\b")
-    allowed = re.compile(r"Ctrl\+[A-Z]|Shift\+Tab|Alt\+[A-Z]|Esc")
+    key = re.compile(
+        r"(?i)\b(?:ctrl|shift|alt)[-+]\w+|\besc(?:ape)?\b"
+        r"|\b(?:enter|tab) (?:select|scope|cancel)\b"
+    )
+    allowed = re.compile(
+        r"Ctrl\+[A-Z]|Shift\+Tab|Alt\+[A-Z]|Esc|(?:Enter|Tab) (?:select|scope|cancel)"
+    )
     sources = [
         *Path(ROOT, "cli", "tui").glob("*.py"),
         Path(ROOT, "cli", "exec_cli.py"),
@@ -2272,12 +2277,21 @@ def test_tui_text_names_keys_one_way():
             and isinstance(node.body[0], ast.Expr)
             and isinstance(node.body[0].value, ast.Constant)
         }
+        # Key binding names (bindings.add("escape")) are code, not text.
+        bindings = {
+            id(argument)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "add"
+            for argument in node.args
+        }
         offenders += [
             f"{path.name}:{node.lineno}: {match.group()!r} in {node.value!r}"
             for node in ast.walk(tree)
             if isinstance(node, ast.Constant)
             and isinstance(node.value, str)
-            and id(node) not in docstrings
+            and id(node) not in docstrings | bindings
             for match in key.finditer(node.value)
             if not allowed.fullmatch(match.group())
         ]
@@ -2288,6 +2302,9 @@ def test_a_picker_row_is_found_by_the_value_you_would_type():
     """The effort picker shows "Extra high"; Tab completion offers ``xhigh``."""
     from cli.tui.picker import PickerItem
 
-    row = PickerItem(value="xhigh", title="Extra high")
+    row = PickerItem(value="xhigh", title="Extra high", keywords="xhigh")
     assert row.matches("xhigh") and row.matches("extra")
     assert not row.matches("medium")
+    # A value that is not shown, such as a Skill's id, does not match.
+    skill = PickerItem(value="sk_0a1b2c3d4e5f", title="Review")
+    assert not skill.matches("sk_") and not skill.matches("a")
