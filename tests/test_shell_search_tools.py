@@ -49,39 +49,6 @@ async def test_bash_nonzero_exit_reported(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("command", "output", "exit_code", "exit_codes"),
-    [
-        # The pipeline's code is its last command's; each stage is on record.
-        ("sh -c 'echo 1 failed; exit 1' | tail -5", "1 failed\n", 0, [1, 0]),
-        ("yes | head -1", "y\n", 0, [141, 0]),
-        ("echo hi", "hi\n", 0, [0]),
-        ("printf 'no newline'", "no newline", 0, [0]),
-        ("cat <<EOF\nheredoc\nEOF", "heredoc\n", 0, [0]),
-        ("echo a # comment", "a\n", 0, [0]),
-        # The shell never reaches the report: nothing is on record.
-        ("exit 4", "[exit 4]", 4, None),
-        ("set -e; false; echo never", "[exit 1]", 1, None),
-    ],
-)
-async def test_bash_records_every_pipeline_stage(
-    tmp_path, command, output, exit_code, exit_codes
-):
-    out = await BashTool(str(tmp_path), sandbox_enabled=False).execute(command=command)
-    assert str(out) == output  # the report line never reaches the model
-    assert out.metadata["exit_code"] == exit_code
-    assert out.metadata.get("exit_codes") == exit_codes
-
-
-def test_an_exit_report_that_does_not_parse_is_ignored():
-    from core.harness.tools.shell import _take_exit_report
-
-    text, codes = _take_exit_report("out\n\x1eM:x y\n", "\x1eM:")
-    assert (text, codes) == ("out", ())
-    assert _take_exit_report("no report", "\x1eM:") == ("no report", ())
-
-
-@pytest.mark.asyncio
 async def test_bash_empty_command_is_error(tmp_path):
     b = BashTool(str(tmp_path))
     assert (await b.execute(command="   ")).startswith("Error: empty")

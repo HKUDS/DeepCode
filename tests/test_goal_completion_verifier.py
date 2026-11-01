@@ -30,7 +30,6 @@ class FakeGoalHandler:
         self.objective = objective
         self.events: list[str] = []
         self.charged: list[int] = []
-        self.paused: list[str] = []
 
     def read_goal(self, context: GoalRuntimeContext):
         return {"goalId": context.goal_id, "objective": self.objective}
@@ -52,10 +51,6 @@ class FakeGoalHandler:
 
     def record_verification_tokens(self, context: GoalRuntimeContext, tokens: int):
         self.charged.append(tokens)
-
-    def pause_for_verification(self, context: GoalRuntimeContext, *, reason: str):
-        self.paused.append(reason)
-        return {"goalId": context.goal_id, "status": "paused"}
 
     def completion_request(
         self,
@@ -619,32 +614,8 @@ async def test_a_stopped_review_still_charges_what_it_spent() -> None:
     assert handler.charged == [70] and handler.requests == []
 
 
-def test_a_failing_command_hidden_by_a_pipe_still_fails_the_claim() -> None:
-    hidden = GoalEvidenceItem(
-        kind="command_execution",
-        status="completed",  # `tail` exited 0
-        summary="python -m pytest -q 2>&1 | tail -20",
-        name="bash",
-        exit_codes=(1, 0),
-    )
-    verdict = _judge(FIX, hidden)
-    assert not verdict.confirmed
-    assert "exit codes 1 0" in verdict.justification
-
-
-def test_a_sigpipe_cut_is_not_a_failure() -> None:
-    cut = GoalEvidenceItem(
-        kind="command_execution",
-        status="completed",
-        summary="yes | head -1",
-        name="bash",
-        exit_codes=(141, 0),
-    )
-    assert _judge(FIX, cut).confirmed
-
-
 @pytest.mark.asyncio
-async def test_an_unverifiable_claim_pauses_the_goal_without_counting() -> None:
+async def test_an_unverifiable_claim_blocks_the_goal_without_counting() -> None:
     from core.agent_runtime.goal_verifier import VerificationUnavailable
 
     class Down:
@@ -654,11 +625,32 @@ async def test_an_unverifiable_claim_pauses_the_goal_without_counting() -> None:
     handler = FakeGoalHandler()
     runtime = _armed(handler, Down())
     result = await runtime.request(status="complete", reason="Done.")
-    assert result["paused"] is True and result["updated"] is False
+    assert result["unverified"] is True and "rejections" not in result
     assert "could not be verified (provider down)" in result["verdict"]["justification"]
-    assert handler.requests == [] and handler.charged == [12]
-    assert len(handler.paused) == 1
+    assert [r["status"] for r in handler.requests] == ["blocked"]
+    assert "Resume the Goal to try again" in handler.requests[0]["reason"]
+    assert handler.charged == [12]
     assert runtime.visible_tool_names(("update_goal",)) == ()
+
+
+@pytest.mark.asyncio
+async def test_an_unverifiable_claim_on_an_ended_goal_records_nothing() -> None:
+    from core.agent_runtime.goal_verifier import VerificationUnavailable
+
+    class Down:
+        async def __call__(self, request):
+            raise VerificationUnavailable("provider down", tokens=12)
+
+    class Ended(FakeGoalHandler):
+        def read_goal(self, context):
+            return {**super().read_goal(context), "canUpdate": False}
+
+    handler = Ended()
+    runtime = _armed(handler, Down())
+    result = await runtime.request(status="complete", reason="Done.")
+    assert result["updated"] is False
+    assert "no longer active" in result["verdict"]["justification"]
+    assert handler.requests == []
 
 
 class _Marked(FakeGoalHandler):
@@ -700,3 +692,17 @@ async def test_progress_never_buys_endless_claims() -> None:
     assert handler.requests[-1]["reason"].startswith(
         f"Blocked by the completion verifier after {MAX_TOTAL_REJECTIONS} rejected"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_claim_without_any_change_is_no_progress() -> None:
+    handler = _Marked()
+    handler.marker = "item_a"
+    runtime = _armed(handler, RejectingVerifier(), max_rejections=3)
+    await runtime.request(status="complete", reason="Done.")
+    handler.marker = ""  # a later Turn that changed nothing
+    second = await runtime.request(status="complete", reason="Done.")
+    handler.marker = "item_a"  # the same old change is no news either
+    third = await runtime.request(status="complete", reason="Done.")
+    assert [second["rejections"], third["rejections"]] == [2, 3]
+    assert third["autoBlocked"] is True

@@ -102,17 +102,6 @@ def display_preview(result: Any, *, hook_context_at: int | None = None) -> str:
     return summarize_result(result)
 
 
-def _exit_codes(result: Any) -> tuple[int, ...]:
-    if not isinstance(result, ToolResult):
-        return ()
-    codes = result.metadata.get("exit_codes")
-    if not isinstance(codes, list):
-        return ()
-    return tuple(
-        code for code in codes if isinstance(code, int) and not isinstance(code, bool)
-    )
-
-
 def _is_error_result(result: Any) -> bool:
     if isinstance(result, ToolResult):
         return result.is_error
@@ -406,7 +395,6 @@ class _EventEmittingHook(AgentHook):
                         result, hook_context_at=event.get("hook_context_at")
                     ),
                     denied=event.get("status") == "denied",
-                    exit_codes=_exit_codes(result),
                 )
             )
 

@@ -374,9 +374,6 @@ class ToolCompleted:
     # run), a PreToolUse hook, or a tool outside this turn's set. It is an
     # error for the model (``is_error`` stays true), but no failure.
     denied: bool = False
-    # A shell command's exit code per command of its last pipeline, when the
-    # tool reported them: `pytest | tail` that failed reads (1, 0).
-    exit_codes: tuple[int, ...] = ()
     type: str = field(default="tool_completed", init=False)
 
 

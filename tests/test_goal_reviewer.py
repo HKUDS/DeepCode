@@ -252,3 +252,28 @@ def test_the_prompt_treats_everything_it_reads_as_material():
     assert items["properties"]["finding"]["enum"] == list(FINDINGS)
     for finding in FINDINGS:
         assert f"- {finding}:" in REVIEWER_PROMPT
+
+
+def test_the_reviewer_thinks_even_when_the_worker_does_not():
+    from dataclasses import replace
+
+    from core.agent_setup import _reviewer_execution_profile
+    from core.domain.execution_profile import ExecutionProfile
+
+    base = ExecutionProfile(
+        connection_id="deepseek",
+        provider_name="deepseek",
+        adapter="openai",
+        model_id="deepseek-v4-pro",
+        context_window=128_000,
+        max_output_tokens=8_000,
+        max_tokens=8_000,
+        temperature=0.0,
+        reasoning_effort="none",
+        config_revision="r1",
+    )
+    assert _reviewer_execution_profile(base).reasoning_effort is None
+    high = replace(base, reasoning_effort="high")
+    assert _reviewer_execution_profile(high) is high
+    no_thinking = replace(base, model_id="some-unknown-model")
+    assert _reviewer_execution_profile(no_thinking).reasoning_effort == "none"

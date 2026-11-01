@@ -52,8 +52,9 @@ that claim checked as well, set `goal.completionVerifier` in your
 [configuration](configuration.md):
 
 - `"rule"` turns the claim back while the latest check failed or nothing was
-  done in that Turn. A check counts as failed when any command in its pipeline
-  failed, so `pytest | tail` with failing tests is caught.
+  done in that Turn. It reads a command's exit code, which for a pipeline is
+  the last command's: `pytest | tail` reads as passed even when the tests
+  fail, so the agent is asked to run checks without pipes.
 - `"reviewer"` runs the same rule, then has a second agent review the work
   before the Goal is recorded complete. The reviewer has its own context: it
   sees the Goal, the agent's reason and its latest steps, reads the changes,
@@ -66,7 +67,8 @@ that claim checked as well, set `goal.completionVerifier` in your
   working. When it finds the Goal cannot be met at all, for example because a
   needed key or service is missing, the Goal stops as blocked. When the review
   itself cannot run (the model service fails three times, or it takes longer
-  than 15 minutes), the Goal is paused, not blocked: resume it to try again.
+  than 15 minutes), the Goal also stops as blocked, with that reason, but this
+  does not count as a rejected claim: resume it to try again.
   A review can take a few minutes, and its tokens count toward the Goal's
   token budget.
 

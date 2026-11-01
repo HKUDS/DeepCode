@@ -92,15 +92,6 @@ class GoalRuntimeHandler(Protocol):
         """Charge the tokens a completion review spent to the Goal."""
         ...
 
-    def pause_for_verification(
-        self,
-        context: GoalRuntimeContext,
-        *,
-        reason: str,
-    ) -> dict[str, Any]:
-        """Pause the Goal because its completion could not be verified."""
-        ...
-
     def completion_request(
         self,
         context: GoalRuntimeContext,
@@ -127,8 +118,8 @@ class GoalRuntimeRouter:
     all, or at once when the verifier finds the Goal impossible, the router
     moves the goal to ``blocked`` itself, so a model that keeps re-claiming
     completion cannot burn Turns forever. A verifier that cannot reach a
-    verdict (:class:`VerificationUnavailable`) pauses the Goal instead: that
-    is no rejection of the work.
+    verdict (:class:`VerificationUnavailable`) also stops the Goal as blocked,
+    with that reason, but counts no rejection: the work may well be fine.
     """
 
     def __init__(self) -> None:
@@ -226,7 +217,9 @@ class GoalRuntimeRouter:
                 raise
             except VerificationUnavailable as exc:
                 self._charge(handler, context, exc.tokens)
-                return self._pause_unverified(handler, context, str(exc))
+                return self._stop_unverified(
+                    handler, context, str(exc), judged_objective
+                )
             except Exception as exc:  # noqa: BLE001 - fail closed, report to the model
                 verdict = GoalVerdict(
                     confirmed=False,
@@ -287,30 +280,64 @@ class GoalRuntimeRouter:
         except Exception:  # noqa: BLE001 - accounting must not change the outcome
             logger.exception("completion review tokens were not charged")
 
-    def _pause_unverified(
+    def _goal_still_open(
+        self,
+        handler: GoalRuntimeHandler,
+        context: GoalRuntimeContext,
+    ) -> bool:
+        try:
+            return bool(handler.read_goal(context).get("canUpdate", True))
+        except Exception:  # noqa: BLE001 - the answer itself must still arrive
+            logger.exception("Goal state could not be read after a verdict")
+            return True
+
+    def _stop_unverified(
         self,
         handler: GoalRuntimeHandler,
         context: GoalRuntimeContext,
         problem: str,
+        judged_objective: str | None,
     ) -> dict[str, Any]:
-        """Pause the Goal when its claim could not be verified at all."""
+        """Stop the Goal when its claim could not be verified at all.
 
+        Blocked with the reason, so the user sees why and can resume it; no
+        rejection is counted against the agent.
+        """
+
+        if not self._goal_still_open(handler, context):
+            # The review used up the token budget, or the Goal was paused or
+            # replaced meanwhile: nothing is left to stop.
+            return {
+                "goalId": context.goal_id,
+                "updated": False,
+                "verdict": {
+                    "confirmed": False,
+                    "justification": (
+                        f"The completion claim could not be verified ({problem}). "
+                        "This Goal is no longer active."
+                    ),
+                },
+            }
         reason = (
-            f"Paused: the completion claim could not be verified ({problem}). "
+            f"The completion claim could not be verified ({problem}). "
             "Resume the Goal to try again."
         )[:_AUTO_BLOCK_REASON_MAX_CHARS]
-        verdict = {"confirmed": False, "justification": reason}
-        try:
-            result = handler.pause_for_verification(context, reason=reason)
-        except Exception:  # noqa: BLE001 - the answer itself must still arrive
-            logger.exception("Goal could not be paused after a failed review")
-            return {"goalId": context.goal_id, "updated": False, "verdict": verdict}
+        result = handler.update_goal(
+            context,
+            status="blocked",
+            reason=reason,
+            expected_objective=judged_objective,
+        )
         with self._lock:
             if self._context != context:
                 raise GoalRuntimeError("Goal Turn changed while recording the decision")
-            # Paused: no later Goal call in this Turn could be recorded.
             self._terminal_requested = True
-        return {**result, "updated": False, "paused": True, "verdict": verdict}
+        return {
+            **result,
+            "updated": True,
+            "unverified": True,
+            "verdict": {"confirmed": False, "justification": reason},
+        }
 
     def _reject_completion(
         self,
@@ -326,13 +353,17 @@ class GoalRuntimeRouter:
             if self._context != context:
                 raise GoalRuntimeError("Goal Turn changed while recording the decision")
             counted = self._rejections.setdefault(context.goal_id, _Rejections())
-            # New changes since the last rejection: the agent is getting on.
+            # A file change the last rejection had not seen: the agent is
+            # getting on. No change in the claim's Turn is no progress.
             progressed = (
-                counted.marker is not None and counted.marker != progress_marker
+                counted.total > 0
+                and bool(progress_marker)
+                and progress_marker != counted.marker
             )
             counted.stalled = 1 if progressed else counted.stalled + 1
             counted.total += 1
-            counted.marker = progress_marker
+            if progress_marker:
+                counted.marker = progress_marker
             count = counted.stalled
             total = counted.total
             max_rejections = self._max_rejections
@@ -353,12 +384,7 @@ class GoalRuntimeRouter:
             "maxRejections": max_rejections,
             "totalRejections": total,
         }
-        try:
-            still_open = bool(handler.read_goal(context).get("canUpdate", True))
-        except Exception:  # noqa: BLE001 - the rejection itself must still arrive
-            logger.exception("Goal state could not be read after a rejection")
-            still_open = True
-        if not still_open:
+        if not self._goal_still_open(handler, context):
             # The review used up the token budget, or the Goal was paused or
             # replaced: no later claim in this Turn can be recorded, and
             # nothing is left to block.

@@ -73,8 +73,6 @@ _EVIDENCE_KINDS = frozenset(
 )
 # A finished file change: the agent got on with the work.
 _CHANGE_KINDS = frozenset({ItemKind.FILE_CHANGE, ItemKind.DIFF})
-# How far back a claim looks for the Goal's latest file change.
-_PROGRESS_LOOKBACK_TURNS = 50
 # A recorded result. Anything else is a call still in flight.
 _SETTLED_STATUSES = frozenset(
     {ItemStatus.COMPLETED, ItemStatus.FAILED, ItemStatus.DECLINED}
@@ -101,15 +99,6 @@ def _goal_work(items: Iterable[Item]) -> list[Item]:
         for item in sorted(items, key=lambda candidate: candidate.ordinal)
         if item.kind in _EVIDENCE_KINDS and not _is_goal_bookkeeping(item)
     ]
-
-
-def _exit_codes(item: Item) -> tuple[int, ...]:
-    codes = item.payload.get("exitCodes")
-    if not isinstance(codes, list):
-        return ()
-    return tuple(
-        code for code in codes if isinstance(code, int) and not isinstance(code, bool)
-    )
 
 
 def _evidence_summary(item: Item) -> str:
@@ -789,7 +778,6 @@ class GoalExtension(GoalRuntimeHandler):
                 status=item.status.value,
                 summary=_evidence_summary(item),
                 name=str(item.payload.get("name") or ""),
-                exit_codes=_exit_codes(item),
             )
 
         items = _goal_work(snapshot.items)
@@ -800,79 +788,24 @@ class GoalExtension(GoalRuntimeHandler):
             reason=reason or "",
             evidence=tuple(settled[-GOAL_OUTCOME_EVIDENCE_MAX_ITEMS:]),
             pending=tuple(pending[-GOAL_OUTCOME_EVIDENCE_MAX_ITEMS:]),
-            progress_marker=self._progress_marker(context, snapshot.items),
+            progress_marker=self._progress_marker(snapshot.items),
         )
 
-    def _progress_marker(
-        self,
-        context: GoalRuntimeContext,
-        current_items: Iterable[Item],
-    ) -> str:
-        """The latest file change made for this Goal, as an item id.
+    @staticmethod
+    def _progress_marker(items: Iterable[Item]) -> str:
+        """The latest file change in the claim's Turn, as an item id ("" for none).
 
-        It moves whenever the agent changes files with its editing tools, so
-        two rejected claims with the same marker made no progress in between.
-        Changes made through shell commands do not move it.
+        The Goal runtime compares it with the marker of the previous rejected
+        claim: a new id means the agent changed files in between. Changes
+        made through shell commands do not count.
         """
 
-        def latest_change(items: Iterable[Item]) -> str:
-            changes = [
-                item
-                for item in items
-                if item.kind in _CHANGE_KINDS and item.status is ItemStatus.COMPLETED
-            ]
-            return max(changes, key=lambda item: item.ordinal).id if changes else ""
-
-        marker = latest_change(current_items)
-        if marker:
-            return marker
-        try:
-            turns = self.turns.list_for_goal(context.thread_id, context.goal_id)
-            for turn in reversed(turns[-_PROGRESS_LOOKBACK_TURNS:]):
-                if turn.id == context.turn_id:
-                    continue
-                marker = latest_change(self.turns.read(turn.id).items)
-                if marker:
-                    return marker
-        except TurnNotFoundError:
-            pass
-        return ""
-
-    def pause_for_verification(
-        self,
-        context: GoalRuntimeContext,
-        *,
-        reason: str,
-    ) -> dict[str, Any]:
-        """Pause an active Goal whose completion claim could not be verified."""
-
-        with self._lock(context.thread_id):
-            try:
-                updated = self.store.update(
-                    context.thread_id,
-                    expected_goal_id=context.goal_id,
-                    transform=lambda current: current.user_transition(
-                        ThreadGoalStatus.PAUSED
-                    ),
-                    reason=self._reason(reason, fallback="Completion not verified."),
-                    # No turn id: a runtime entry with one settles that Turn.
-                    source="runtime",
-                )
-            except ThreadGoalConflictError as exc:
-                raise ConflictError(str(exc)) from exc
-            except ValueError as exc:
-                raise ConflictError(str(exc)) from exc
-            self._notify(context.thread_id, updated)
-            self._emit(
-                context.thread_id,
-                "goal.paused",
-                {
-                    "goalId": updated.id,
-                    "status": updated.status.value,
-                    "reason": reason,
-                },
-            )
-            return {"goal": thread_goal_view(updated), "updated": True}
+        changes = [
+            item
+            for item in items
+            if item.kind in _CHANGE_KINDS and item.status is ItemStatus.COMPLETED
+        ]
+        return max(changes, key=lambda item: item.ordinal).id if changes else ""
 
     def recover_incomplete(self) -> int:
         """Replay committed Goal Turns whose ledger settlement may be missing."""

@@ -314,6 +314,29 @@ def _legacy_execution_profile(
     )
 
 
+def _reviewer_execution_profile(profile: ExecutionProfile) -> ExecutionProfile:
+    """The worker's model, but thinking: a review is careful comparison.
+
+    When the user turned reasoning off for speed, the reviewer still uses the
+    model's own default (thinking where the model has it); any explicit level
+    is kept.
+    """
+    from dataclasses import replace
+
+    from core.providers.reasoning import infer_reasoning_capabilities
+
+    if profile.reasoning_effort != "none":
+        return profile
+    if (
+        infer_reasoning_capabilities(
+            profile.model_id, provider_name=profile.provider_name
+        )
+        is None
+    ):
+        return profile
+    return replace(profile, reasoning_effort=None)
+
+
 def _completion_verifier(
     mode: str,
     *,
@@ -342,7 +365,7 @@ def _completion_verifier(
             workspace=workspace,
             build_session=build_agent_session,
             session_kwargs={
-                "execution_profile": execution_profile,
+                "execution_profile": _reviewer_execution_profile(execution_profile),
                 "execution_security_profile": reviewer_security_profile(
                     security_profile
                 ),

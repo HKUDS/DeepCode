@@ -344,7 +344,9 @@ def test_impossible_blocks_the_goal_at_once(monkeypatch, tmp_path) -> None:
     )
 
 
-def test_a_reviewer_without_a_verdict_pauses_the_goal(monkeypatch, tmp_path) -> None:
+def test_a_reviewer_without_a_verdict_blocks_the_goal_unverified(
+    monkeypatch, tmp_path
+) -> None:
     from core.harness.agents import goal_reviewer
 
     monkeypatch.setattr(goal_reviewer, "REVIEW_RETRY_DELAYS_SECONDS", (0.0, 0.0))
@@ -364,11 +366,12 @@ def test_a_reviewer_without_a_verdict_pauses_the_goal(monkeypatch, tmp_path) -> 
     )
 
     (result,) = provider.goal_results()
-    assert result["updated"] is False and result["paused"] is True
+    assert result["unverified"] is True
     assert "gave no verdict (tried 3 times)" in result["verdict"]["justification"]
     assert "rejections" not in result  # not counted against the agent
     assert len(_reviewer_requests(provider)) == 3
-    assert goal.status.value == "paused"
+    assert goal.status.value == "blocked"
+    assert outcome.reason.startswith("The completion claim could not be verified")
 
 
 def test_the_rule_check_rejects_before_any_review(monkeypatch, tmp_path) -> None:
@@ -456,26 +459,6 @@ def test_the_reviews_tokens_count_toward_the_goal(monkeypatch, tmp_path) -> None
     assert "turnId" not in charged[0] or charged[0]["turnId"] is None
     assert goal.tokens_used >= reviewer_calls * 1000
     assert goal.status.value == "complete"
-
-
-def test_a_check_failing_behind_a_pipe_is_caught_end_to_end(
-    monkeypatch, tmp_path
-) -> None:
-    # The red check, piped: its exit code is tail's 0.
-    piped = f"{CHECK} 2>&1 | tail -5"
-    goal, _, provider = _run(
-        monkeypatch,
-        tmp_path,
-        [("bash", {"command": piped}), COMPLETE, "Stopping here."],
-    )
-
-    (result,) = provider.goal_results()
-    assert result["updated"] is False
-    assert (
-        "a command before the last one in its pipeline failed"
-        in (result["verdict"]["justification"])
-    )
-    assert goal.status.value != "complete"
 
 
 def test_a_file_change_between_rejections_restarts_the_count(

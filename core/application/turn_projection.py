@@ -8,7 +8,7 @@ import sqlite3
 from collections.abc import Callable
 from dataclasses import replace
 from time import monotonic
-from typing import Any, TypeVar
+from typing import TypeVar
 
 from core.application.event_service import EventBroker
 from core.application.live_items import TEXT_CHANNEL, LiveItems
@@ -247,16 +247,13 @@ class TurnEventProjector:
                     status = ItemStatus.FAILED
                 else:
                     status = ItemStatus.COMPLETED
-                payload_update: dict[str, Any] = {
-                    "isError": message.is_error,
-                    "resultPreview": message.result_preview,
-                }
-                if message.exit_codes:
-                    payload_update["exitCodes"] = list(message.exit_codes)
                 self._update_item(
                     item_id,
                     status=status,
-                    payload_update=payload_update,
+                    payload_update={
+                        "isError": message.is_error,
+                        "resultPreview": message.result_preview,
+                    },
                 )
         elif isinstance(message, ErrorEvent):
             if message.warning:

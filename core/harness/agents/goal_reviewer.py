@@ -192,11 +192,7 @@ def _evidence_lines(items: tuple[GoalEvidenceItem, ...]) -> str:
     lines = []
     for item in items:
         label = item.name or item.kind.replace("_", " ")
-        status = item.status
-        if len(item.exit_codes) > 1:
-            codes = " ".join(str(code) for code in item.exit_codes)
-            status += f", pipeline exit codes {codes}"
-        lines.append(f"- [{status}] {label}: {item.summary}")
+        lines.append(f"- [{item.status}] {label}: {item.summary}")
     return "\n".join(lines) or "- (none)"
 
 
