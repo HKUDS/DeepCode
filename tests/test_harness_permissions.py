@@ -275,6 +275,64 @@ def test_denylist_ignores_case():
     assert _decide(engine, "read", file_path="/home/u/proj/Server.PEM") is DENY
 
 
+# ---- file: URL arguments (2026-10-30 L3 path-boundary review) ---------------
+
+
+def test_file_url_under_non_path_key_is_denied():
+    # A file: URL names a filesystem path no matter which key carries it —
+    # "url" is not in _PATH_KEY, and the value resolves as a credential path.
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/home/u/proj")
+    assert _decide(engine, "web_fetch", url="file:///home/u/.ssh/id_rsa") is DENY
+
+
+def test_file_url_percent_encoding_is_decoded_before_probe():
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/home/u/proj")
+    assert _decide(engine, "web_fetch", url="file:///home/u/.ssh/%69d_rsa") is DENY
+
+
+def test_file_url_localhost_and_unc_forms_are_denied():
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/home/u/proj")
+    assert (
+        _decide(engine, "read", url="file://localhost/home/u/.aws/credentials") is DENY
+    )
+    assert _decide(engine, "read", url="file://fileserver/share/.ssh/id_rsa") is DENY
+
+
+def test_file_url_windows_drive_form_is_denied():
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="C:\\proj")
+    assert _decide(engine, "read", url="file:///C:/Users/u/.ssh/id_rsa") is DENY
+
+
+def test_file_url_is_denied_in_nested_arguments():
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/home/u/proj")
+    decision, _reason = engine.evaluate(
+        "mcp_x_fetch",
+        {"options": {"href": "file:///home/u/.gnupg/something.gpg"}},
+    )
+    assert decision is DENY
+
+
+def test_remote_urls_are_not_treated_as_paths():
+    # https URLs never denote a local path; key-name matching must not start
+    # flagging them just because a file: URL now is.
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/home/u/proj")
+    assert _decide(engine, "web_fetch", url="https://example.com/.env") is ALLOW
+
+
+def test_text_mentioning_a_file_url_is_not_a_path():
+    # Only a value that *is* a file: URL counts; prose that mentions one does not.
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/home/u/proj")
+    assert (
+        _decide(
+            engine,
+            "write",
+            file_path="notes.md",
+            content="see file:///home/u/.ssh/id_rsa for details",
+        )
+        is ALLOW
+    )
+
+
 # ---- modes -----------------------------------------------------------------
 
 
