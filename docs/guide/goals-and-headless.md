@@ -43,7 +43,21 @@ without reporting complete or blocked. It then stops as blocked, so you can
 check its progress, and `/goal resume` lets it continue. Sending a message,
 editing, resuming, or continuing the Goal starts the count again. A Goal with
 a token budget is limited by its budget instead. The budget also holds inside a
-Turn: once it is used up, the Turn stops before its next model request.
+Turn: once it is used up, the agent gets one more answer, without tools, to say
+what it finished and what is left, and the Turn ends there.
+
+With or without a budget, a Goal also stops as blocked when no step succeeded
+in three automatic continuations in a row: each of those Turns did no work at
+all, or every step it took failed. The agent itself can report a
+Goal blocked only from the Goal's third Turn on, unless you declined an
+approval it asked for in that Turn; before that it is told to try another
+approach.
+
+If DeepCode restarts while a Goal is active, the Goal is paused rather than
+continued, so it does not spend tokens while nobody is watching. Resume it to
+go on, for example with `/goal resume` or `deepcode loop --resume SESSION_ID`.
+A Goal that an Automation runs, or one with a message you queued before the
+restart, continues as before.
 
 Any Turn, with or without a Goal, stops when the agent's tool calls keep
 bringing nothing new: 12 results in a row it had already seen, or 40 calls in a

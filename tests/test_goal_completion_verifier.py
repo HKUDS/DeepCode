@@ -30,6 +30,14 @@ class FakeGoalHandler:
         self.objective = objective
         self.events: list[str] = []
         self.charged: list[int] = []
+        self.turns = 3
+        self.declined = False
+
+    def goal_turn_count(self, context: GoalRuntimeContext) -> int:
+        return self.turns
+
+    def user_declined_in_turn(self, context: GoalRuntimeContext) -> bool:
+        return self.declined
 
     def read_goal(self, context: GoalRuntimeContext):
         return {"goalId": context.goal_id, "objective": self.objective}
@@ -227,6 +235,59 @@ async def test_raising_verifier_fails_closed_and_reports_to_model() -> None:
     assert result["updated"] is False
     assert "verifier backend unavailable" in result["verdict"]["justification"]
     assert handler.requests == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("turns", [1, 2])
+async def test_blocked_before_the_third_turn_is_not_recorded(turns: int) -> None:
+    runtime = GoalRuntimeRouter()
+    handler = FakeGoalHandler()
+    handler.turns = turns
+    runtime.configure(handler)
+    runtime.activate(_context())
+
+    result = await runtime.request(status="blocked", reason="Upstream API is down.")
+
+    assert result["updated"] is False
+    assert f"Turn {turns} of the Goal" in result["note"]
+    assert handler.requests == []
+    # Not a terminal request: the model keeps its tools and goes on.
+    assert runtime.visible_tool_names(("bash", "update_goal")) == (
+        "bash",
+        "update_goal",
+    )
+
+
+@pytest.mark.asyncio
+async def test_blocked_is_recorded_at_once_when_the_user_declined() -> None:
+    """Asking again for an approval the user just declined would be worse."""
+
+    runtime = GoalRuntimeRouter()
+    handler = FakeGoalHandler()
+    handler.turns = 1
+    handler.declined = True
+    runtime.configure(handler)
+    runtime.activate(_context())
+
+    result = await runtime.request(status="blocked", reason="approval denied")
+
+    assert result["status"] == "blocked"
+
+
+@pytest.mark.asyncio
+async def test_blocked_is_recorded_when_the_turns_cannot_be_counted() -> None:
+    class Uncountable(FakeGoalHandler):
+        def goal_turn_count(self, context):
+            raise RuntimeError("store unavailable")
+
+    runtime = GoalRuntimeRouter()
+    handler = Uncountable()
+    runtime.configure(handler)
+    runtime.activate(_context())
+
+    result = await runtime.request(status="blocked", reason="Upstream API is down.")
+
+    assert result["status"] == "blocked"
 
 
 @pytest.mark.asyncio

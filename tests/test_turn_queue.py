@@ -16,6 +16,7 @@ from core.domain import (
     TurnStatus,
 )
 from core.domain.common import utc_now
+from core.domain.message_provenance import ClientSurface
 from core.events import AgentMessage, Event, TaskComplete, TurnStarted
 from core.persistence import Database
 from core.persistence.execution_repository import ItemRepository, TurnRepository
@@ -315,20 +316,28 @@ def test_crash_recovery_does_not_replay_unknown_goal_work(tmp_path) -> None:
         current_goal = recovered.goals.read(thread.id)
         assert current_goal is not None
         assert current_goal.id == goal.id
-        assert current_goal.status.value == "active"
+        # Paused after the restart: nothing replays, nothing runs on its own.
+        assert current_goal.status.value == "paused"
         assert current_goal.tokens_used == 0
 
-        explicit = recovered.turns.start(
+        # The user resumes it; only then does the Goal run again.
+        recovered.goals.resume(
             thread.id,
-            prompt="continue from the recovered durable evidence",
+            expected_goal_id=goal.id,
+            client_surface=ClientSurface.DESKTOP,
         )
-        assert explicit.turn.goal_id == goal.id
+        explicit = recovered.turns.active_for_thread(thread.id)
+        assert explicit is not None
+        assert explicit.goal_id == goal.id
         assert factory.first_started.wait(timeout=2)
-        assert factory.prompts == ["continue from the recovered durable evidence"]
+        assert len(factory.prompts) == 1
+        assert factory.prompts[0].startswith(
+            "Continue working toward the active Thread Goal."
+        )
 
         accepted, interrupted = recovered.turns.interrupt(
             thread.id,
-            explicit.turn.id,
+            explicit.id,
         )
         assert accepted is True
         assert interrupted.status is TurnStatus.INTERRUPTED

@@ -593,10 +593,47 @@ def test_runner_stops_when_the_token_allowance_is_spent() -> None:
         )
     )
 
-    # 100 tokens a call: 300 >= 250 after the third.
+    # 100 tokens a call: 300 >= 250 after the third. A fourth request wraps
+    # up; this model only ever calls tools, so the fixed note stands in.
     assert result.stop_reason == "token_budget"
-    assert provider.calls == 3
+    assert provider.calls == 4
     assert "token budget" in result.final_content
+
+
+class _WrapUpProvider(_StubbornProvider):
+    """Calls tools while it may; answers in words when it may not."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.wrap_up_request: dict[str, Any] | None = None
+
+    async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
+        if not kwargs.get("tools"):
+            self.calls += 1
+            self.wrap_up_request = kwargs
+            return LLMResponse(
+                content="Fixed the parser; the CLI flag is still to do.",
+                finish_reason="stop",
+            )
+        return await super().chat_with_retry(**kwargs)
+
+
+def test_a_spent_budget_gets_one_answer_without_tools() -> None:
+    provider = _WrapUpProvider()
+    result = asyncio.run(
+        AgentRunner(provider).run(
+            _spec(provider, max_iterations=None, token_allowance=lambda: 250)
+        )
+    )
+
+    assert result.stop_reason == "token_budget"
+    assert result.final_content == "Fixed the parser; the CLI flag is still to do."
+    assert provider.wrap_up_request is not None
+    asked = provider.wrap_up_request["messages"][-1]
+    assert asked["role"] == "user"
+    assert "budget is used up" in asked["content"]
+    # The wrap-up is spent too: the run's usage counts it.
+    assert provider.calls == 4
 
 
 def test_runner_ignores_an_allowance_it_cannot_read() -> None:
@@ -630,3 +667,16 @@ def test_waiting_tools_wait_only_while_sub_agents_run() -> None:
         assert tool_class(_Control(running=1)).waits is True
         # Nothing to wait for: a repeated answer is a loop like any other.
         assert tool_class(_Control(running=0)).waits is False
+
+
+def test_a_budget_spent_before_the_run_gets_no_wrap_up() -> None:
+    provider = _WrapUpProvider()
+    result = asyncio.run(
+        AgentRunner(provider).run(
+            _spec(provider, max_iterations=None, token_allowance=lambda: 0)
+        )
+    )
+
+    assert result.stop_reason == "token_budget"
+    assert provider.calls == 0
+    assert "token budget" in result.final_content

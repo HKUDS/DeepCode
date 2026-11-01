@@ -24,6 +24,6 @@ otherwise keep working.
 
 Call get_goal whenever you need the latest objective or status. Call
 update_goal(status="blocked") only when the same external blocker has stopped
-all progress across several turns and no safe action remains; hard, slow or
+all progress across at least three turns and no safe action remains; hard, slow or
 uncertain work is not blocked. The runtime supplies Goal identity and
 concurrency context automatically.

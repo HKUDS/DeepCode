@@ -528,7 +528,7 @@ def test_a_token_budget_stops_the_goal_inside_one_turn(
         monkeypatch, tmp_path, steps, extra_args=("--token-budget", "3500")
     )
 
-    # 1000 tokens a call: 4000 >= 3500 after the fourth.
-    assert provider.calls == 4
+    # 1000 tokens a call: 4000 >= 3500 after the fourth; a fifth wraps up.
+    assert provider.calls == 5
     assert goal.status.value == "budget_limited"
-    assert goal.tokens_used == 4000
+    assert goal.tokens_used == 5000

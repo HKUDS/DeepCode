@@ -26,6 +26,12 @@ _AUTO_BLOCK_REASON_MAX_CHARS = 2_000
 # Rejected claims per Goal before it stops even while each one followed new
 # changes: every claim may start a review that costs real tokens.
 MAX_TOTAL_REJECTIONS = 10
+# The model may report a Goal blocked only from this Turn on (dsh's rule; Codex
+# asks for it in its prompt): an obstacle often gives way to another approach
+# on a later Turn. A user who declined an approval in the Turn is the
+# exception: asking them again would be worse. The runtime's own stops are not
+# limited by it.
+MIN_TURNS_BEFORE_BLOCKED = 3
 
 
 @dataclass(slots=True)
@@ -44,8 +50,9 @@ objective with the current workspace and evidence.
 - If every requirement of the Goal is proved by current evidence (the code,
   commands you ran, tests you checked cover it), call
   update_goal(status="complete") with a concise reason naming that evidence.
-- If the same external blocker has stopped all progress across several turns
-  and no safe action remains, call update_goal(status="blocked") and explain it.
+- If the same external blocker has stopped all progress across at least three
+  turns and no safe action remains, call update_goal(status="blocked") and
+  explain it.
 - Otherwise continue concrete work toward the Goal.
 
 Do not mark the Goal complete merely because one intermediate check passed or
@@ -90,6 +97,14 @@ class GoalRuntimeHandler(Protocol):
         tokens: int,
     ) -> None:
         """Charge the tokens a completion review spent to the Goal."""
+        ...
+
+    def goal_turn_count(self, context: GoalRuntimeContext) -> int:
+        """How many Turns have worked on the Goal, this one included."""
+        ...
+
+    def user_declined_in_turn(self, context: GoalRuntimeContext) -> bool:
+        """Whether the user declined an approval this Turn asked for."""
         ...
 
     def completion_request(
@@ -245,6 +260,10 @@ class GoalRuntimeRouter:
                 # and refuse a completion the review just confirmed.
                 self._charge(handler, context, verdict.tokens)
         else:
+            if status == "blocked":
+                early = self._too_early_to_block(handler, context)
+                if early is not None:
+                    return early
             result = handler.update_goal(
                 context,
                 status=status,
@@ -450,6 +469,36 @@ class GoalRuntimeRouter:
             return ()
         return names
 
+    @staticmethod
+    def _too_early_to_block(
+        handler: GoalRuntimeHandler,
+        context: GoalRuntimeContext,
+    ) -> dict[str, Any] | None:
+        """Refuse a blocked report before the Goal's third Turn."""
+
+        try:
+            turns = handler.goal_turn_count(context)
+            if turns >= MIN_TURNS_BEFORE_BLOCKED or handler.user_declined_in_turn(
+                context
+            ):
+                return None
+        except Exception:
+            logger.warning("Could not check an early blocked report", exc_info=True)
+            return None
+        return {
+            "updated": False,
+            "goalId": context.goal_id,
+            "note": (
+                f"Not recorded: this is Turn {turns} of the Goal, and a Goal "
+                f"can be reported blocked only from Turn "
+                f"{MIN_TURNS_BEFORE_BLOCKED} on. Keep working on what you can; "
+                "an obstacle often gives way to another approach. Never work "
+                "around something the user declined. If the obstacle still "
+                "stops you on a later Turn, report blocked then, naming it and "
+                "what you tried."
+            ),
+        }
+
     def remaining_tokens(self) -> int | None:
         """Tokens the active Goal Turn may still spend, or None for no limit.
 
@@ -473,6 +522,9 @@ class GoalRuntimeRouter:
         # tokens, a lowered budget) moves the Goal to budget_limited, and that
         # is exactly when the limit must hold.
         if not isinstance(goal, dict) or goal.get("id") != context.goal_id:
+            return None
+        if goal.get("status") == "complete":
+            # Done: the Turn only has its closing answer left.
             return None
         budget = goal.get("tokenBudget")
         used = goal.get("tokensUsed")

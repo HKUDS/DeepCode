@@ -292,6 +292,18 @@ def test_a_budget_used_up_mid_turn_still_holds() -> None:
     [
         (_goal_view(None, 400), True),  # no budget
         (_goal_view(1000, 400, goal_id="goal_2"), True),  # a different Goal now
+        (  # done: only the closing answer is left
+            {
+                "goal": {
+                    "id": "goal_1",
+                    "status": "complete",
+                    "tokenBudget": 1000,
+                    "tokensUsed": 1200,
+                },
+                "canUpdate": False,
+            },
+            True,
+        ),
         ({"goal": None, "canUpdate": False}, True),
         (RuntimeError("store unavailable"), True),
         (_goal_view(1000, 400), False),  # not a Goal Turn

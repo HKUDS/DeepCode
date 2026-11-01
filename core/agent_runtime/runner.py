@@ -98,6 +98,13 @@ _TOKEN_BUDGET_MESSAGE = (
     "I stopped because the Goal's token budget is used up. Raise the budget "
     "to let the work continue."
 )
+# Codex's rule: a spent budget still gets one answer to wrap up, so the user
+# learns where the work stands. No tools: nothing new is started.
+_TOKEN_BUDGET_WRAP_UP = (
+    "The Goal's token budget is used up, so this Turn ends now and no tools "
+    "are available. Do not start new work. In a few sentences, tell the user "
+    "what you finished, what you verified and how, and what is left to do."
+)
 _MAX_EMPTY_RETRIES = 2
 _MAX_LENGTH_RECOVERIES = 3
 _SNIP_SAFETY_BUFFER = 1024
@@ -649,7 +656,13 @@ class AgentRunner:
 
             if self._token_allowance_spent(spec, usage):
                 stop_reason = "token_budget"
-                final_content = _TOKEN_BUDGET_MESSAGE
+                final_content = await self._wrap_up_after_budget(
+                    spec,
+                    messages,
+                    hook,
+                    record_response,
+                    iteration=iteration,
+                )
                 self._append_final_message(messages, final_content)
                 break
 
@@ -1276,6 +1289,46 @@ class AgentRunner:
             except (TypeError, ValueError):
                 continue
         return result
+
+    async def _wrap_up_after_budget(
+        self,
+        spec: AgentRunSpec,
+        messages: list[dict[str, Any]],
+        hook: AgentHook,
+        record_response: Callable[..., Awaitable[dict[str, int]]],
+        *,
+        iteration: int,
+    ) -> str:
+        """One answer without tools after the budget ran out, or a fixed note."""
+
+        if iteration == 0:
+            # Spent before this run asked anything: nothing to wrap up.
+            return _TOKEN_BUDGET_MESSAGE
+        self._enter_noted(
+            spec,
+            messages,
+            {"role": "user", "content": _TOKEN_BUDGET_WRAP_UP},
+            "token_budget",
+        )
+        context = AgentHookContext(iteration=iteration, messages=messages)
+        try:
+            view = self._request_view(spec, messages, iteration=iteration)
+            kwargs = self._build_request_kwargs(spec, view, tools=None)
+            response = await self._await_provider_response(
+                self.provider.chat_with_retry(**kwargs),
+                timeout_s=resolve_request_timeout_s(spec.llm_timeout_s),
+                streaming=False,
+            )
+            await record_response(response, context)
+            text = hook.finalize_content(context, response.content)
+        except Exception:
+            logger.exception(
+                "Budget wrap-up failed for {}", spec.session_key or "default"
+            )
+            return _TOKEN_BUDGET_MESSAGE
+        if response.finish_reason == "error" or is_blank_text(text):
+            return _TOKEN_BUDGET_MESSAGE
+        return str(text)
 
     @staticmethod
     def _token_allowance_spent(spec: AgentRunSpec, usage: dict[str, int]) -> bool:

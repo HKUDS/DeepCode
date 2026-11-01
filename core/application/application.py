@@ -214,6 +214,7 @@ class DeepCodeApplication:
         self.automations.set_scheduler(self.automation_scheduler)
         self.turns.add_admission_guard(self.automations.ensure_turn_admitted)
         self.goals.add_continuation_guard(self.automations.ensure_goal_continuable)
+        self.goals.add_unattended_owner(self.automations.runs_unattended)
         self.turns.add_settled_listener(self.automations.on_turn_settled)
 
     def legacy_importer(self, store: SessionStore) -> LegacySessionImporter:
