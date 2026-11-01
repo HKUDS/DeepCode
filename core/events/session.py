@@ -426,6 +426,7 @@ class AgentSession:
         execution_profile: Any | None = None,
         tool_filter: Any | None = None,
         closure_callback: Any | None = None,
+        token_allowance: Any | None = None,
         mcp_runtime: McpSessionRuntime | None = None,
         provider_cleanup: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
@@ -496,6 +497,10 @@ class AgentSession:
         # this to ask the model for one final complete/blocked/continue decision;
         # ordinary Turns leave it unset.
         self._closure_callback = closure_callback
+        # Optional application-owned token limit, asked before every model
+        # request (see ``AgentRunSpec.token_allowance``). Goal Turns use it so
+        # a Goal's budget holds inside a Turn.
+        self._token_allowance = token_allowance
         # P1-5: compaction summaries → memory vault (compacted sessions stay
         # retrievable). Built once here so auto and manual compaction share it.
         self._compaction_summary_sink = self._make_compaction_summary_sink()
@@ -1104,6 +1109,7 @@ class AgentSession:
                 else None
             ),
             compaction_summary_sink=self._compaction_summary_sink,
+            token_allowance=self._token_allowance,
         )
 
         try:

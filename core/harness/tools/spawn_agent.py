@@ -208,6 +208,12 @@ class WaitAgentTool(Tool):
         )
 
     @property
+    def waits(self) -> bool:
+        # Only while there is work to wait for: with nothing running, a
+        # repeated answer is a loop like any other.
+        return self._control.active_count() > 0
+
+    @property
     def read_only(self) -> bool:
         # Just parks on the mailbox — no workspace / security side effects.
         return True
@@ -239,6 +245,12 @@ class ListAgentsTool(Tool):
             "List the sub-agents you have spawned this session, with each one's "
             "status (running | done | failed) and its task."
         )
+
+    @property
+    def waits(self) -> bool:
+        # Only while there is work to wait for: with nothing running, a
+        # repeated answer is a loop like any other.
+        return self._control.active_count() > 0
 
     @property
     def read_only(self) -> bool:

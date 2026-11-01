@@ -687,6 +687,9 @@ def build_agent_session(
         closure_callback=(
             goal_runtime.closure_prompt if goal_runtime is not None else None
         ),
+        token_allowance=(
+            goal_runtime.remaining_tokens if goal_runtime is not None else None
+        ),
         mcp_runtime=mcp_runtime,
         provider_cleanup=provider_cleanup,
     )

@@ -13,7 +13,10 @@ The contract under test:
   Goal tools return dicts) and counting must not raise on it;
 - inside the runner the reminder lands as a user message after the tool results,
   calls ``repeat_guard`` already flagged are left to it (one reminder per call),
-  and ``evidence_ledger_threshold=None`` disables the layer entirely.
+  and ``evidence_ledger_threshold=None`` disables the layer entirely;
+- reminders are not enough on their own, so a run whose calls keep bringing
+  nothing new is warned once and then stopped (``no_progress``): results it had
+  already seen, or calls it had already made. New input starts the count over.
 """
 
 from __future__ import annotations
@@ -31,6 +34,10 @@ if str(ROOT) not in sys.path:
 
 from core.agent_runtime.evidence_ledger import (
     _MAX_TRACKED_CALLS,
+    REPEATED_CALL_STOP,
+    REPEATED_CALL_WARNING,
+    STALE_RESULT_STOP,
+    STALE_RESULT_WARNING,
     EvidenceLedger,
 )
 from core.agent_runtime.repeat_guard import RepeatCallTracker
@@ -367,3 +374,259 @@ def test_runner_evidence_ledger_can_be_disabled() -> None:
         if m.get("role") == "user" and "Reminder:" in str(m.get("content"))
     ]
     assert result.stop_reason == "max_iterations"
+
+
+# --- the hard stop ---------------------------------------------------------
+
+
+def _alternate(ledger: EvidenceLedger, calls: int) -> list[str | None]:
+    """A, B, A, B, ... each with a constant result; the warnings it earned."""
+    warnings = []
+    for n in range(calls):
+        ledger.observe("probe", {"side": n % 2}, "nothing")
+        warnings.append(ledger.take_warning())
+    return warnings
+
+
+def test_seen_results_warn_once_then_stop_the_run() -> None:
+    ledger = EvidenceLedger()
+    # The first A and B are new; every later result was seen before.
+    warnings = _alternate(ledger, STALE_RESULT_WARNING + 2)
+    assert [w is not None for w in warnings].count(True) == 1
+    assert warnings[-1] is not None
+    assert "already seen" in warnings[-1]
+    assert ledger.stalled is None
+
+    _alternate(ledger, STALE_RESULT_STOP - STALE_RESULT_WARNING - 1)
+    assert ledger.stalled is None
+    _alternate(ledger, 1)
+    assert ledger.stalled is not None
+    assert f"last {STALE_RESULT_STOP} tool calls" in ledger.stalled
+
+
+def test_a_new_result_or_a_new_call_starts_the_count_over() -> None:
+    ledger = EvidenceLedger()
+    _alternate(ledger, STALE_RESULT_STOP + 1)
+    ledger.observe("probe", {"side": 0}, "something new")
+    assert ledger.stalled is None
+
+    _alternate(ledger, STALE_RESULT_STOP + 1)
+    ledger.observe("probe", {"side": "fresh"}, "nothing")
+    assert ledger.stalled is None
+
+
+def test_repeated_calls_with_noisy_results_stop_later() -> None:
+    """Re-running the same tests, where only the timing differs each time."""
+    ledger = EvidenceLedger()
+    warned = []
+    for n in range(REPEATED_CALL_STOP):
+        call = "pytest" if n % 2 else "cat test_calc.py"
+        result = f"1 failed in 0.{n:02d}s" if n % 2 else "the same test file"
+        ledger.observe("bash", {"command": call}, result)
+        warned.append(ledger.take_warning())
+        assert ledger.stalled is None
+    # The file read repeats evidence but the test run never does, so only the
+    # repeated-call streak grows (both calls were first made at n = 0 and 1).
+    hits = [n for n, w in enumerate(warned) if w is not None]
+    assert hits == [REPEATED_CALL_WARNING + 1]
+    assert "already made" in warned[hits[0]]
+    assert ledger.stalled is None
+    ledger.observe("bash", {"command": "pytest"}, "1 failed in 9.99s")
+    ledger.observe("bash", {"command": "cat test_calc.py"}, "the same test file")
+    assert ledger.stalled is not None
+    assert "already made" in ledger.stalled
+
+
+def test_waiting_on_other_work_is_not_a_stall() -> None:
+    """``wait_agent`` returns the same "still running" text by design."""
+    ledger = EvidenceLedger()
+    for _ in range(STALE_RESULT_STOP * 3):
+        ledger.observe("wait_agent", {}, "still running", waits=True)
+    assert ledger.stalled is None
+    assert ledger.take_warning() is None
+    # Waiting neither hides nor breaks a real loop around it.
+    for n in range(STALE_RESULT_STOP + 2):
+        ledger.observe("probe", {"side": n % 2}, "nothing")
+        ledger.observe("wait_agent", {}, "still running", waits=True)
+        ledger.take_warning()
+    assert ledger.stalled is not None
+
+
+def test_after_a_summary_reading_again_is_not_a_stall() -> None:
+    ledger = EvidenceLedger()
+    for n in range(STALE_RESULT_WARNING + 2):
+        ledger.observe("read", {"file": n % 5}, f"contents {n % 5}")
+    ledger.take_warning()
+    streak_before = ledger._stale_results
+    ledger.out_of_view()
+    # Re-reading the five files once more is neither progress nor a stall.
+    for n in range(5):
+        ledger.observe("read", {"file": n}, f"contents {n}")
+    assert ledger._stale_results == streak_before
+    # A second read is back in view, so it counts again.
+    ledger.observe("read", {"file": 0}, "contents 0")
+    assert ledger._stale_results == streak_before + 1
+
+
+def test_frequent_summaries_cannot_hide_a_loop() -> None:
+    """Context full of a loop: a summary every few calls must not reset it."""
+    ledger = EvidenceLedger()
+    calls = 0
+    while ledger.stalled is None and calls < 200:
+        ledger.observe("probe", {"side": calls % 2}, "nothing")
+        ledger.take_warning()
+        calls += 1
+        if calls % 3 == 0:
+            ledger.out_of_view()
+    assert ledger.stalled is not None
+    assert calls < 60
+
+
+def test_the_model_reads_the_warning_before_the_stop() -> None:
+    """A batch of parallel calls can cross the warning and the stop at once."""
+    ledger = EvidenceLedger()
+    _alternate(ledger, 2)
+    for n in range(STALE_RESULT_STOP + 2):  # one batch
+        ledger.observe("probe", {"side": n % 2}, "nothing")
+    assert ledger.take_warning() is not None
+    assert ledger.stalled is None  # not before the model saw the warning
+    ledger.observe("probe", {"side": 0}, "nothing")  # its next step
+    assert ledger.stalled is not None
+
+
+def test_the_stop_can_be_switched_off_and_reset() -> None:
+    quiet = EvidenceLedger(stop=False)
+    assert not any(_alternate(quiet, STALE_RESULT_STOP * 2))
+    assert quiet.stalled is None
+
+    ledger = EvidenceLedger()
+    _alternate(ledger, STALE_RESULT_STOP + 2)
+    assert ledger.stalled is not None
+    ledger.reset_streaks()
+    assert ledger.stalled is None
+    assert ledger.take_warning() is None
+
+
+class _StubbornProvider:
+    """Alternates two calls forever, whatever it is told."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def get_default_model(self) -> str:
+        return "fake-model"
+
+    async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
+        self.calls += 1
+        return LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id=f"call-{self.calls}",
+                    name="probe",
+                    arguments={"pattern": "left" if self.calls % 2 else "right"},
+                )
+            ],
+            finish_reason="tool_calls",
+            usage={"prompt_tokens": 90, "completion_tokens": 10},
+        )
+
+
+def test_runner_stops_a_run_that_ignores_every_reminder() -> None:
+    provider = _StubbornProvider()
+    result = asyncio.run(
+        AgentRunner(provider).run(_spec(provider, max_iterations=None))
+    )
+
+    assert result.stop_reason == "no_progress"
+    # Two new results, then STALE_RESULT_STOP results already seen.
+    assert provider.calls == STALE_RESULT_STOP + 2
+    assert "not making progress" in result.final_content
+    warnings = [
+        m
+        for m in result.messages
+        if m.get("role") == "user" and "Warning:" in str(m.get("content"))
+    ]
+    assert len(warnings) == 1
+
+
+def test_runner_starts_over_when_the_user_steers() -> None:
+    provider = _StubbornProvider()
+    steered = []
+
+    async def steer_once() -> list[dict[str, Any]]:
+        if provider.calls == STALE_RESULT_STOP + 2 and not steered:
+            steered.append(True)
+            return [{"role": "user", "content": "try something else"}]
+        return []
+
+    result = asyncio.run(
+        AgentRunner(provider).run(
+            _spec(provider, max_iterations=None, injection_callback=steer_once)
+        )
+    )
+
+    assert steered
+    assert result.stop_reason == "no_progress"
+    # The steer arrived just as the run was due to stop, so the count started
+    # over and the run went on until the model stalled a second time.
+    assert provider.calls == 2 * STALE_RESULT_STOP + 2
+
+
+def test_runner_no_progress_stop_can_be_disabled() -> None:
+    provider = _StubbornProvider()
+    result = asyncio.run(
+        AgentRunner(provider).run(
+            _spec(provider, no_progress_stop=False, max_iterations=30)
+        )
+    )
+
+    assert result.stop_reason == "max_iterations"
+    assert provider.calls == 30
+
+
+def test_runner_stops_when_the_token_allowance_is_spent() -> None:
+    provider = _StubbornProvider()
+    result = asyncio.run(
+        AgentRunner(provider).run(
+            _spec(provider, max_iterations=None, token_allowance=lambda: 250)
+        )
+    )
+
+    # 100 tokens a call: 300 >= 250 after the third.
+    assert result.stop_reason == "token_budget"
+    assert provider.calls == 3
+    assert "token budget" in result.final_content
+
+
+def test_runner_ignores_an_allowance_it_cannot_read() -> None:
+    provider = _StubbornProvider()
+
+    def broken() -> int:
+        raise RuntimeError("store unavailable")
+
+    result = asyncio.run(
+        AgentRunner(provider).run(
+            _spec(provider, max_iterations=5, token_allowance=broken)
+        )
+    )
+
+    assert result.stop_reason == "max_iterations"
+    assert provider.calls == 5
+
+
+class _Control:
+    def __init__(self, running: int) -> None:
+        self.running = running
+
+    def active_count(self) -> int:
+        return self.running
+
+
+def test_waiting_tools_wait_only_while_sub_agents_run() -> None:
+    from core.harness.tools.spawn_agent import ListAgentsTool, WaitAgentTool
+
+    for tool_class in (WaitAgentTool, ListAgentsTool):
+        assert tool_class(_Control(running=1)).waits is True
+        # Nothing to wait for: a repeated answer is a loop like any other.
+        assert tool_class(_Control(running=0)).waits is False

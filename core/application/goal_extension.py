@@ -1145,8 +1145,9 @@ class GoalExtension(GoalRuntimeHandler):
             if not isinstance(usage, dict):
                 return 0
             total = usage.get("total_tokens")
-            if isinstance(total, int) and not isinstance(total, bool):
-                return max(0, total)
+            # A total of 0 means the provider left it out, not a free Turn.
+            if isinstance(total, int) and not isinstance(total, bool) and total > 0:
+                return total
             return sum(
                 value
                 for key, value in usage.items()

@@ -81,6 +81,7 @@ def _run(
     steps: list[Any],
     *,
     verifier: str = "rule",
+    extra_args: tuple[str, ...] = (),
 ) -> tuple[Any, Any, _ScriptedProvider]:
     from core.sessions import SessionStore, ThreadGoalStore
 
@@ -108,7 +109,9 @@ def _run(
     monkeypatch.setenv("DEEPCODE_SESSIONS_DIR", str(tmp_path / "sessions"))
     monkeypatch.setattr("core.sessions.store._DEFAULT_STORE", None)
 
-    loop_cli.main(["make calc.add correct", "-w", str(workspace), "--trust"])
+    loop_cli.main(
+        ["make calc.add correct", "-w", str(workspace), "--trust", *extra_args]
+    )
 
     sessions = SessionStore(tmp_path / "sessions")
     session_id = sessions.list_sessions()[0].session_id
@@ -485,3 +488,47 @@ def test_a_file_change_between_rejections_restarts_the_count(
     assert [r["rejections"] for r in results] == [1, 1, 2, 3]
     assert results[-1]["autoBlocked"] is True
     assert goal.status.value == "blocked"
+
+
+def test_a_turn_that_keeps_learning_nothing_blocks_the_goal(
+    monkeypatch, tmp_path
+) -> None:
+    """The 2026-11 runaway: two commands alternated for 741 steps in one Turn."""
+    from core.agent_runtime.evidence_ledger import STALE_RESULT_STOP
+
+    loop = [("bash", {"command": CHECK}), ("read", {"file_path": "calc.py"})] * 40
+    goal, outcome, provider = _run(monkeypatch, tmp_path, loop)
+
+    assert provider.calls == STALE_RESULT_STOP + 2
+    assert goal.status.value == "blocked"
+    assert "nothing new" in outcome.reason
+
+
+class _TotallessProvider(_ScriptedProvider):
+    """Reports prompt and completion tokens but a total of 0."""
+
+    async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
+        response = await super().chat_with_retry(**kwargs)
+        response.usage = {
+            "prompt_tokens": 900,
+            "completion_tokens": 100,
+            "total_tokens": 0,
+        }
+        return response
+
+
+@pytest.mark.parametrize("metered", [_MeteredProvider, _TotallessProvider])
+def test_a_token_budget_stops_the_goal_inside_one_turn(
+    monkeypatch, tmp_path, metered
+) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "_ScriptedProvider", metered)
+    # Every call is new, so only the budget can stop this Turn.
+    steps = [("bash", {"command": f"echo {n}"}) for n in range(20)]
+    goal, _, provider = _run(
+        monkeypatch, tmp_path, steps, extra_args=("--token-budget", "3500")
+    )
+
+    # 1000 tokens a call: 4000 >= 3500 after the fourth.
+    assert provider.calls == 4
+    assert goal.status.value == "budget_limited"
+    assert goal.tokens_used == 4000

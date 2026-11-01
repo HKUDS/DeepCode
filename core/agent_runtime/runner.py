@@ -90,6 +90,14 @@ _DEFAULT_MAX_ITERATIONS_MESSAGE = (
     "I reached the maximum number of tool call iterations ({max_iterations}) "
     "without completing the task. You can try breaking the task into smaller steps."
 )
+_NO_PROGRESS_MESSAGE = (
+    "I stopped because {reason} in this turn, so I was not making progress. "
+    "Tell me how you would like to proceed."
+)
+_TOKEN_BUDGET_MESSAGE = (
+    "I stopped because the Goal's token budget is used up. Raise the budget "
+    "to let the work continue."
+)
 _MAX_EMPTY_RETRIES = 2
 _MAX_LENGTH_RECOVERIES = 3
 _SNIP_SAFETY_BUFFER = 1024
@@ -190,6 +198,15 @@ class AgentRunSpec:
     # the tracker already flagged is left to the tracker, so one iteration
     # injects at most one reminder per call. ``None`` disables the ledger.
     evidence_ledger_threshold: int | None = DEFAULT_NO_PROGRESS_THRESHOLD
+    # Hard stop on top of the ledger's reminders: after a warning, end the run
+    # (stop reason ``no_progress``) when its calls keep bringing nothing new.
+    # Needs the ledger; False keeps the reminders only.
+    no_progress_stop: bool = True
+    # Tokens this run may still spend, asked before every model request:
+    # ``() -> int | None``. Goal Turns use it so a budget holds inside a Turn,
+    # not only between Turns. None means no limit; a failing callback is
+    # logged and treated as no limit.
+    token_allowance: Any | None = None
     # Model-visible means logged (the dsh session-log rule): mid-turn messages
     # the runner itself adds to the PERSISTED model history — injected
     # sub-agent results, Goal updates, repeat-call reminders, length-recovery
@@ -540,7 +557,7 @@ class AgentRunner:
             else None
         )
         evidence_ledger = (
-            EvidenceLedger(spec.evidence_ledger_threshold)
+            EvidenceLedger(spec.evidence_ledger_threshold, stop=spec.no_progress_stop)
             if spec.evidence_ledger_threshold is not None
             else None
         )
@@ -560,7 +577,7 @@ class AgentRunner:
 
             nonlocal response_ordinal
             response_ordinal += 1
-            raw_usage = self._usage_dict(response.usage)
+            raw_usage = self._with_total(self._usage_dict(response.usage))
             self._accumulate_usage(usage, raw_usage)
             # The provider just priced this exact history; that number is a
             # better anchor than any estimate of it (§9.1).
@@ -583,6 +600,14 @@ class AgentRunner:
 
         iteration = 0
         sampling_limit = _SamplingLimit(spec.max_iterations)
+
+        def take_new_input() -> None:
+            # Input from outside the run (a user Steer, a sub-agent result)
+            # starts the step limit and the stall streaks over.
+            sampling_limit.reset()
+            if evidence_ledger is not None:
+                evidence_ledger.reset_streaks()
+
         while True:
             if sampling_limit.exhausted:
                 resumed = await self._try_drain_injections(
@@ -594,7 +619,7 @@ class AgentRunner:
                 )
                 if resumed:
                     had_injections = True
-                    sampling_limit.reset()
+                    take_new_input()
                 else:
                     stop_reason = "max_iterations"
                     template = (
@@ -603,6 +628,30 @@ class AgentRunner:
                     final_content = template.format(max_iterations=spec.max_iterations)
                     self._append_final_message(messages, final_content)
                     break
+
+            stall = evidence_ledger.stalled if evidence_ledger is not None else None
+            if stall is not None:
+                resumed = await self._try_drain_injections(
+                    spec,
+                    messages,
+                    None,
+                    phase="at a no-progress stop",
+                    close_if_empty=True,
+                )
+                if resumed:
+                    had_injections = True
+                    take_new_input()
+                else:
+                    stop_reason = "no_progress"
+                    final_content = _NO_PROGRESS_MESSAGE.format(reason=stall)
+                    self._append_final_message(messages, final_content)
+                    break
+
+            if self._token_allowance_spent(spec, usage):
+                stop_reason = "token_budget"
+                final_content = _TOKEN_BUDGET_MESSAGE
+                self._append_final_message(messages, final_content)
+                break
 
             current_iteration = iteration
             iteration += 1
@@ -635,7 +684,7 @@ class AgentRunner:
                     )
                     if resumed:
                         had_injections = True
-                        sampling_limit.reset()
+                        take_new_input()
                         skip_stop_check_once = True
                         continue
                     break
@@ -656,6 +705,9 @@ class AgentRunner:
                 spec,
                 messages,
                 response_observer=record_compaction_response,
+                on_summarized=(
+                    evidence_ledger.out_of_view if evidence_ledger is not None else None
+                ),
             )
             # What the model is about to read is on record before it reads it.
             self._report_history(spec, messages)
@@ -748,24 +800,29 @@ class AgentRunner:
                     if evidence_ledger is not None:
                         # The evidence half: a call that keeps returning the
                         # same result without ever repeating consecutively is
-                        # invisible to the tracker above. Calls it already
-                        # flagged stay with it, so each call contributes at
-                        # most one reminder to this batch. Both halves share
-                        # this one message (and so one note source): stacking
-                        # consecutive user turns would not survive providers
-                        # that require alternating roles.
+                        # invisible to the tracker above. Every call is
+                        # counted, so the stall streaks see all of them, but a
+                        # call the tracker already flagged keeps only its
+                        # reminder: each call contributes at most one reminder
+                        # to this batch. Both halves share this one message
+                        # (and so one note source): stacking consecutive user
+                        # turns would not survive providers that require
+                        # alternating roles.
                         for tc, result_message in zip(
                             response.tool_calls, completed_tool_results
                         ):
-                            if tc.id in flagged:
-                                continue
+                            tool = spec.tools.get(tc.name)
                             reminder = evidence_ledger.observe(
                                 tc.name,
                                 tc.arguments,
                                 result_message.get("content", ""),
+                                waits=getattr(tool, "waits", False) is True,
                             )
-                            if reminder is not None:
+                            if reminder is not None and tc.id not in flagged:
                                 reminders.append(reminder)
+                        warning = evidence_ledger.take_warning()
+                        if warning is not None:
+                            reminders.append(warning)
                     if reminders:
                         self._enter_noted(
                             spec,
@@ -791,7 +848,7 @@ class AgentRunner:
                     )
                     if should_continue:
                         had_injections = True
-                        sampling_limit.reset()
+                        take_new_input()
                         stop_reason = "completed"
                         error = None
                         continue
@@ -817,7 +874,7 @@ class AgentRunner:
                 )
                 if drained:
                     had_injections = True
-                    sampling_limit.reset()
+                    take_new_input()
                 await hook.after_iteration(context)
                 continue
 
@@ -916,7 +973,7 @@ class AgentRunner:
                 await hook.on_stream_end(context, resuming=should_continue)
 
             if should_continue:
-                sampling_limit.reset()
+                take_new_input()
                 await hook.after_iteration(context)
                 continue
 
@@ -954,7 +1011,7 @@ class AgentRunner:
                 )
                 if should_continue:
                     had_injections = True
-                    sampling_limit.reset()
+                    take_new_input()
                     stop_reason = "completed"
                     error = None
                     continue
@@ -977,7 +1034,7 @@ class AgentRunner:
                 )
                 if should_continue:
                     had_injections = True
-                    sampling_limit.reset()
+                    take_new_input()
                     stop_reason = "completed"
                     error = None
                     continue
@@ -1036,7 +1093,7 @@ class AgentRunner:
             )
             if resumed:
                 had_injections = True
-                sampling_limit.reset()
+                take_new_input()
                 continue
             break
 
@@ -1219,6 +1276,38 @@ class AgentRunner:
             except (TypeError, ValueError):
                 continue
         return result
+
+    @staticmethod
+    def _token_allowance_spent(spec: AgentRunSpec, usage: dict[str, int]) -> bool:
+        """Whether the run has used up the tokens its host allows it."""
+        if spec.token_allowance is None:
+            return False
+        try:
+            allowance = spec.token_allowance()
+        except Exception:
+            logger.exception(
+                "token_allowance failed for {}; continuing run",
+                spec.session_key or "default",
+            )
+            return False
+        if allowance is None:
+            return False
+        # Every response carries a total (``_with_total``), and the Goal
+        # charges a Turn this same accumulated total when it settles.
+        return usage.get("total_tokens", 0) >= allowance
+
+    @staticmethod
+    def _with_total(usage: dict[str, int]) -> dict[str, int]:
+        """One response's usage with a total, so budgets count every response.
+
+        Some providers omit ``total_tokens`` or send 0; summing totals across
+        responses would then undercount.
+        """
+        if usage and usage.get("total_tokens", 0) <= 0:
+            usage["total_tokens"] = max(0, usage.get("prompt_tokens", 0)) + max(
+                0, usage.get("completion_tokens", 0)
+            )
+        return usage
 
     @staticmethod
     def _accumulate_usage(target: dict[str, int], addition: dict[str, int]) -> None:
@@ -1853,8 +1942,11 @@ class AgentRunner:
         messages: list[dict[str, Any]],
         *,
         response_observer: Callable[[LLMResponse], Awaitable[None]] | None = None,
+        on_summarized: Callable[[], None] | None = None,
     ) -> list[dict[str, Any]]:
         """Relieve context pressure with the cheapest sufficient measure.
+
+        ``on_summarized`` is called when a summary replaced old turns.
 
         The ladder (dsh's ordering): pressure gate → model-free clear of old
         tool results (microcompact, when armed) → model-free prune of
@@ -1992,6 +2084,8 @@ class AgentRunner:
             _COMPACT_TRIGGER_FRACTION,
         )
         self._notify_compaction_summary(spec, summary, messages, compacted, "auto")
+        if on_summarized is not None:
+            on_summarized()
         return compacted
 
     def _estimate_prompt(

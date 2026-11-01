@@ -450,6 +450,36 @@ class GoalRuntimeRouter:
             return ()
         return names
 
+    def remaining_tokens(self) -> int | None:
+        """Tokens the active Goal Turn may still spend, or None for no limit.
+
+        The Goal adds a Turn's usage only when the Turn settles, so without
+        this a single runaway Turn could spend far past the budget. Review
+        tokens are charged as they are spent, so they count here at once.
+        """
+
+        with self._lock:
+            handler = self._handler
+            context = self._context
+        if handler is None or context is None:
+            return None
+        try:
+            view = handler.read_goal(context)
+        except Exception:
+            logger.warning("Could not read the Goal for its budget", exc_info=True)
+            return None
+        goal = view.get("goal")
+        # By identity, not status: the budget running out mid-Turn (review
+        # tokens, a lowered budget) moves the Goal to budget_limited, and that
+        # is exactly when the limit must hold.
+        if not isinstance(goal, dict) or goal.get("id") != context.goal_id:
+            return None
+        budget = goal.get("tokenBudget")
+        used = goal.get("tokensUsed")
+        if not isinstance(budget, int) or not isinstance(used, int):
+            return None
+        return max(0, budget - used)
+
     def closure_prompt(self, stop_hook_active: bool = False) -> str | None:
         """Request one model-owned Goal decision before a clean Turn exit."""
 

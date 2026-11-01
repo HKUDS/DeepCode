@@ -1146,6 +1146,7 @@ const ZH_CN: Record<string, string> = {
   "turn.failed.empty": "模型返回了空回答。",
   "turn.failed.busy": "会话正被另一个 Turn 占用。",
   "turn.failed.invalidSkill": "选中的技能无法加载。",
+  "turn.failed.noProgress": "智能体已停止：最近的工具调用一直没有带来新信息。",
   // Inspector: artifacts
   "inspector.artifacts.eyebrow": "工作流产出",
   "inspector.artifacts.attempt": "第 {{attempt}} 次尝试",

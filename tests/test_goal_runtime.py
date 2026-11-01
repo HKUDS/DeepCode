@@ -243,3 +243,59 @@ async def test_terminal_request_blocks_later_tools_in_the_same_model_response() 
     assert denied and "not available in this turn" in denied[0]
     assert "Skill policy" not in denied[0]  # the Goal hid it
     assert "Available: none" in denied[0]
+
+
+class _BudgetHandler(FakeGoalHandler):
+    def __init__(self, view: object) -> None:
+        super().__init__()
+        self.view = view
+
+    def read_goal(self, context: GoalRuntimeContext):
+        if isinstance(self.view, Exception):
+            raise self.view
+        return self.view
+
+
+def _budget_router(view: object, *, active: bool = True) -> GoalRuntimeRouter:
+    router = GoalRuntimeRouter()
+    router.configure(_BudgetHandler(view))
+    if active:
+        router.activate(_context())
+    return router
+
+
+def _goal_view(
+    budget: int | None, used: int, *, goal_id: str = "goal_1", open_: bool = True
+) -> dict:
+    return {
+        "goal": {"id": goal_id, "tokenBudget": budget, "tokensUsed": used},
+        "canUpdate": open_,
+    }
+
+
+def test_remaining_tokens_is_what_the_budget_has_left() -> None:
+    assert _budget_router(_goal_view(1000, 400)).remaining_tokens() == 600
+
+
+def test_a_budget_used_up_mid_turn_still_holds() -> None:
+    """Review tokens or a lowered budget can end the budget inside a Turn.
+
+    The Goal is then budget_limited and no longer updatable, which is exactly
+    when the Turn must stop: it must not read as "no limit".
+    """
+    view = _goal_view(1000, 1200, open_=False)
+    assert _budget_router(view).remaining_tokens() == 0
+
+
+@pytest.mark.parametrize(
+    ("view", "active"),
+    [
+        (_goal_view(None, 400), True),  # no budget
+        (_goal_view(1000, 400, goal_id="goal_2"), True),  # a different Goal now
+        ({"goal": None, "canUpdate": False}, True),
+        (RuntimeError("store unavailable"), True),
+        (_goal_view(1000, 400), False),  # not a Goal Turn
+    ],
+)
+def test_remaining_tokens_has_no_limit_otherwise(view: object, active: bool) -> None:
+    assert _budget_router(view, active=active).remaining_tokens() is None

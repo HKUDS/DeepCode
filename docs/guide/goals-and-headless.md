@@ -42,7 +42,14 @@ A Goal without a token budget continues on its own at most 20 times in a row
 without reporting complete or blocked. It then stops as blocked, so you can
 check its progress, and `/goal resume` lets it continue. Sending a message,
 editing, resuming, or continuing the Goal starts the count again. A Goal with
-a token budget is limited by its budget instead.
+a token budget is limited by its budget instead. The budget also holds inside a
+Turn: once it is used up, the Turn stops before its next model request.
+
+Any Turn, with or without a Goal, stops when the agent's tool calls keep
+bringing nothing new: 12 results in a row it had already seen, or 40 calls in a
+row it had already made. The agent is warned first. The Turn ends as failed, so
+a Goal stops as blocked and you can check what went wrong. A message you send
+during the Turn starts the count again.
 
 ## Check completion claims
 

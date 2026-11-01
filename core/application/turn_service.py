@@ -122,6 +122,12 @@ _DURABLE_STATE_POLL_INTERVAL = 0.1
 _FINISH_RETRY_DELAYS_S = (0.5, 2.0, 10.0)
 
 logger = logging.getLogger(__name__)
+# Readable reasons for the agent's own stops, kept on the failed Turn.
+_AGENT_STOP_MESSAGES = {
+    "no_progress": (
+        "The agent stopped: its recent tool calls kept bringing nothing new."
+    ),
+}
 
 
 def _user_error_text(exc: BaseException) -> str:
@@ -1609,10 +1615,15 @@ class TurnService:
                     "empty_final_response",
                     "busy",
                     "invalid_skill",
+                    "no_progress",
                 }:
+                    # A no-progress stop fails the Turn, so a Goal blocks
+                    # with that reason instead of starting another Turn.
                     status = TurnStatus.FAILED
                     error_code = "AGENT_TURN_FAILED"
-                    error_message = f"agent stopped with reason: {stop_reason}"
+                    error_message = _AGENT_STOP_MESSAGES.get(
+                        stop_reason, f"agent stopped with reason: {stop_reason}"
+                    )
                 else:
                     status = TurnStatus.COMPLETED
                     error_code = error_message = None
