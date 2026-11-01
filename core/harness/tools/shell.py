@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import secrets
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,48 @@ from core.harness.env_sanitize import child_env
 from core.harness.sandbox import build_exec_command
 
 _MAX_OUTPUT_CHARS = 30_000
+
+# After the command, the shell reports the exit code of each command in its
+# last pipeline on one marked line, which is cut from the output again. A
+# pipeline's own exit code is its last command's, so `pytest | tail` exits 0
+# when the tests fail; the report keeps that failure on record. `pipefail`
+# would change what the agent sees and turn the normal `yes | head`
+# (SIGPIPE, 141) or `grep ... | wc` into failures.
+_EXIT_REPORT_PREFIX = "\x1edeepcode-exit-codes-"
+
+
+def _with_exit_report(command: str, marker: str) -> str:
+    # Both expansions read the command's status: an assignment changes $?
+    # and PIPESTATUS only once the whole line has run.
+    return (
+        f"{command}\n"
+        '__deepcode_rc=$? __deepcode_ps="${PIPESTATUS[*]}"; '
+        f"printf '\\n%s%s\\n' '{marker}' \"$__deepcode_ps\"; "
+        'exit "$__deepcode_rc"'
+    )
+
+
+def _take_exit_report(text: str, marker: str) -> tuple[str, tuple[int, ...]]:
+    """The output without the report line, and the exit codes it gave.
+
+    No codes when the shell never reached the report (``exit``, ``set -e``,
+    ``exec``) or it does not parse.
+    """
+
+    start = text.rfind("\n" + marker)
+    if start < 0:
+        return text, ()
+    values_at = start + 1 + len(marker)
+    end = text.find("\n", values_at)
+    if end < 0:
+        end = len(text)
+    try:
+        codes = tuple(int(value) for value in text[values_at:end].split())
+    except ValueError:
+        codes = ()
+    return text[:start] + text[end + 1 :], codes
+
+
 _DEFAULT_TIMEOUT = 120
 
 # Declarative preflight: (needle in command, required non-interactive flag,
@@ -213,9 +256,10 @@ class BashTool(Tool):
                 "If this is intended, re-run with the matching DEEPCODE_* waiver."
             )
 
+        marker = f"{_EXIT_REPORT_PREFIX}{secrets.token_hex(8)}:"
         try:
             wrapped = build_exec_command(
-                command=command,
+                command=_with_exit_report(command, marker),
                 workspace=self._workspace,
                 enabled=self._sandbox_enabled,
                 read_only=self._read_only_workspace,
@@ -253,17 +297,18 @@ class BashTool(Tool):
         finally:
             wrapped.cleanup()
 
-        text = out.decode("utf-8", errors="replace")
+        text, exit_codes = _take_exit_report(
+            out.decode("utf-8", errors="replace"), marker
+        )
         rc = proc.returncode
         assert rc is not None
         header = f"[exit {rc}]" if rc else ""
+        metadata: dict[str, Any] = {"exit_code": rc}
+        if exit_codes:
+            metadata["exit_codes"] = list(exit_codes)
         if len(text) <= _MAX_OUTPUT_CHARS:
             content = f"{header}\n{text}".strip() if header else text
-            return ToolResult(
-                content,
-                is_error=rc != 0,
-                metadata={"exit_code": rc},
-            )
+            return ToolResult(content, is_error=rc != 0, metadata=metadata)
 
         # Spill full output to a file; return a bounded preview + the path.
         fd, path = tempfile.mkstemp(prefix="deepcode-bash-", suffix=".txt")
@@ -274,8 +319,4 @@ class BashTool(Tool):
             f"{header}\n...output truncated ({len(text)} chars). "
             f"Full output saved to: {path}\n\n{preview}"
         ).strip()
-        return ToolResult(
-            content,
-            is_error=rc != 0,
-            metadata={"exit_code": rc},
-        )
+        return ToolResult(content, is_error=rc != 0, metadata=metadata)

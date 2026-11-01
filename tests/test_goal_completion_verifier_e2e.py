@@ -163,7 +163,8 @@ def test_get_goal_alone_is_rejected_then_blocked_by_the_verifier(
     assert results[-1]["autoBlocked"] is True
     assert goal.status.value == "blocked"
     assert outcome.reason.startswith(
-        "Blocked by the completion verifier after 3 rejected completion claims."
+        "Blocked by the completion verifier after 3 rejected completion claims "
+        "with no new changes in between."
     )
 
 
@@ -233,7 +234,7 @@ FIXED = "def add(a, b):\n    return a + b\n"
 def _verdict(verdict: str, summary: str, *missing: str) -> tuple[str, dict]:
     requirement = {
         "requirement": "calc.add adds",
-        "met": verdict == "pass",
+        "finding": "proved" if verdict == "pass" else "contradicted",
         "evidence": "read calc.py",
     }
     return (
@@ -343,23 +344,31 @@ def test_impossible_blocks_the_goal_at_once(monkeypatch, tmp_path) -> None:
     )
 
 
-def test_a_reviewer_without_a_verdict_rejects_the_claim(monkeypatch, tmp_path) -> None:
-    goal, _, provider = _run(
+def test_a_reviewer_without_a_verdict_pauses_the_goal(monkeypatch, tmp_path) -> None:
+    from core.harness.agents import goal_reviewer
+
+    monkeypatch.setattr(goal_reviewer, "REVIEW_RETRY_DELAYS_SECONDS", (0.0, 0.0))
+    goal, outcome, provider = _run(
         monkeypatch,
         tmp_path,
         [
             ("read", {"file_path": "calc.py"}),
             COMPLETE,
-            "Looks fine to me.",  # reviewer forgets to submit
+            # The reviewer forgets to submit, three times.
+            "Looks fine to me.",
+            "Still fine.",
+            "Fine.",
             "Stopping here.",
         ],
         verifier="reviewer",
     )
 
     (result,) = provider.goal_results()
-    assert result["updated"] is False
-    assert "gave no verdict" in result["verdict"]["justification"]
-    assert goal.status.value != "complete"
+    assert result["updated"] is False and result["paused"] is True
+    assert "gave no verdict (tried 3 times)" in result["verdict"]["justification"]
+    assert "rejections" not in result  # not counted against the agent
+    assert len(_reviewer_requests(provider)) == 3
+    assert goal.status.value == "paused"
 
 
 def test_the_rule_check_rejects_before_any_review(monkeypatch, tmp_path) -> None:
@@ -447,3 +456,49 @@ def test_the_reviews_tokens_count_toward_the_goal(monkeypatch, tmp_path) -> None
     assert "turnId" not in charged[0] or charged[0]["turnId"] is None
     assert goal.tokens_used >= reviewer_calls * 1000
     assert goal.status.value == "complete"
+
+
+def test_a_check_failing_behind_a_pipe_is_caught_end_to_end(
+    monkeypatch, tmp_path
+) -> None:
+    # The red check, piped: its exit code is tail's 0.
+    piped = f"{CHECK} 2>&1 | tail -5"
+    goal, _, provider = _run(
+        monkeypatch,
+        tmp_path,
+        [("bash", {"command": piped}), COMPLETE, "Stopping here."],
+    )
+
+    (result,) = provider.goal_results()
+    assert result["updated"] is False
+    assert (
+        "a command before the last one in its pipeline failed"
+        in (result["verdict"]["justification"])
+    )
+    assert goal.status.value != "complete"
+
+
+def test_a_file_change_between_rejections_restarts_the_count(
+    monkeypatch, tmp_path
+) -> None:
+    bad = ("read", {"file_path": "missing.py"})  # a failed last step
+    goal, _, provider = _run(
+        monkeypatch,
+        tmp_path,
+        [
+            bad,
+            COMPLETE,
+            ("write", {"file_path": "notes.txt", "content": "progress"}),
+            bad,
+            COMPLETE,  # rejected, but files changed since: count restarts
+            bad,
+            COMPLETE,
+            bad,
+            COMPLETE,  # third in a row without a change: blocked
+        ],
+    )
+
+    results = provider.goal_results()
+    assert [r["rejections"] for r in results] == [1, 1, 2, 3]
+    assert results[-1]["autoBlocked"] is True
+    assert goal.status.value == "blocked"

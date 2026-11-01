@@ -67,10 +67,12 @@ class UpdateGoalTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Update the current Thread Goal. Use 'complete' only after checking "
-            "the latest Goal against real code and tool evidence. Use 'blocked' "
-            "only for a persistent external blocker with no safe remaining "
-            "action. Goal identity comes from this Turn; do not guess IDs."
+            "Update the current Thread Goal. Use 'complete' only when current "
+            "evidence (code, commands you ran, tests you checked cover it) "
+            "proves every requirement of the latest Goal; the claim may be "
+            "checked independently. Use 'blocked' only for a persistent "
+            "external blocker with no safe remaining action. Goal identity "
+            "comes from this Turn; do not guess IDs."
         )
 
     @property

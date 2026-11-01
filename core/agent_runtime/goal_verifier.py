@@ -29,6 +29,8 @@ class GoalEvidenceItem:
     summary: str
     # The tool that produced the item (``read``, ``bash``...), when known.
     name: str = ""
+    # A command's exit code per command of its last pipeline, when recorded.
+    exit_codes: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +48,22 @@ class GoalCompletionRequest:
     reason: str
     evidence: tuple[GoalEvidenceItem, ...]
     pending: tuple[GoalEvidenceItem, ...] = ()
+    # Changes whenever the agent changes files for this Goal: rejected claims
+    # with the same marker in a row made no progress in between.
+    progress_marker: str = ""
+
+
+class VerificationUnavailable(RuntimeError):
+    """The verifier could not reach a verdict (a provider error, a timeout).
+
+    Not a rejection: the work may be fine. The Goal runtime pauses the Goal
+    instead of counting it against the agent. ``tokens`` is what the attempt
+    spent anyway.
+    """
+
+    def __init__(self, message: str, *, tokens: int = 0) -> None:
+        super().__init__(message)
+        self.tokens = tokens
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,11 +96,34 @@ class GoalCompletionVerifier(Protocol):
 
 _CHECK_KINDS = frozenset({"command_execution", "test_result"})
 _UNSUCCESSFUL = frozenset({"failed", "declined"})
+# A command cut off because the next one stopped reading (`yes | head`).
+_SIGPIPE = 141
+
+
+def _failed_stage(item: GoalEvidenceItem) -> bool:
+    """Whether a command before the last one in its pipeline failed.
+
+    The pipeline's own exit code is its last command's: `pytest | tail`
+    exits 0 when the tests fail, so its status alone reads as success.
+    """
+
+    return any(code not in (0, _SIGPIPE) for code in item.exit_codes[:-1])
+
+
+def _unsuccessful_item(item: GoalEvidenceItem) -> bool:
+    return item.status in _UNSUCCESSFUL or _failed_stage(item)
 
 
 def _describe(item: GoalEvidenceItem) -> str:
     label = item.name or item.kind.replace("_", " ")
-    return f"{label} `{item.summary}`" if item.summary else label
+    text = f"{label} `{item.summary}`" if item.summary else label
+    if _failed_stage(item):
+        codes = " ".join(str(code) for code in item.exit_codes)
+        text += (
+            f" (exit codes {codes}: a command before the last one in its "
+            "pipeline failed)"
+        )
+    return text
 
 
 def _unsuccessful(what: str, item: GoalEvidenceItem, remedy: str) -> str:
@@ -112,6 +153,10 @@ class RuleBasedVerifier:
     3. the latest check (a command run or test result) failed or was
        declined; or
     4. the latest evidence item of any kind failed or was declined.
+
+    A command failed when any command in its pipeline failed (a SIGPIPE cut,
+    as in ``yes | head``, aside), not only its last one: ``pytest | tail``
+    exits 0 when the tests fail.
 
     Only the latest outcome counts: a failure that later work moved past is
     resolved, so the usual red -> fix -> green loop, or a mistyped path early
@@ -148,14 +193,14 @@ class RuleBasedVerifier:
                 request.pending,
             )
         checks = [item for item in evidence if item.kind in _CHECK_KINDS]
-        if checks and checks[-1].status in _UNSUCCESSFUL:
+        if checks and _unsuccessful_item(checks[-1]):
             return _reject(
                 _unsuccessful(
                     "check", checks[-1], "Fix the problem and run the check again"
                 ),
                 pending_checks,
             )
-        if evidence[-1].status in _UNSUCCESSFUL:
+        if _unsuccessful_item(evidence[-1]):
             return _reject(
                 _unsuccessful("step", evidence[-1], "Resolve it"),
                 request.pending,

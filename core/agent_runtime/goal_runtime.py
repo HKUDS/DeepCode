@@ -23,17 +23,33 @@ GOAL_TOOL_NAMES = frozenset({"get_goal", "update_goal"})
 # The Goal ledger's reason limit (GOAL_OUTCOME_REASON_MAX_CHARS); a longer
 # auto-block reason would fail the very update that ends the retries.
 _AUTO_BLOCK_REASON_MAX_CHARS = 2_000
+# Rejected claims per Goal before it stops even while each one followed new
+# changes: every claim may start a review that costs real tokens.
+MAX_TOTAL_REJECTIONS = 10
+
+
+@dataclass(slots=True)
+class _Rejections:
+    """Rejected claims of one Goal: in a row without new changes, and in all."""
+
+    stalled: int = 0
+    total: int = 0
+    marker: str | None = None
+
+
 _GOAL_CLOSURE_PROMPT = """\
 Before ending this Goal-associated Turn, call get_goal and compare the latest
 objective with the current workspace and evidence.
 
-- If the complete Goal is satisfied, call update_goal(status="complete") and
-  give a concise reason grounded in evidence from this Turn.
-- If a persistent external blocker leaves no safe action, call
-  update_goal(status="blocked") and explain it.
+- If every requirement of the Goal is proved by current evidence (the code,
+  commands you ran, tests you checked cover it), call
+  update_goal(status="complete") with a concise reason naming that evidence.
+- If the same external blocker has stopped all progress across several turns
+  and no safe action remains, call update_goal(status="blocked") and explain it.
 - Otherwise continue concrete work toward the Goal.
 
-Do not mark the Goal complete merely because one intermediate check passed."""
+Do not mark the Goal complete merely because one intermediate check passed or
+because no remaining work is obvious."""
 
 
 class GoalRuntimeError(RuntimeError):
@@ -76,6 +92,15 @@ class GoalRuntimeHandler(Protocol):
         """Charge the tokens a completion review spent to the Goal."""
         ...
 
+    def pause_for_verification(
+        self,
+        context: GoalRuntimeContext,
+        *,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Pause the Goal because its completion could not be verified."""
+        ...
+
     def completion_request(
         self,
         context: GoalRuntimeContext,
@@ -97,10 +122,13 @@ class GoalRuntimeRouter:
     :meth:`configure_completion_verifier`), a ``complete`` request is judged
     exactly once, asynchronously, before any durable update. A rejection is
     returned to the model as data — with the verifier's justification — and
-    the goal is not updated. After ``max_rejections`` rejected claims, or at
-    once when the verifier finds the Goal impossible, the router moves the
-    goal to ``blocked`` itself, so a model that keeps re-claiming completion
-    cannot burn Turns forever.
+    the goal is not updated. After ``max_rejections`` rejected claims in a
+    row with no new changes in between, after ``MAX_TOTAL_REJECTIONS`` in
+    all, or at once when the verifier finds the Goal impossible, the router
+    moves the goal to ``blocked`` itself, so a model that keeps re-claiming
+    completion cannot burn Turns forever. A verifier that cannot reach a
+    verdict (:class:`VerificationUnavailable`) pauses the Goal instead: that
+    is no rejection of the work.
     """
 
     def __init__(self) -> None:
@@ -114,7 +142,7 @@ class GoalRuntimeRouter:
         # Rejected completion claims per goal, so a model cannot burn Turns
         # retrying the same claim; cleared on success, auto-block, and every
         # (re)configuration. Process memory only: a restart starts over.
-        self._rejections: dict[str, int] = {}
+        self._rejections: dict[str, _Rejections] = {}
 
     def configure(self, handler: GoalRuntimeHandler) -> None:
         with self._lock:
@@ -178,19 +206,27 @@ class GoalRuntimeRouter:
 
         verdict = None
         if status == "complete" and verifier is not None:
-            from core.agent_runtime.goal_verifier import GoalVerdict
+            from core.agent_runtime.goal_verifier import (
+                GoalVerdict,
+                VerificationUnavailable,
+            )
 
             judged_objective = None
+            progress_marker = ""
             try:
                 if settle is not None:
                     await settle()
                 claim = handler.completion_request(context, reason=reason)
                 judged_objective = claim.objective
+                progress_marker = claim.progress_marker
                 verdict = await verifier(claim)
             except asyncio.CancelledError as exc:
                 # Stopped mid-review: what it spent so far is still spent.
                 self._charge(handler, context, getattr(exc, "tokens", 0))
                 raise
+            except VerificationUnavailable as exc:
+                self._charge(handler, context, exc.tokens)
+                return self._pause_unverified(handler, context, str(exc))
             except Exception as exc:  # noqa: BLE001 - fail closed, report to the model
                 verdict = GoalVerdict(
                     confirmed=False,
@@ -202,7 +238,7 @@ class GoalRuntimeRouter:
                 # used up the budget.
                 self._charge(handler, context, verdict.tokens)
                 return self._reject_completion(
-                    handler, context, verdict, judged_objective
+                    handler, context, verdict, judged_objective, progress_marker
                 )
             try:
                 result = handler.update_goal(
@@ -251,22 +287,60 @@ class GoalRuntimeRouter:
         except Exception:  # noqa: BLE001 - accounting must not change the outcome
             logger.exception("completion review tokens were not charged")
 
+    def _pause_unverified(
+        self,
+        handler: GoalRuntimeHandler,
+        context: GoalRuntimeContext,
+        problem: str,
+    ) -> dict[str, Any]:
+        """Pause the Goal when its claim could not be verified at all."""
+
+        reason = (
+            f"Paused: the completion claim could not be verified ({problem}). "
+            "Resume the Goal to try again."
+        )[:_AUTO_BLOCK_REASON_MAX_CHARS]
+        verdict = {"confirmed": False, "justification": reason}
+        try:
+            result = handler.pause_for_verification(context, reason=reason)
+        except Exception:  # noqa: BLE001 - the answer itself must still arrive
+            logger.exception("Goal could not be paused after a failed review")
+            return {"goalId": context.goal_id, "updated": False, "verdict": verdict}
+        with self._lock:
+            if self._context != context:
+                raise GoalRuntimeError("Goal Turn changed while recording the decision")
+            # Paused: no later Goal call in this Turn could be recorded.
+            self._terminal_requested = True
+        return {**result, "updated": False, "paused": True, "verdict": verdict}
+
     def _reject_completion(
         self,
         handler: GoalRuntimeHandler,
         context: GoalRuntimeContext,
         verdict: GoalVerdict,
         judged_objective: str | None = None,
+        progress_marker: str = "",
     ) -> dict[str, Any]:
-        """Return a rejection to the model; auto-block after N rejections."""
+        """Return a rejection to the model; auto-block when it goes nowhere."""
 
         with self._lock:
             if self._context != context:
                 raise GoalRuntimeError("Goal Turn changed while recording the decision")
-            count = self._rejections.get(context.goal_id, 0) + 1
-            self._rejections[context.goal_id] = count
+            counted = self._rejections.setdefault(context.goal_id, _Rejections())
+            # New changes since the last rejection: the agent is getting on.
+            progressed = (
+                counted.marker is not None and counted.marker != progress_marker
+            )
+            counted.stalled = 1 if progressed else counted.stalled + 1
+            counted.total += 1
+            counted.marker = progress_marker
+            count = counted.stalled
+            total = counted.total
             max_rejections = self._max_rejections
-            exhausted = verdict.impossible or count >= max_rejections
+            exhausted = (
+                verdict.impossible
+                or count >= max_rejections
+                or total >= MAX_TOTAL_REJECTIONS
+            )
 
         rejection: dict[str, Any] = {
             "goalId": context.goal_id,
@@ -277,6 +351,7 @@ class GoalRuntimeRouter:
             },
             "rejections": count,
             "maxRejections": max_rejections,
+            "totalRejections": total,
         }
         try:
             still_open = bool(handler.read_goal(context).get("canUpdate", True))
@@ -307,6 +382,12 @@ class GoalRuntimeRouter:
                 if verdict.impossible
                 else (
                     f"Blocked by the completion verifier after {count} rejected "
+                    "completion claims with no new changes in between. "
+                    f"Last rejection: {verdict.justification}"
+                )
+                if count >= max_rejections
+                else (
+                    f"Blocked by the completion verifier after {total} rejected "
                     f"completion claims. Last rejection: {verdict.justification}"
                 )
             )[:_AUTO_BLOCK_REASON_MAX_CHARS],
@@ -325,6 +406,7 @@ class GoalRuntimeRouter:
             "verdict": rejection["verdict"],
             "rejections": count,
             "maxRejections": max_rejections,
+            "totalRejections": total,
             "autoBlocked": True,
         }
 

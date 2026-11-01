@@ -430,8 +430,10 @@ class GoalConfig(_Base):
       ``"reviewer"`` runs the same rule check, then has an independent agent
       with a read-only view of the workspace check the claim: it reads the
       changes and re-runs the checks before the Goal is recorded complete.
-    - ``max_rejections``: after this many rejected completion claims the Goal is
-      moved to ``blocked`` (instead of letting the model burn Turns retrying).
+    - ``max_rejections``: after this many rejected completion claims in a row
+      with no file changes in between, the Goal is moved to ``blocked``
+      (instead of letting the model burn Turns retrying); after
+      ``MAX_TOTAL_REJECTIONS`` (10) it is blocked whatever changed.
     """
 
     completion_verifier: Literal["off", "rule", "reviewer"] = "off"

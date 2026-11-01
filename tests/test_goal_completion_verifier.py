@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 
 import pytest
@@ -29,6 +30,7 @@ class FakeGoalHandler:
         self.objective = objective
         self.events: list[str] = []
         self.charged: list[int] = []
+        self.paused: list[str] = []
 
     def read_goal(self, context: GoalRuntimeContext):
         return {"goalId": context.goal_id, "objective": self.objective}
@@ -50,6 +52,10 @@ class FakeGoalHandler:
 
     def record_verification_tokens(self, context: GoalRuntimeContext, tokens: int):
         self.charged.append(tokens)
+
+    def pause_for_verification(self, context: GoalRuntimeContext, *, reason: str):
+        self.paused.append(reason)
+        return {"goalId": context.goal_id, "status": "paused"}
 
     def completion_request(
         self,
@@ -172,7 +178,8 @@ async def test_goal_blocks_after_max_rejections_instead_of_burning_turns() -> No
             "status": "blocked",
             "reason": (
                 "Blocked by the completion verifier after 2 rejected completion "
-                "claims. Last rejection: No file change evidence."
+                "claims with no new changes in between. Last rejection: No file "
+                "change evidence."
             ),
         }
     ]
@@ -610,3 +617,86 @@ async def test_a_stopped_review_still_charges_what_it_spent() -> None:
     with pytest.raises(asyncio.CancelledError):
         await task
     assert handler.charged == [70] and handler.requests == []
+
+
+def test_a_failing_command_hidden_by_a_pipe_still_fails_the_claim() -> None:
+    hidden = GoalEvidenceItem(
+        kind="command_execution",
+        status="completed",  # `tail` exited 0
+        summary="python -m pytest -q 2>&1 | tail -20",
+        name="bash",
+        exit_codes=(1, 0),
+    )
+    verdict = _judge(FIX, hidden)
+    assert not verdict.confirmed
+    assert "exit codes 1 0" in verdict.justification
+
+
+def test_a_sigpipe_cut_is_not_a_failure() -> None:
+    cut = GoalEvidenceItem(
+        kind="command_execution",
+        status="completed",
+        summary="yes | head -1",
+        name="bash",
+        exit_codes=(141, 0),
+    )
+    assert _judge(FIX, cut).confirmed
+
+
+@pytest.mark.asyncio
+async def test_an_unverifiable_claim_pauses_the_goal_without_counting() -> None:
+    from core.agent_runtime.goal_verifier import VerificationUnavailable
+
+    class Down:
+        async def __call__(self, request):
+            raise VerificationUnavailable("provider down", tokens=12)
+
+    handler = FakeGoalHandler()
+    runtime = _armed(handler, Down())
+    result = await runtime.request(status="complete", reason="Done.")
+    assert result["paused"] is True and result["updated"] is False
+    assert "could not be verified (provider down)" in result["verdict"]["justification"]
+    assert handler.requests == [] and handler.charged == [12]
+    assert len(handler.paused) == 1
+    assert runtime.visible_tool_names(("update_goal",)) == ()
+
+
+class _Marked(FakeGoalHandler):
+    """A handler whose claims carry a progress marker the test moves."""
+
+    marker = "item_a"
+
+    def completion_request(self, context, *, reason):
+        request = super().completion_request(context, reason=reason)
+        return dataclasses.replace(request, progress_marker=self.marker)
+
+
+@pytest.mark.asyncio
+async def test_rejections_count_only_while_nothing_changes() -> None:
+    handler = _Marked()
+    runtime = _armed(handler, RejectingVerifier(), max_rejections=2)
+
+    first = await runtime.request(status="complete", reason="Done.")
+    handler.marker = "item_b"  # the agent changed files
+    second = await runtime.request(status="complete", reason="Done.")
+    third = await runtime.request(status="complete", reason="Done.")  # no change
+
+    assert [r["rejections"] for r in (first, second, third)] == [1, 1, 2]
+    assert third["autoBlocked"] is True
+    assert "with no new changes in between" in handler.requests[-1]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_progress_never_buys_endless_claims() -> None:
+    from core.agent_runtime.goal_runtime import MAX_TOTAL_REJECTIONS
+
+    handler = _Marked()
+    runtime = _armed(handler, RejectingVerifier(), max_rejections=3)
+    for n in range(MAX_TOTAL_REJECTIONS):
+        handler.marker = f"item_{n}"
+        result = await runtime.request(status="complete", reason="Done.")
+    assert result["autoBlocked"] is True
+    assert result["totalRejections"] == MAX_TOTAL_REJECTIONS
+    assert handler.requests[-1]["reason"].startswith(
+        f"Blocked by the completion verifier after {MAX_TOTAL_REJECTIONS} rejected"
+    )

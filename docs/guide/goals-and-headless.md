@@ -46,25 +46,32 @@ a token budget is limited by its budget instead.
 
 ## Check completion claims
 
-By default the agent decides when a Goal is complete. To have that claim
-checked, set `goal.completionVerifier` in your
+By default the agent decides when a Goal is complete: before it says so, it is
+asked to check every requirement of the Goal against the workspace. To have
+that claim checked as well, set `goal.completionVerifier` in your
 [configuration](configuration.md):
 
 - `"rule"` turns the claim back while the latest check failed or nothing was
-  done in that Turn.
+  done in that Turn. A check counts as failed when any command in its pipeline
+  failed, so `pytest | tail` with failing tests is caught.
 - `"reviewer"` runs the same rule, then has a second agent review the work
   before the Goal is recorded complete. The reviewer has its own context: it
   sees the Goal, the agent's reason and its latest steps, reads the changes,
-  and re-runs the checks. It cannot change anything: it has no editing tools,
-  runs no hooks, and its commands run with a read-only workspace and no
-  network. Where commands cannot be kept read-only (Windows, or Linux without
-  bubblewrap), it only reads files.
+  and re-runs the checks. For each requirement it records whether the evidence
+  proves it, and the claim passes only when every one is proved. It cannot
+  change anything: it has no editing tools, runs no hooks, and its commands
+  run with a read-only workspace and no network. Where commands cannot be kept
+  read-only (Windows, or Linux without bubblewrap), it only reads files.
   When it finds something missing, the agent gets the list and keeps
   working. When it finds the Goal cannot be met at all, for example because a
-  needed key or service is missing, the Goal stops as blocked. A review can
-  take a few minutes, and its tokens count toward the Goal's token budget.
+  needed key or service is missing, the Goal stops as blocked. When the review
+  itself cannot run (the model service fails three times, or it takes longer
+  than 15 minutes), the Goal is paused, not blocked: resume it to try again.
+  A review can take a few minutes, and its tokens count toward the Goal's
+  token budget.
 
-After `goal.maxRejections` (3) rejected claims, the Goal stops as blocked.
+The Goal stops as blocked after `goal.maxRejections` (3) rejected claims in a
+row with no file changes in between, or after 10 rejected claims in all.
 
 ## Work on a Goal from the shell: `deepcode loop`
 
