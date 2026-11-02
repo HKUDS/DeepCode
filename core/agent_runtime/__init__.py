@@ -20,6 +20,7 @@ from core.agent_runtime.injections import (
     UserSteer,
     compose_injection_callbacks,
 )
+from core.agent_runtime.parallel import run_parallel_llm
 from core.agent_runtime.runner import AgentRunner, AgentRunResult, AgentRunSpec
 from core.agent_runtime.tools.base import Tool
 from core.agent_runtime.tools.mcp import (
@@ -50,4 +51,5 @@ __all__ = [
     "UserSteer",
     "compose_injection_callbacks",
     "connect_mcp_servers",
+    "run_parallel_llm",
 ]
