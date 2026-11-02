@@ -12,6 +12,7 @@ from copy import deepcopy
 from typing import Any, Iterable, Mapping
 
 from core.agent_runtime.context import EnvironmentContext
+from core.agent_runtime.helpers import named_tool_calls
 from core.domain.message_provenance import TurnInputSource
 from core.sessions.continuation import session_message_history_entry
 from core.sessions.models import SessionMessage
@@ -40,7 +41,7 @@ def kernel_message_to_record(message: Mapping[str, Any]) -> SessionMessage | Non
     if EnvironmentContext.is_history_message(message):
         return None
     content = _as_text(message.get("content"))
-    tool_calls = message.get("tool_calls")
+    tool_calls = named_tool_calls(message.get("tool_calls"))
     if role == "assistant" and not content and not tool_calls:
         return None
     if role == "user" and not content:
@@ -50,7 +51,7 @@ def kernel_message_to_record(message: Mapping[str, Any]) -> SessionMessage | Non
     metadata: dict[str, Any] = {}
     if role == "assistant":
         if tool_calls:
-            metadata[TOOL_CALLS_META] = deepcopy(list(tool_calls))
+            metadata[TOOL_CALLS_META] = deepcopy(tool_calls)
         provider_state = message.get("provider_state")
         if isinstance(provider_state, dict) and provider_state:
             metadata["providerState"] = deepcopy(provider_state)
@@ -116,8 +117,7 @@ def record_fingerprint(message: SessionMessage) -> tuple[Any, ...]:
         "" if message.role == "tool" and call_id else message.content,
         tuple(
             str(call.get("id", ""))
-            for call in metadata.get(TOOL_CALLS_META) or ()
-            if isinstance(call, dict)
+            for call in named_tool_calls(metadata.get(TOOL_CALLS_META))
         ),
         call_id,
     )
@@ -135,17 +135,17 @@ def session_message_to_kernel(message: SessionMessage) -> dict[str, Any] | None:
     if message.role not in {"user", "assistant", "tool"}:
         return None
     metadata = message.metadata or {}
-    if (
-        message.role in {"user", "assistant"}
-        and not message.content
-        and not metadata.get(TOOL_CALLS_META)
-    ):
+    tool_calls = (
+        named_tool_calls(metadata.get(TOOL_CALLS_META))
+        if message.role == "assistant"
+        else []
+    )
+    if message.role in {"user", "assistant"} and not message.content and not tool_calls:
         return None
     entry = session_message_history_entry(message)
     if message.role == "assistant":
-        tool_calls = metadata.get(TOOL_CALLS_META)
         if tool_calls:
-            entry["tool_calls"] = deepcopy(list(tool_calls))
+            entry["tool_calls"] = deepcopy(tool_calls)
     if message.role == "tool":
         call_id = metadata.get(TOOL_CALL_ID_META)
         if call_id:

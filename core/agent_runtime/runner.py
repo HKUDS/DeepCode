@@ -38,6 +38,7 @@ from core.agent_runtime.helpers import (
     estimate_message_tokens,
     find_legal_message_start,
     maybe_persist_tool_result,
+    named_tool_calls,
     renew_tool_result_references,
     truncate_text,
 )
@@ -1163,7 +1164,8 @@ class AgentRunner:
         minimal repair instead of aborting the run.
         """
         try:
-            view = self._drop_orphan_tool_results(messages)
+            view = self._drop_nameless_tool_calls(messages)
+            view = self._drop_orphan_tool_results(view)
             view = self._backfill_missing_tool_results(view)
             view = self._apply_tool_result_budget(spec, view)
             view = self._with_transient_context(
@@ -1181,7 +1183,8 @@ class AgentRunner:
                 exc,
             )
             try:
-                view = self._drop_orphan_tool_results(messages)
+                view = self._drop_nameless_tool_calls(messages)
+                view = self._drop_orphan_tool_results(view)
                 return self._backfill_missing_tool_results(view)
             except Exception:
                 return messages
@@ -1879,6 +1882,47 @@ class AgentRunner:
         if isinstance(content, str) and len(content) > spec.max_tool_result_chars:
             return truncate_text(content, spec.max_tool_result_chars)
         return content
+
+    @staticmethod
+    def _drop_nameless_tool_calls(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Drop tool calls that name no function, and turns left empty by them.
+
+        A live session keeps ``AgentSession._history`` in memory between turns,
+        so the record boundary in :mod:`core.sessions.transcript` cannot heal a
+        run that is already poisoned: the nameless call sits in the message list
+        the provider is about to receive, and the request is rejected until the
+        process restarts.
+
+        Runs before :meth:`_drop_orphan_tool_results` on purpose. Dropping a
+        call orphans its tool result, and the orphan pass that follows then
+        removes it, so calls and results still pair up.
+        """
+        updated: list[dict[str, Any]] | None = None
+        for idx, msg in enumerate(messages):
+            current = msg
+            raw = msg.get("tool_calls")
+            if msg.get("role") == "assistant" and isinstance(raw, (list, tuple)):
+                raw_calls = list(raw)
+                kept = named_tool_calls(raw_calls)
+                if len(kept) != len(raw_calls):
+                    if updated is None:
+                        updated = [dict(m) for m in messages[:idx]]
+                    if not kept and not msg.get("content"):
+                        # Nothing survives this turn: no name to run, no text.
+                        continue
+                    current = dict(msg)
+                    if kept:
+                        current["tool_calls"] = kept
+                    else:
+                        current.pop("tool_calls", None)
+            if updated is not None:
+                updated.append(dict(current))
+
+        if updated is None:
+            return messages
+        return updated
 
     @staticmethod
     def _drop_orphan_tool_results(
