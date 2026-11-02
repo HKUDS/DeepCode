@@ -30,6 +30,29 @@ def _as_text(content: Any) -> str:
     return str(content)
 
 
+def _named_tool_calls(tool_calls: Any) -> list[dict[str, Any]]:
+    """Keep the calls that name the function to run.
+
+    A call whose ``function.name`` is missing or blank names nothing: the
+    model API refuses the whole request that carries one (400/422 missing
+    field name), and records round-trip verbatim, so one such entry saved
+    poisons the session on every resume. A parser glitch that turns raw
+    tool-call text into a ``tool_calls`` entry while dropping the name is
+    enough to make one. The record boundary drops it here, on save and on
+    rebuild, which also heals a session that already holds one.
+    """
+    if not isinstance(tool_calls, (list, tuple)):
+        return []
+    return [
+        call
+        for call in tool_calls
+        if isinstance(call, dict)
+        and isinstance(call.get("function"), dict)
+        and isinstance(call["function"].get("name"), str)
+        and call["function"]["name"].strip()
+    ]
+
+
 def kernel_message_to_record(message: Mapping[str, Any]) -> SessionMessage | None:
     """Project one kernel history dict into a store record, or skip it."""
     role = message.get("role")
@@ -40,7 +63,7 @@ def kernel_message_to_record(message: Mapping[str, Any]) -> SessionMessage | Non
     if EnvironmentContext.is_history_message(message):
         return None
     content = _as_text(message.get("content"))
-    tool_calls = message.get("tool_calls")
+    tool_calls = _named_tool_calls(message.get("tool_calls"))
     if role == "assistant" and not content and not tool_calls:
         return None
     if role == "user" and not content:
@@ -50,7 +73,7 @@ def kernel_message_to_record(message: Mapping[str, Any]) -> SessionMessage | Non
     metadata: dict[str, Any] = {}
     if role == "assistant":
         if tool_calls:
-            metadata[TOOL_CALLS_META] = deepcopy(list(tool_calls))
+            metadata[TOOL_CALLS_META] = deepcopy(tool_calls)
         provider_state = message.get("provider_state")
         if isinstance(provider_state, dict) and provider_state:
             metadata["providerState"] = deepcopy(provider_state)
@@ -116,8 +139,7 @@ def record_fingerprint(message: SessionMessage) -> tuple[Any, ...]:
         "" if message.role == "tool" and call_id else message.content,
         tuple(
             str(call.get("id", ""))
-            for call in metadata.get(TOOL_CALLS_META) or ()
-            if isinstance(call, dict)
+            for call in _named_tool_calls(metadata.get(TOOL_CALLS_META))
         ),
         call_id,
     )
@@ -135,17 +157,17 @@ def session_message_to_kernel(message: SessionMessage) -> dict[str, Any] | None:
     if message.role not in {"user", "assistant", "tool"}:
         return None
     metadata = message.metadata or {}
-    if (
-        message.role in {"user", "assistant"}
-        and not message.content
-        and not metadata.get(TOOL_CALLS_META)
-    ):
+    tool_calls = (
+        _named_tool_calls(metadata.get(TOOL_CALLS_META))
+        if message.role == "assistant"
+        else []
+    )
+    if message.role in {"user", "assistant"} and not message.content and not tool_calls:
         return None
     entry = session_message_history_entry(message)
     if message.role == "assistant":
-        tool_calls = metadata.get(TOOL_CALLS_META)
         if tool_calls:
-            entry["tool_calls"] = deepcopy(list(tool_calls))
+            entry["tool_calls"] = deepcopy(tool_calls)
     if message.role == "tool":
         call_id = metadata.get(TOOL_CALL_ID_META)
         if call_id:
