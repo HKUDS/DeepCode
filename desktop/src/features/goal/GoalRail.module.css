@@ -118,6 +118,15 @@
   font-style: normal;
 }
 
+.summaryText [data-review="passed"] {
+  color: var(--success);
+}
+
+.summaryText [data-review="rejected"],
+.summaryText [data-review="impossible"] {
+  color: var(--attention);
+}
+
 .summary progress {
   width: 100%;
   height: 3px;

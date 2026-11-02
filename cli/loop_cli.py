@@ -75,7 +75,8 @@ def _run(args: argparse.Namespace) -> int:
     console.print(
         f" [{theme.META_STYLE}]test {args.test_cmd or '(none)'} · "
         f"workspace {workspace or '(stored Session workspace)'} · "
-        f"token budget {args.token_budget or 'none'}[/]"
+        f"token budget {args.token_budget or 'none'} · "
+        f"time limit {f'{args.time_budget} min' if args.time_budget else 'none'}[/]"
     )
     console.print()
 
@@ -98,6 +99,7 @@ def _run(args: argparse.Namespace) -> int:
                         connection_id=args.connection,
                         reasoning_effort=args.reasoning_effort,
                         token_budget=args.token_budget,
+                        time_budget_seconds=_minutes(args.time_budget),
                         trust_workspace=args.trust,
                         access_preset=parse_access_preset(args.access),
                     ),
@@ -113,11 +115,13 @@ def _run(args: argparse.Namespace) -> int:
                         objective=args.goal,
                         workspace=workspace,
                         completion_evidence_command=args.test_cmd,
+                        check_commands=tuple(args.check),
                         model=args.model,
                         connection_id=args.connection,
                         reasoning_effort=args.reasoning_effort,
                         skill_identifiers=tuple(args.skill),
                         token_budget=args.token_budget,
+                        time_budget_seconds=_minutes(args.time_budget),
                         trust_workspace=args.trust,
                         access_preset=parse_access_preset(args.access),
                     ),
@@ -188,8 +192,17 @@ def main(argv: list[str] | None = None) -> int:
         "--test-cmd",
         "-t",
         default="",
-        help="For a new Goal, a command the Agent must run and inspect as evidence "
-        "(for example: pytest or 'python -m pytest -q').",
+        help="For a new Goal, a test command (for example 'python -m pytest -q'). "
+        "The Agent runs it, and DeepCode runs it itself "
+        "before accepting completion.",
+    )
+    parser.add_argument(
+        "--check",
+        action="append",
+        default=[],
+        metavar="COMMAND",
+        help="For a new Goal, another command that must exit 0 before DeepCode "
+        "accepts completion (repeatable). Shell syntax runs in bash with pipefail.",
     )
     parser.add_argument(
         "--model",
@@ -219,14 +232,37 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Total budget for a new Goal, or a larger budget when resuming.",
     )
+    parser.add_argument(
+        "--time-budget",
+        type=_positive_minutes,
+        default=None,
+        metavar="MINUTES",
+        help="Active time a new Goal may use, or a longer limit when resuming.",
+    )
     args = parser.parse_args(argv)
     if (args.goal is None) == (args.resume is None):
         parser.error("provide exactly one of GOAL or --resume SESSION_ID")
     if args.resume is not None and args.test_cmd:
         parser.error("--test-cmd cannot rewrite the objective of an existing Goal")
+    if args.resume is not None and args.check:
+        parser.error("--check is only available when creating a new Goal")
     if args.resume is not None and args.skill:
         parser.error("--skill is only available when creating a new Goal")
     return _run(args)
+
+
+def _positive_minutes(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a whole number of minutes") from exc
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be at least 1 minute")
+    return value
+
+
+def _minutes(value: int | None) -> int | None:
+    return None if value is None else value * 60
 
 
 if __name__ == "__main__":

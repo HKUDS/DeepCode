@@ -101,6 +101,8 @@ describe("workspace event projection", () => {
       tokensUsed: 12,
       timeUsedSeconds: 4,
       skillIds: [],
+      checks: [],
+      proposedChecks: [],
       createdAt: "2026-07-16T00:00:00Z",
       updatedAt: "2026-07-16T00:00:04Z",
     };

@@ -347,31 +347,44 @@ def _completion_verifier(
 ) -> Any:
     """The Goal completion gate for ``goal.completion_verifier``.
 
-    ``reviewer`` builds each reviewer like this session: same workspace,
-    model and runtime, but read-only and under its own rules.
+    Every mode runs the Goal's confirmed checks; ``rule`` adds the rule check,
+    and ``reviewer`` both and then a reviewer built like this session: same
+    workspace, model and runtime, but read-only and under its own rules.
     """
-    from core.agent_runtime.goal_verifier import RuleBasedVerifier
+    from core.agent_runtime.goal_verifier import CompletionGate
 
-    if mode == "rule":
-        return RuleBasedVerifier()
+    # Checks get the agent's own command sandbox: the agent may have written
+    # the code they run.
+    sandbox_enabled = (
+        security_profile.command_sandbox if security_profile is not None else None
+    )
+    if mode != "reviewer":
+        return CompletionGate(
+            rule=mode == "rule", workspace=workspace, sandbox_enabled=sandbox_enabled
+        )
     from core.harness.agents.goal_reviewer import (
         AgentReviewVerifier,
         reviewer_security_profile,
         session_review_runner,
     )
 
-    return AgentReviewVerifier(
-        session_review_runner(
-            workspace=workspace,
-            build_session=build_agent_session,
-            session_kwargs={
-                "execution_profile": _reviewer_execution_profile(execution_profile),
-                "execution_security_profile": reviewer_security_profile(
-                    security_profile
-                ),
-                "runtime": runtime,
-            },
-        )
+    return CompletionGate(
+        rule=True,
+        workspace=workspace,
+        sandbox_enabled=sandbox_enabled,
+        review=AgentReviewVerifier(
+            session_review_runner(
+                workspace=workspace,
+                build_session=build_agent_session,
+                session_kwargs={
+                    "execution_profile": _reviewer_execution_profile(execution_profile),
+                    "execution_security_profile": reviewer_security_profile(
+                        security_profile
+                    ),
+                    "runtime": runtime,
+                },
+            )
+        ),
     )
 
 
@@ -695,23 +708,24 @@ def build_agent_session(
     )
     if goal_runtime is not None:
         # The Goal router outlives agent rebuilds, so every build sets the
-        # completion gate from the current config: ``off`` disarms it.
+        # completion gate from the current config. Even ``off`` keeps a gate:
+        # the Goal's confirmed checks run in every mode.
         goal_cfg = getattr(active_runtime.config, "goal", None)
         mode = goal_cfg.completion_verifier if goal_cfg is not None else "off"
-        if mode == "off":
-            goal_runtime.configure_completion_verifier(None)
-        else:
-            goal_runtime.configure_completion_verifier(
-                _completion_verifier(
-                    mode,
-                    workspace=workspace,
-                    execution_profile=resolved_execution,
-                    security_profile=resolved_security_profile,
-                    runtime=active_runtime,
-                ),
-                max_rejections=goal_cfg.max_rejections,
-                settle=session.settle_events,
-            )
+        goal_runtime.configure_running_work(
+            control.active_count if control is not None else None
+        )
+        goal_runtime.configure_completion_verifier(
+            _completion_verifier(
+                mode,
+                workspace=workspace,
+                execution_profile=resolved_execution,
+                security_profile=resolved_security_profile,
+                runtime=active_runtime,
+            ),
+            max_rejections=goal_cfg.max_rejections if goal_cfg is not None else 3,
+            settle=session.settle_events,
+        )
     if control is not None:
         # `session.history` is a @property (a list), so it must be wrapped in a
         # callable — passing its value would make fork_turns call a list.

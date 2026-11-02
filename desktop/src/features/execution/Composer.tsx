@@ -21,7 +21,9 @@ import {
 import type {
   ExecutionAccessPreset,
   Goal,
+  GoalCheck,
   GoalOutcome,
+  GoalReview,
   Project,
   SettingsSnapshot,
   Thread,
@@ -72,6 +74,7 @@ interface ComposerProps {
   settings: SettingsSnapshot | null;
   goal: Goal | null;
   goalOutcome: GoalOutcome | null;
+  goalReviews?: readonly GoalReview[];
   goalTurns: readonly Turn[];
   disabledReason: string | null;
   transcriptMode: TranscriptMode;
@@ -88,6 +91,8 @@ interface ComposerProps {
   onResumeGoal(): Promise<void>;
   onContinueGoal(): Promise<void>;
   onClearGoal(): Promise<void>;
+  onConfirmGoalChecks?(checks: GoalCheck[]): Promise<void>;
+  onDismissGoalChecks?(): Promise<void>;
   onSelectGoalEvidence(itemId: string): void;
   onPickContextFiles(): Promise<string[]>;
   onCommand(command: ComposerCommand): Promise<boolean>;
@@ -120,6 +125,7 @@ export function Composer({
   settings,
   goal,
   goalOutcome,
+  goalReviews,
   goalTurns,
   disabledReason,
   transcriptMode,
@@ -131,6 +137,8 @@ export function Composer({
   onResumeGoal,
   onContinueGoal,
   onClearGoal,
+  onConfirmGoalChecks,
+  onDismissGoalChecks,
   onSelectGoalEvidence,
   onPickContextFiles,
   onCommand,
@@ -428,6 +436,7 @@ export function Composer({
       <GoalRail
         goal={goal}
         outcome={goalOutcome}
+        reviews={goalReviews}
         turns={goalTurns}
         enabled={canExecute}
         busy={busy}
@@ -437,6 +446,8 @@ export function Composer({
         onResume={onResumeGoal}
         onContinue={onContinueGoal}
         onClear={onClearGoal}
+        onConfirmChecks={onConfirmGoalChecks}
+        onDismissChecks={onDismissGoalChecks}
         onSelectEvidence={onSelectGoalEvidence}
       />
       <div className={styles.composer}>

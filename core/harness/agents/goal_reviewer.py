@@ -23,6 +23,7 @@ from core.agent_runtime.goal_verifier import (
     GoalCompletionRequest,
     GoalEvidenceItem,
     GoalVerdict,
+    RequirementFinding,
     RuleBasedVerifier,
     VerificationUnavailable,
 )
@@ -211,6 +212,28 @@ def review_task(request: GoalCompletionRequest) -> str:
             "Steps still running when the claim was made (no result yet):\n"
             + _evidence_lines(request.pending)
         )
+    if request.checks:
+        parts.append(
+            "The user confirmed this checklist for the Goal. Each item is a "
+            "requirement: list every one in your requirements, besides any "
+            "others the Goal states.\n"
+            + "\n".join(
+                f"- {_clip(check.requirement, 400)}"
+                + (f" (command: `{' '.join(check.command)}`)" if check.command else "")
+                for check in request.checks
+            )
+        )
+    if request.check_runs:
+        parts.append(
+            "DeepCode itself ran the checklist's commands just now, and each "
+            "exited 0:\n"
+            + "\n".join(
+                f"- {run.requirement}: `{' '.join(run.command)}`"
+                for run in request.check_runs
+            )
+            + "\nA command passing proves its requirement only when you have "
+            "seen that it really tests it."
+        )
     parts.append("Check the workspace, then submit your verdict.")
     return "\n\n".join(parts)
 
@@ -242,6 +265,28 @@ def verdict_from_result(result: dict[str, Any]) -> GoalVerdict:
         if str(entry).strip()
     ] or [entry for entry in unmet if entry]
     missing = missing[:_LIST_MAX_ITEMS]
+    checked_list = result.get("checked")
+    if not isinstance(checked_list, list):
+        checked_list = []
+    report = dict(
+        stage="reviewer",
+        summary=summary,
+        requirements=tuple(
+            RequirementFinding(
+                requirement=_clip(str(entry.get("requirement") or ""), 500),
+                finding=(
+                    str(entry.get("finding"))
+                    if entry.get("finding") in FINDINGS
+                    else "missing"
+                ),
+                evidence=_clip(str(entry.get("evidence") or ""), 800),
+            )
+            for entry in requirements
+        ),
+        checked=tuple(
+            _clip(str(entry), 300) for entry in checked_list if str(entry).strip()
+        )[:20],
+    )
     if verdict == "pass" and not unmet:
         return GoalVerdict(
             confirmed=True,
@@ -249,6 +294,7 @@ def verdict_from_result(result: dict[str, Any]) -> GoalVerdict:
                 f"An independent review passed the claim: {summary} "
                 f"({len(requirements)} requirement(s) checked.)"
             ),
+            **report,
         )
     if verdict == "pass":
         # A pass that lists an unmet requirement is not a pass.
@@ -264,6 +310,7 @@ def verdict_from_result(result: dict[str, Any]) -> GoalVerdict:
         confirmed=False,
         justification=text,
         impossible=verdict == "impossible",
+        **report,
     )
 
 

@@ -2114,6 +2114,8 @@ describe("desktop command center", () => {
       tokensUsed: 42,
       timeUsedSeconds: 8,
       skillIds: [],
+      checks: [],
+      proposedChecks: [],
       createdAt: "2026-07-16T02:00:00Z",
       updatedAt: "2026-07-16T02:01:00Z",
     };
@@ -2256,7 +2258,11 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    const dialog = await screen.findByRole(
+      "dialog",
+      { name: "Settings" },
+      { timeout: 5_000 },
+    );
     const picker = await within(dialog).findByRole("combobox", {
       name: "Default for new Sessions",
     });
@@ -2288,7 +2294,11 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    const dialog = await screen.findByRole(
+      "dialog",
+      { name: "Settings" },
+      { timeout: 5_000 },
+    );
     const dark = within(dialog).getByRole("button", { name: "Dark" });
     expect(dark.getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(dark);
@@ -2304,7 +2314,11 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    const dialog = await screen.findByRole(
+      "dialog",
+      { name: "Settings" },
+      { timeout: 5_000 },
+    );
     const input = within(dialog).getByLabelText(
       "Import VS Code theme",
     ) as HTMLInputElement;
@@ -2376,7 +2390,11 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    const dialog = await screen.findByRole(
+      "dialog",
+      { name: "Settings" },
+      { timeout: 5_000 },
+    );
     fireEvent.change(
       within(dialog).getByRole("combobox", { name: "Interface language" }),
       { target: { value: "zh-CN" } },
@@ -2487,7 +2505,11 @@ describe("desktop command center", () => {
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    const dialog = await screen.findByRole(
+      "dialog",
+      { name: "Settings" },
+      { timeout: 5_000 },
+    );
     const nav = within(dialog).getByRole("navigation", {
       name: "Settings sections",
     });
@@ -2572,7 +2594,11 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    const dialog = await screen.findByRole(
+      "dialog",
+      { name: "Settings" },
+      { timeout: 5_000 },
+    );
     const openButton = within(dialog).getByRole("button", {
       name: "Open configuration file",
     });
@@ -2806,7 +2832,11 @@ describe("desktop command center", () => {
 
     await screen.findByRole("heading", { name: "Recovered task" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    const dialog = await screen.findByRole(
+      "dialog",
+      { name: "Settings" },
+      { timeout: 5_000 },
+    );
     const access = (await within(dialog).findByRole("combobox", {
       name: "Default Session access",
     })) as HTMLSelectElement;

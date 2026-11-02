@@ -15,9 +15,18 @@ claim.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable
-from dataclasses import dataclass
-from typing import Protocol
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
+from typing import Any, Protocol
+
+from core.agent_runtime.goal_checks import GoalCheckRun, GoalCheckSpec, run_checks
+
+# What a kept review may hold: enough to read in the Goal's history, never the
+# whole output of every command.
+_RECORD_TEXT_MAX_CHARS = 2_000
+_RECORD_OUTPUT_MAX_CHARS = 1_500
+_REJECTION_OUTPUT_MAX_CHARS = 1_500
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +58,10 @@ class GoalCompletionRequest:
     # Changes whenever the agent changes files for this Goal: rejected claims
     # with the same marker in a row made no progress in between.
     progress_marker: str = ""
+    # The checklist the user confirmed, and how its commands went this time
+    # (filled in by the completion gate before a review).
+    checks: tuple[GoalCheckSpec, ...] = ()
+    check_runs: tuple[GoalCheckRun, ...] = ()
 
 
 class VerificationUnavailable(RuntimeError):
@@ -62,6 +75,17 @@ class VerificationUnavailable(RuntimeError):
     def __init__(self, message: str, *, tokens: int = 0) -> None:
         super().__init__(message)
         self.tokens = tokens
+        # Confirmed checks that ran before the review failed.
+        self.check_runs: tuple[GoalCheckRun, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class RequirementFinding:
+    """One requirement as the reviewer judged it (see goal_reviewer.FINDINGS)."""
+
+    requirement: str
+    finding: str
+    evidence: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +102,13 @@ class GoalVerdict:
     justification: str
     impossible: bool = False
     tokens: int = 0
+    # Which step reached the verdict: "rule", "checks" or "reviewer"; "none"
+    # when nothing was checked (no verifier and no confirmed checks).
+    stage: str = ""
+    summary: str = ""
+    requirements: tuple[RequirementFinding, ...] = ()
+    checked: tuple[str, ...] = ()
+    check_runs: tuple[GoalCheckRun, ...] = ()
 
     def __post_init__(self) -> None:
         if self.confirmed and self.impossible:
@@ -153,11 +184,13 @@ class RuleBasedVerifier:
             return GoalVerdict(
                 confirmed=False,
                 justification="The Goal has no objective to verify the completion claim against.",
+                stage="rule",
             )
         if not request.reason.strip():
             return GoalVerdict(
                 confirmed=False,
                 justification="The completion claim states no reason. Explain what was done before marking the Goal complete.",
+                stage="rule",
             )
         evidence = request.evidence
         pending_checks = tuple(
@@ -189,6 +222,7 @@ class RuleBasedVerifier:
                 f"The latest of {len(evidence)} finished step(s) succeeded"
                 + (", including the latest check." if checks else ".")
             ),
+            stage="rule",
         )
 
 
@@ -199,4 +233,173 @@ def _reject(text: str, could_resolve: tuple[GoalEvidenceItem, ...]) -> GoalVerdi
             "and has no recorded result yet; look at its result before claiming "
             "completion again."
         )
-    return GoalVerdict(confirmed=False, justification=text)
+    return GoalVerdict(confirmed=False, justification=text, stage="rule")
+
+
+CheckRunner = Callable[[tuple[GoalCheckSpec, ...]], Awaitable[tuple[GoalCheckRun, ...]]]
+
+
+class CompletionGate:
+    """Every completion claim goes through here, cheapest step first.
+
+    1. The rule check, unless ``goal.completionVerifier`` is ``off``.
+    2. The Goal's confirmed checks: DeepCode runs each command itself; one
+       that fails turns the claim back with its output.
+    3. The reviewer, when ``goal.completionVerifier`` is ``reviewer``; it is
+       told how the checks went.
+
+    With the setting ``off`` and no confirmed checks, nothing is checked and
+    the verdict's ``stage`` is ``none``.
+    """
+
+    def __init__(
+        self,
+        *,
+        rule: bool,
+        review: GoalCompletionVerifier | None = None,
+        run: CheckRunner | None = None,
+        workspace: str = ".",
+        sandbox_enabled: bool | None = None,
+    ) -> None:
+        """``sandbox_enabled``: the agent's own command sandbox setting, so a
+        check runs with the same rights as the agent's commands."""
+
+        self._rule = RuleBasedVerifier() if rule or review is not None else None
+        self._review = review
+        self._run = run or (lambda checks: _run_in(checks, workspace, sandbox_enabled))
+
+    async def __call__(self, request: GoalCompletionRequest) -> GoalVerdict:
+        verdict = GoalVerdict(confirmed=True, justification="", stage="none")
+        if self._rule is not None:
+            verdict = await self._rule(request)
+            if not verdict.confirmed:
+                return verdict
+        runs: tuple[GoalCheckRun, ...] = ()
+        if any(check.command for check in request.checks):
+            runs = await self._run(request.checks)
+            failed = [run for run in runs if not run.passed]
+            if failed:
+                return GoalVerdict(
+                    confirmed=False,
+                    justification=_failed_checks_text(runs, failed),
+                    stage="checks",
+                    check_runs=runs,
+                )
+            verdict = GoalVerdict(
+                confirmed=True,
+                justification=(
+                    f"DeepCode ran the {len(runs)} confirmed check(s) and each "
+                    "exited 0."
+                ),
+                stage="checks",
+                check_runs=runs,
+            )
+        if self._review is None:
+            return verdict
+        try:
+            reviewed = await self._review(replace(request, check_runs=runs))
+        except VerificationUnavailable as exc:
+            exc.check_runs = runs
+            raise
+        return replace(reviewed, check_runs=runs)
+
+
+async def _run_in(
+    checks: tuple[GoalCheckSpec, ...], workspace: str, sandbox_enabled: bool | None
+) -> tuple[GoalCheckRun, ...]:
+    from core.harness.env_sanitize import child_env
+
+    return await run_checks(
+        checks, cwd=workspace, env=child_env(), sandbox_enabled=sandbox_enabled
+    )
+
+
+def _failed_checks_text(
+    runs: tuple[GoalCheckRun, ...], failed: list[GoalCheckRun]
+) -> str:
+    lines = [
+        f"DeepCode ran the Goal's {len(runs)} confirmed check(s); "
+        f"{len(failed)} did not pass:"
+    ]
+    for run in failed:
+        lines.append(f"- {run.requirement}: {run.describe()}")
+        output = run.output.strip()
+        if output:
+            if len(output) > _REJECTION_OUTPUT_MAX_CHARS:
+                output = "…" + output[-(_REJECTION_OUTPUT_MAX_CHARS - 1) :]
+            lines.append("  Output (end):\n" + _indent(output))
+    lines.append(
+        "Fix the work so these commands pass, then claim completion again. "
+        "Do not change the checks or what they test to make them pass."
+    )
+    return "\n".join(lines)
+
+
+def _indent(text: str) -> str:
+    return "\n".join(f"    {line}" for line in text.splitlines())
+
+
+def _clip(text: str, limit: int) -> str:
+    text = text.strip()
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def review_record(
+    *,
+    goal_id: str,
+    turn_id: str,
+    result: str,
+    verdict: GoalVerdict | None = None,
+    problem: str = "",
+    check_runs: tuple[GoalCheckRun, ...] = (),
+    tokens: int = 0,
+) -> dict[str, Any]:
+    """One completion review as the Goal's history keeps it.
+
+    ``result`` is ``passed``, ``rejected``, ``impossible`` or ``unavailable``
+    (the review could not run; ``problem`` says why).
+    """
+
+    runs = verdict.check_runs if verdict is not None else check_runs
+    return {
+        "goalId": goal_id,
+        "turnId": turn_id,
+        "recordedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "stage": (verdict.stage or "other") if verdict is not None else "reviewer",
+        "result": result,
+        "justification": _clip(
+            verdict.justification if verdict is not None else problem,
+            _RECORD_TEXT_MAX_CHARS,
+        ),
+        "summary": _clip(verdict.summary, _RECORD_TEXT_MAX_CHARS)
+        if verdict is not None
+        else "",
+        "requirements": [
+            {
+                "requirement": _clip(entry.requirement, 500),
+                "finding": entry.finding,
+                "evidence": _clip(entry.evidence, 800),
+            }
+            for entry in (verdict.requirements if verdict is not None else ())
+        ],
+        "checks": [
+            {
+                "requirement": run.requirement,
+                "command": list(run.command),
+                "exitCode": run.exit_code,
+                "problem": run.problem,
+                "seconds": round(run.seconds, 1),
+                "output": (
+                    run.output
+                    if len(run.output) <= _RECORD_OUTPUT_MAX_CHARS
+                    else "…" + run.output[-(_RECORD_OUTPUT_MAX_CHARS - 1) :]
+                ),
+            }
+            for run in runs
+        ],
+        "checked": [
+            _clip(entry, 300)
+            for entry in (verdict.checked if verdict is not None else ())
+        ][:20],
+        "tokens": max(0, verdict.tokens if verdict is not None else tokens),
+    }

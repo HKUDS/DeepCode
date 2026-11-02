@@ -85,7 +85,12 @@ def _req(text: str, met: bool) -> dict:
 
 def test_verdicts_read_as_the_agent_needs_them():
     passed = verdict_from_result(
-        {"verdict": "pass", "summary": "All good.", "requirements": [_req("CSV", True)]}
+        {
+            "verdict": "pass",
+            "summary": "All good.",
+            "requirements": [_req("CSV", True)],
+            "checked": ["pytest -q", " "],
+        }
     )
     assert passed == GoalVerdict(
         confirmed=True,
@@ -93,7 +98,14 @@ def test_verdicts_read_as_the_agent_needs_them():
             "An independent review passed the claim: All good. "
             "(1 requirement(s) checked.)"
         ),
+        stage="reviewer",
+        summary="All good.",
+        requirements=(passed.requirements[0],),
+        checked=("pytest -q",),
     )
+    # The table is kept for the Goal's history.
+    assert passed.requirements[0].requirement == "CSV"
+    assert passed.requirements[0].finding == "proved"
     failed = verdict_from_result(
         {
             "verdict": "fail",

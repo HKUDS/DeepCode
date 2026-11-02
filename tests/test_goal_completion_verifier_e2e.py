@@ -532,3 +532,94 @@ def test_a_token_budget_stops_the_goal_inside_one_turn(
     assert provider.calls == 5
     assert goal.status.value == "budget_limited"
     assert goal.tokens_used == 5000
+
+
+def _reviews(tmp_path: Path) -> list[dict[str, Any]]:
+    from core.sessions import SessionStore, ThreadGoalStore
+
+    sessions = SessionStore(tmp_path / "sessions")
+    session_id = sessions.list_sessions()[0].session_id
+    store = ThreadGoalStore(sessions)
+    goal = store.read(session_id)
+    return list(store.read_reviews(session_id, goal_id=goal.id))
+
+
+@pytest.mark.parametrize("verifier", ["off", "rule"])
+def test_a_confirmed_check_runs_whatever_the_setting(
+    monkeypatch, tmp_path, verifier
+) -> None:
+    fixed = "def add(a, b):\n    return a + b\n"
+    goal, _, provider = _run(
+        monkeypatch,
+        tmp_path,
+        [
+            ("read", {"file_path": "calc.py"}),
+            COMPLETE,  # claimed before the fix: DeepCode's own run fails
+            ("write", {"file_path": "calc.py", "content": fixed}),
+            COMPLETE,
+        ],
+        verifier=verifier,
+        extra_args=("--check", CHECK),
+    )
+
+    assert goal.status.value == "complete"
+    assert [check.command[1:3] for check in goal.checks] == [("-B", "-c")]
+    rejected, accepted = provider.goal_results()
+    assert rejected["updated"] is False
+    text = rejected["verdict"]["justification"]
+    assert "did not pass" in text and "AssertionError" in text
+    assert accepted["verdict"]["confirmed"] is True
+    reviews = _reviews(tmp_path)
+    assert [(r["stage"], r["result"]) for r in reviews] == [
+        ("checks", "rejected"),
+        ("checks", "passed"),
+    ]
+    assert reviews[0]["checks"][0]["exitCode"] == 1
+    assert reviews[1]["checks"][0]["exitCode"] == 0
+
+
+def test_a_check_that_cannot_be_kept_is_refused_before_the_goal_starts(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    with pytest.raises(IndexError):
+        # Refused before any Session is created.
+        _run(
+            monkeypatch,
+            tmp_path,
+            [COMPLETE],
+            extra_args=("--check", "pytest " + "a" * 3000),
+        )
+    assert "at most" in capsys.readouterr().out
+
+
+def test_proposed_checks_wait_for_the_user_and_never_run(monkeypatch, tmp_path) -> None:
+    goal, _, provider = _run(
+        monkeypatch,
+        tmp_path,
+        [
+            (
+                "propose_goal_checks",
+                {
+                    "checks": [
+                        {
+                            "requirement": "add returns the sum",
+                            "command": [sys.executable, "-c", "raise SystemExit(1)"],
+                        }
+                    ]
+                },
+            ),
+            ("read", {"file_path": "calc.py"}),
+            COMPLETE,
+        ],
+        verifier="off",
+    )
+
+    # The failing command was only proposed, so it did not stop completion.
+    assert goal.status.value == "complete"
+    assert goal.checks == ()
+    assert [check.requirement for check in goal.proposed_checks] == [
+        "add returns the sum"
+    ]
+    assert _reviews(tmp_path) == []
+    first_prompt = provider.requests[0]["messages"][-1]["content"]
+    assert "propose_goal_checks" in str(first_prompt)

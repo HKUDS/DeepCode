@@ -89,7 +89,11 @@ def default_coding_tools(
     from core.agent_runtime.tools.registry import ToolRegistry
     from core.harness.memory import MemoryTool
     from core.harness.skills import SkillTool, discover_skills
-    from core.harness.tools.goal import GetGoalTool, UpdateGoalTool
+    from core.harness.tools.goal import (
+        GetGoalTool,
+        ProposeGoalChecksTool,
+        UpdateGoalTool,
+    )
     from core.harness.tools.plan import UpdatePlanTool
     from core.harness.tools.spawn_agent import (
         InterruptAgentTool,
@@ -178,6 +182,7 @@ def default_coding_tools(
     if goal_runtime is not None:
         tools.append(GetGoalTool(goal_runtime))
         tools.append(UpdateGoalTool(goal_runtime))
+        tools.append(ProposeGoalChecksTool(goal_runtime))
     for tool in tools:
         registry.register(tool)
     return registry

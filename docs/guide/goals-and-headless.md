@@ -38,13 +38,16 @@ include `/goal continue`, `/goal wait`, `/goal reopen`, and `/goal clear`.
 `/goal wait` follows the Goal until it finishes; press `Ctrl+C` to stop
 waiting while the Goal keeps working.
 
-A Goal without a token budget continues on its own at most 20 times in a row
+A Goal can have a token budget, a time limit (its active time, set in the
+Desktop Goal editor or with `deepcode loop --time-budget MINUTES`), or both.
+A Goal without either continues on its own at most 20 times in a row
 without reporting complete or blocked. It then stops as blocked, so you can
 check its progress, and `/goal resume` lets it continue. Sending a message,
 editing, resuming, or continuing the Goal starts the count again. A Goal with
-a token budget is limited by its budget instead. The budget also holds inside a
+a budget is limited by its budget instead. The budget also holds inside a
 Turn: once it is used up, the agent gets one more answer, without tools, to say
-what it finished and what is left, and the Turn ends there.
+what it finished and what is left, and the Turn ends there. It is asked to
+report only what its tool results showed and to say what it did not verify.
 
 With or without a budget, a Goal also stops as blocked when no step succeeded
 in three automatic continuations in a row: each of those Turns did no work at
@@ -68,9 +71,43 @@ during the Turn starts the count again.
 ## Check completion claims
 
 By default the agent decides when a Goal is complete: before it says so, it is
-asked to check every requirement of the Goal against the workspace. To have
-that claim checked as well, set `goal.completionVerifier` in your
-[configuration](configuration.md):
+asked to check every requirement of the Goal against the workspace. A claim
+made while sub-agents it started are still running is not recorded: the agent
+is told to wait for them and look at their results first. After three such
+claims in a row the next one is judged anyway, so a stuck sub-agent cannot
+keep the Goal open; stop it before accepting the outcome. There are two ways
+to check the claim as well, and they work together.
+
+### A checklist you confirm
+
+Early in a Goal the agent proposes a checklist: the Goal's requirements, each
+with the command that proves it where one exists. Nothing runs until you
+confirm it. In Desktop the proposal appears on the Goal card with **Use these
+checks** and **Dismiss**; in the TUI, `/goal checks` shows it, `/goal checks
+confirm` uses the list you were shown (if the agent replaced it meanwhile, you
+are shown the new one first), `/goal checks dismiss` drops it, `/goal checks add
+COMMAND` adds a command of your own and `/goal checks clear` removes them all.
+After you dismiss a proposal the agent is not asked for another. With
+`deepcode loop`, `--test-cmd` and each `--check COMMAND` become confirmed checks
+of the new Goal.
+
+Once confirmed, DeepCode runs each command itself whenever the agent claims
+the Goal complete, in the project folder. A proposed command is an argument
+list run without a shell. A command you type yourself runs the same way unless
+it uses shell syntax (a pipe, `&&`, a glob, a variable); then it runs in
+`bash -o pipefail -c`, so a failing stage fails the check: `pytest | tail`
+cannot hide failing tests. Each command may take up to 10 minutes, all of them
+30 minutes, and anything a command leaves running is stopped when it exits. If
+one does not exit 0, the claim is turned back with the end of its output, and
+the agent keeps working. A check runs with the same rights as the agent's own
+commands, in the same sandbox: the agent may have written the code it runs. A
+requirement without a command is checked only by the reviewer below, if you
+use one. Checks run whatever `goal.completionVerifier` is set to.
+
+### A verifier
+
+Set `goal.completionVerifier` in your [configuration](configuration.md), or
+in Desktop under **Settings → General → Goal completion checks**:
 
 - `"rule"` turns the claim back while the latest check failed or nothing was
   done in that Turn. It reads a command's exit code, which for a pipeline is
@@ -93,8 +130,15 @@ that claim checked as well, set `goal.completionVerifier` in your
   A review can take a few minutes, and its tokens count toward the Goal's
   token budget.
 
+  The reviewer also gets your confirmed checklist, and checks each item.
+
 The Goal stops as blocked after `goal.maxRejections` (3) rejected claims in a
 row with no file changes in between, or after 10 rejected claims in all.
+
+Every check of a claim is kept with the Session: what was checked, the result,
+and, for a review, each requirement with its finding and evidence. The Desktop
+Goal card shows the latest result next to the Goal's status and the full table
+when you open the card; `/goal show` prints the latest one.
 
 ## Work on a Goal from the shell: `deepcode loop`
 
@@ -106,12 +150,13 @@ deepcode loop "Refactor greet without changing its tested behavior" --workspace 
 ```
 
 Use the Python command available in your project. `--test-cmd` tells the agent
-which test command to run before reporting completion; `--token-budget` limits
-how many tokens the Goal may use.
+which test command to run before reporting completion, and DeepCode runs it
+itself before it accepts the claim (see
+[A checklist you confirm](#a-checklist-you-confirm)); `--check COMMAND` adds
+more such commands. `--token-budget` limits how many tokens the Goal may use
+and `--time-budget MINUTES` how long it may work.
 
-When the run finishes, review the changed files and test output. The agent
-reports Goal completion based on its work; the test command is an instruction
-to the agent, rather than an independent test runner built into `loop`.
+When the run finishes, review the changed files and test output.
 For a script, exit code 0 means the Goal was marked complete; other settled
 states return 1. You can resume it with `deepcode loop --resume SESSION_ID`.
 
@@ -182,7 +227,8 @@ deepcode schedule loop "Check greet and fix any regressions" --workspace ./deepc
 
 Closing this scheduling client stops future submissions; already accepted work
 continues in the service. Use Automations when the schedule itself must survive
-client exit. The test-command limitation described above also applies here.
+client exit. As with `deepcode loop`, DeepCode runs the test command itself
+before it accepts a completion claim.
 See [service operation](../SERVICE_RUNTIME.md) for shutdown and drain semantics.
 
 ### Change-gated schedules

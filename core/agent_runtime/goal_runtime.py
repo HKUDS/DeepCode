@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-GOAL_TOOL_NAMES = frozenset({"get_goal", "update_goal"})
+GOAL_TOOL_NAMES = frozenset({"get_goal", "update_goal", "propose_goal_checks"})
 # The Goal ledger's reason limit (GOAL_OUTCOME_REASON_MAX_CHARS); a longer
 # auto-block reason would fail the very update that ends the retries.
 _AUTO_BLOCK_REASON_MAX_CHARS = 2_000
@@ -32,6 +33,10 @@ MAX_TOTAL_REJECTIONS = 10
 # exception: asking them again would be worse. The runtime's own stops are not
 # limited by it.
 MIN_TURNS_BEFORE_BLOCKED = 3
+# Completion claims in a row held back for running sub-agents before the next
+# one is judged anyway: a sub-agent that hangs must not make completion
+# impossible.
+MAX_HELD_CLAIMS = 3
 
 
 @dataclass(slots=True)
@@ -99,6 +104,18 @@ class GoalRuntimeHandler(Protocol):
         """Charge the tokens a completion review spent to the Goal."""
         ...
 
+    def record_review(
+        self, context: GoalRuntimeContext, review: dict[str, Any]
+    ) -> None:
+        """Keep one completion review in the Goal's history (best effort)."""
+        ...
+
+    def propose_checks(
+        self, context: GoalRuntimeContext, checks: tuple[Any, ...]
+    ) -> dict[str, Any]:
+        """Keep the agent's checklist (``GoalCheck`` values) for the user to confirm."""
+        ...
+
     def goal_turn_count(self, context: GoalRuntimeContext) -> int:
         """How many Turns have worked on the Goal, this one included."""
         ...
@@ -142,9 +159,15 @@ class GoalRuntimeRouter:
         self._handler: GoalRuntimeHandler | None = None
         self._context: GoalRuntimeContext | None = None
         self._terminal_requested = False
+        # When the active Turn started, for the Goal's time budget.
+        self._activated_at = 0.0
         self._verifier: GoalCompletionVerifier | None = None
         self._settle: Callable[[], Awaitable[None]] | None = None
         self._max_rejections = 3
+        # How many sub-agents of the active session are still running, and
+        # claims held back for them in a row, per Goal.
+        self._running_work: Callable[[], int] | None = None
+        self._held_claims: dict[str, int] = {}
         # Rejected completion claims per goal, so a model cannot burn Turns
         # retrying the same claim; cleared on success, auto-block, and every
         # (re)configuration. Process memory only: a restart starts over.
@@ -177,12 +200,24 @@ class GoalRuntimeRouter:
             self._max_rejections = max_rejections
             self._rejections.clear()
 
+    def configure_running_work(self, count: Callable[[], int] | None) -> None:
+        """Tell the router how many sub-agents are still at work.
+
+        A completion claim made while one runs is not recorded: its result
+        may still change the work, and a review now would judge it unfinished.
+        """
+
+        with self._lock:
+            self._running_work = count
+
     def activate(self, context: GoalRuntimeContext) -> None:
         with self._lock:
             if self._context is not None and self._context.turn_id != context.turn_id:
                 raise GoalRuntimeError(
                     f"Goal runtime is already active for Turn {self._context.turn_id}"
                 )
+            if self._context is None:
+                self._activated_at = time.monotonic()
             self._context = context
             self._terminal_requested = False
 
@@ -197,6 +232,10 @@ class GoalRuntimeRouter:
         handler, context = self._snapshot()
         return handler.read_goal(context)
 
+    def propose_checks(self, checks: tuple[Any, ...]) -> dict[str, Any]:
+        handler, context = self._snapshot()
+        return handler.propose_checks(context, checks)
+
     async def request(
         self,
         *,
@@ -209,12 +248,38 @@ class GoalRuntimeRouter:
         with self._lock:
             verifier = self._verifier
             settle = self._settle
+            running_work = self._running_work
+
+        if status == "complete" and running_work is not None:
+            try:
+                running = running_work()
+            except Exception:  # noqa: BLE001 - never blocks a claim by itself
+                logger.warning("Could not count running sub-agents", exc_info=True)
+                running = 0
+            with self._lock:
+                held = self._held_claims.get(context.goal_id, 0)
+                if running > 0 and held < MAX_HELD_CLAIMS:
+                    self._held_claims[context.goal_id] = held + 1
+                else:
+                    self._held_claims.pop(context.goal_id, None)
+            if running > 0 and held < MAX_HELD_CLAIMS:
+                return {
+                    "updated": False,
+                    "goalId": context.goal_id,
+                    "note": (
+                        f"Not recorded: {running} sub-agent(s) you started are "
+                        "still running. Wait for them (wait_agent), check what "
+                        "they did, then claim completion again. Stop one that "
+                        "is stuck with interrupt_agent."
+                    ),
+                }
 
         verdict = None
         if status == "complete" and verifier is not None:
             from core.agent_runtime.goal_verifier import (
                 GoalVerdict,
                 VerificationUnavailable,
+                review_record,
             )
 
             judged_objective = None
@@ -232,6 +297,18 @@ class GoalRuntimeRouter:
                 raise
             except VerificationUnavailable as exc:
                 self._charge(handler, context, exc.tokens)
+                self._keep(
+                    handler,
+                    context,
+                    review_record(
+                        goal_id=context.goal_id,
+                        turn_id=context.turn_id,
+                        result="unavailable",
+                        problem=str(exc),
+                        check_runs=exc.check_runs,
+                        tokens=exc.tokens,
+                    ),
+                )
                 return self._stop_unverified(
                     handler, context, str(exc), judged_objective
                 )
@@ -240,6 +317,24 @@ class GoalRuntimeRouter:
                     confirmed=False,
                     justification=f"Completion verification failed: {exc}",
                     tokens=getattr(exc, "tokens", 0),
+                    stage="error",
+                )
+            if verdict.stage != "none":
+                self._keep(
+                    handler,
+                    context,
+                    review_record(
+                        goal_id=context.goal_id,
+                        turn_id=context.turn_id,
+                        result=(
+                            "passed"
+                            if verdict.confirmed
+                            else "impossible"
+                            if verdict.impossible
+                            else "rejected"
+                        ),
+                        verdict=verdict,
+                    ),
                 )
             if not verdict.confirmed:
                 # Charged first, so the rejection can say when the review
@@ -274,7 +369,7 @@ class GoalRuntimeRouter:
                 raise GoalRuntimeError("Goal Turn changed while recording the decision")
             self._terminal_requested = True
             self._rejections.pop(context.goal_id, None)
-        if verdict is not None:
+        if verdict is not None and verdict.stage != "none":
             result = {
                 **result,
                 "verdict": {
@@ -283,6 +378,19 @@ class GoalRuntimeRouter:
                 },
             }
         return result
+
+    @staticmethod
+    def _keep(
+        handler: GoalRuntimeHandler,
+        context: GoalRuntimeContext,
+        review: dict[str, Any],
+    ) -> None:
+        """Keep a review in the Goal's history; never hides the decision."""
+
+        try:
+            handler.record_review(context, review)
+        except Exception:  # noqa: BLE001 - history must not change the outcome
+            logger.exception("a completion review was not kept")
 
     @staticmethod
     def _charge(
@@ -505,11 +613,14 @@ class GoalRuntimeRouter:
         The Goal adds a Turn's usage only when the Turn settles, so without
         this a single runaway Turn could spend far past the budget. Review
         tokens are charged as they are spent, so they count here at once.
+        0 also once the Goal's time budget is used, this Turn's time so far
+        included.
         """
 
         with self._lock:
             handler = self._handler
             context = self._context
+            activated_at = self._activated_at
         if handler is None or context is None:
             return None
         try:
@@ -526,6 +637,17 @@ class GoalRuntimeRouter:
         if goal.get("status") == "complete":
             # Done: the Turn only has its closing answer left.
             return None
+        # The Goal counts a Turn's time when the Turn settles; this one's so
+        # far is added here, in whole seconds as settling counts it, so a
+        # Turn stopped here always settles the Goal as out of time.
+        time_budget = goal.get("timeBudgetSeconds")
+        time_used = goal.get("timeUsedSeconds")
+        if (
+            isinstance(time_budget, int)
+            and isinstance(time_used, int)
+            and time_used + int(time.monotonic() - activated_at) >= time_budget
+        ):
+            return 0
         budget = goal.get("tokenBudget")
         used = goal.get("tokensUsed")
         if not isinstance(budget, int) or not isinstance(used, int):

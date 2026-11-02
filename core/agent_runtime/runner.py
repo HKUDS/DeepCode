@@ -95,15 +95,18 @@ _NO_PROGRESS_MESSAGE = (
     "Tell me how you would like to proceed."
 )
 _TOKEN_BUDGET_MESSAGE = (
-    "I stopped because the Goal's token budget is used up. Raise the budget "
-    "to let the work continue."
+    "I stopped because the Goal's budget (tokens or time) is used up. Raise "
+    "it to let the work continue."
 )
 # Codex's rule: a spent budget still gets one answer to wrap up, so the user
 # learns where the work stands. No tools: nothing new is started.
 _TOKEN_BUDGET_WRAP_UP = (
-    "The Goal's token budget is used up, so this Turn ends now and no tools "
+    "The Goal's budget (tokens or time) is used up, so this Turn ends now and no tools "
     "are available. Do not start new work. In a few sentences, tell the user "
-    "what you finished, what you verified and how, and what is left to do."
+    "what you finished, what you verified and how, and what is left to do. "
+    "Report only what the tool results in this conversation show: for each "
+    "check, the command you ran and what it showed. Say plainly what you did "
+    "not run or did not see; never state a result you did not observe."
 )
 _MAX_EMPTY_RETRIES = 2
 _MAX_LENGTH_RECOVERIES = 3

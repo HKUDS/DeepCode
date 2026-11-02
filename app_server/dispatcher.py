@@ -71,6 +71,7 @@ from core.domain.execution_security import ExecutionAccessPreset
 from core.domain.message_provenance import ClientSurface
 from core.domain.project import TrustState
 from core.domain.thread import ThreadMode
+from core.domain.thread_goal import KEEP_TIME_BUDGET, GoalCheck
 from core.skills.models import MAX_SELECTED_SKILLS, SkillScope
 from core.version import __version__
 
@@ -291,6 +292,8 @@ class Dispatcher:
             rpc_methods.THREAD_GOAL_RESUME: self._thread_goal_resume,
             rpc_methods.THREAD_GOAL_CONTINUE: self._thread_goal_continue,
             rpc_methods.THREAD_GOAL_CLEAR: self._thread_goal_clear,
+            rpc_methods.THREAD_GOAL_CHECKS_CONFIRM: self._thread_goal_checks_confirm,
+            rpc_methods.THREAD_GOAL_CHECKS_DISMISS: self._thread_goal_checks_dismiss,
             rpc_methods.TURN_START: self._turn_start,
             rpc_methods.TURN_ENQUEUE: self._turn_enqueue,
             rpc_methods.TURN_STEER: self._turn_steer,
@@ -1243,12 +1246,25 @@ class Dispatcher:
     def _thread_goal_get(self, params: Params) -> dict[str, Any]:
         params.only("threadId")
         thread_id = str(params.string("threadId"))
-        goal, outcome = self.application.goals.read_with_outcome(thread_id)
+        goals = self.application.goals
+        goal, outcome = goals.read_with_outcome(thread_id)
+        settled = goal is None or goals.execution_settled(goal, outcome)
+        if settled and goal is not None:
+            # The deciding Turn may have settled after the read above: read
+            # again so a settled answer comes with the usage it settled.
+            again, again_outcome = goals.read_with_outcome(thread_id)
+            if (
+                again is not None
+                and again.id == goal.id
+                and again.status is goal.status
+                and (again_outcome.decided_by_turn_id if again_outcome else None)
+                == (outcome.decided_by_turn_id if outcome else None)
+            ):
+                goal, outcome = again, again_outcome
         return {
             **self._goal_view(goal, outcome),
-            "executionSettled": (
-                goal is None or self.application.goals.execution_settled(goal, outcome)
-            ),
+            "reviews": list(goals.read_reviews(thread_id, goal)),
+            "executionSettled": settled,
         }
 
     def _thread_goal_set(self, params: Params) -> dict[str, Any]:
@@ -1259,9 +1275,17 @@ class Dispatcher:
             "skills",
             "expectedGoalId",
             "start",
+            "checks",
+            "timeBudgetSeconds",
         )
         thread_id = str(params.string("threadId"))
         existing = self.application.goals.read(thread_id)
+        checks = _goal_checks(params) if "checks" in params.values else ()
+        if existing is not None and "checks" in params.values:
+            raise InvalidParams(
+                "checks can be set only when creating a Goal; use "
+                "thread/goal/checks/confirm"
+            )
         expected_goal_id = (
             params.nullable_string("expectedGoalId")
             if "expectedGoalId" in params.values
@@ -1292,6 +1316,13 @@ class Dispatcher:
             if existing is not None
             else None
         )
+        time_budget = (
+            params.optional_integer(
+                "timeBudgetSeconds", minimum=1, maximum=2_147_483_647
+            )
+            if "timeBudgetSeconds" in params.values
+            else KEEP_TIME_BUDGET
+        )
         start = params.boolean("start", default=True)
         if existing is None:
             if expected_goal_id is not None:
@@ -1303,6 +1334,10 @@ class Dispatcher:
                 objective=objective,
                 token_budget=token_budget,
                 skill_ids=skills,
+                checks=checks,
+                time_budget_seconds=(
+                    None if time_budget is KEEP_TIME_BUDGET else time_budget
+                ),
                 start=start,
                 client_surface=self.client_surface,
             )
@@ -1317,6 +1352,7 @@ class Dispatcher:
                 objective=objective,
                 token_budget=token_budget,
                 skill_ids=skills,
+                time_budget_seconds=time_budget,
                 continue_work=start,
                 client_surface=self.client_surface,
             )
@@ -1373,11 +1409,34 @@ class Dispatcher:
         )
         return {"goal": None, "outcome": None}
 
+    def _thread_goal_checks_confirm(self, params: Params) -> dict[str, Any]:
+        params.only("threadId", "expectedGoalId", "checks")
+        thread_id = str(params.string("threadId"))
+        self.application.goals.confirm_checks(
+            thread_id,
+            expected_goal_id=str(params.string("expectedGoalId")),
+            checks=_goal_checks(params),
+        )
+        return self._goal_result(thread_id)
+
+    def _thread_goal_checks_dismiss(self, params: Params) -> dict[str, Any]:
+        params.only("threadId", "expectedGoalId")
+        thread_id = str(params.string("threadId"))
+        self.application.goals.dismiss_proposed_checks(
+            thread_id,
+            expected_goal_id=str(params.string("expectedGoalId")),
+        )
+        return self._goal_result(thread_id)
+
     def _goal_result(self, thread_id: str) -> dict[str, Any]:
         # Read back after the change, Goal and outcome together: a Turn may
         # settle as soon as the change commits, and pairing the changed Goal
         # with that Turn's outcome would describe no state that existed.
-        return self._goal_view(*self.application.goals.read_with_outcome(thread_id))
+        goal, outcome = self.application.goals.read_with_outcome(thread_id)
+        return {
+            **self._goal_view(goal, outcome),
+            "reviews": list(self.application.goals.read_reviews(thread_id, goal)),
+        }
 
     @staticmethod
     def _goal_view(goal, outcome) -> dict[str, Any]:
@@ -1779,3 +1838,26 @@ class Dispatcher:
             "items": [item_view(item) for item in snapshot.items],
             "artifacts": [artifact_view(artifact) for artifact in snapshot.artifacts],
         }
+
+
+def _goal_checks(params: Params) -> tuple[GoalCheck, ...]:
+    """A checklist from request parameters: ``[{requirement, command?}]``."""
+
+    value = params.values.get("checks")
+    if not isinstance(value, list):
+        raise InvalidParams("checks must be an array")
+    checks: list[GoalCheck] = []
+    for entry in value:
+        if not isinstance(entry, dict) or set(entry) - {"requirement", "command"}:
+            raise InvalidParams("each check must be {requirement, command}")
+        requirement = entry.get("requirement")
+        command = entry.get("command", [])
+        if not isinstance(requirement, str) or not isinstance(command, list):
+            raise InvalidParams("a check needs a requirement and a command list")
+        if any(not isinstance(part, str) for part in command):
+            raise InvalidParams("a check command must be a list of strings")
+        try:
+            checks.append(GoalCheck(requirement=requirement, command=tuple(command)))
+        except ValueError as exc:
+            raise InvalidParams(str(exc)) from exc
+    return tuple(checks)

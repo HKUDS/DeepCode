@@ -229,6 +229,12 @@ class DeepCodeApplication:
         from core.application.views import goal_outcome_view, thread_goal_view
 
         outcome = self.goals.read_outcome(thread_id) if record is not None else None
+        # Read before the transaction, like the outcome: reading takes the
+        # Session's file lock, which must never wait inside a database write.
+        reviews = [
+            _slim_review(review)
+            for review in self.goals.read_reviews(thread_id, record, limit=1)
+        ]
         with self.database.transaction() as connection:
             event = EventRepository(connection).append(
                 thread_id=thread_id,
@@ -238,6 +244,7 @@ class DeepCodeApplication:
                     "outcome": (
                         goal_outcome_view(outcome) if outcome is not None else None
                     ),
+                    "reviews": reviews,
                 },
             )
         self.broker.publish(event)
@@ -433,3 +440,18 @@ class DeepCodeApplication:
             raise errors[0]
         if errors:
             raise ExceptionGroup("DeepCode application shutdown failed", errors)
+
+
+# Every Goal update is kept as an event, so it carries only the latest review,
+# with the end of each check's output; thread/goal/get has the rest.
+_EVENT_REVIEW_OUTPUT_MAX_CHARS = 500
+
+
+def _slim_review(review: dict) -> dict:
+    checks = []
+    for run in review.get("checks") or ():
+        output = str(run.get("output") or "")
+        if len(output) > _EVENT_REVIEW_OUTPUT_MAX_CHARS:
+            output = "…" + output[-(_EVENT_REVIEW_OUTPUT_MAX_CHARS - 1) :]
+        checks.append({**run, "output": output})
+    return {**review, "checks": checks}

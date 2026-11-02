@@ -20,7 +20,9 @@ workspace as it is now. Treat completion as unproven until the audit proves it:
 - When a check's result matters, do not pipe it into another command: in
   `pytest | tail` the exit code is tail's, not the tests'.
 Call update_goal(status="complete") only when every requirement is proved;
-otherwise keep working.
+otherwise keep working. In its reason, and whatever you tell the user, report
+only what the tool results in this conversation show; say plainly what you did
+not verify, and never state a result you did not observe.
 
 Call get_goal whenever you need the latest objective or status. Call
 update_goal(status="blocked") only when the same external blocker has stopped

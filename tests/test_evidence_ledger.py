@@ -597,7 +597,7 @@ def test_runner_stops_when_the_token_allowance_is_spent() -> None:
     # up; this model only ever calls tools, so the fixed note stands in.
     assert result.stop_reason == "token_budget"
     assert provider.calls == 4
-    assert "token budget" in result.final_content
+    assert "budget (tokens or time)" in result.final_content
 
 
 class _WrapUpProvider(_StubbornProvider):
@@ -631,7 +631,8 @@ def test_a_spent_budget_gets_one_answer_without_tools() -> None:
     assert provider.wrap_up_request is not None
     asked = provider.wrap_up_request["messages"][-1]
     assert asked["role"] == "user"
-    assert "budget is used up" in asked["content"]
+    assert "is used up" in asked["content"]
+    assert "never state a result you did not observe" in asked["content"]
     # The wrap-up is spent too: the run's usage counts it.
     assert provider.calls == 4
 
@@ -679,4 +680,4 @@ def test_a_budget_spent_before_the_run_gets_no_wrap_up() -> None:
 
     assert result.stop_reason == "token_budget"
     assert provider.calls == 0
-    assert "token budget" in result.final_content
+    assert "budget (tokens or time)" in result.final_content

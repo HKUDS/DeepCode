@@ -32,6 +32,7 @@ class FakeGoalHandler:
         self.charged: list[int] = []
         self.turns = 3
         self.declined = False
+        self.reviews: list[dict[str, object]] = []
 
     def goal_turn_count(self, context: GoalRuntimeContext) -> int:
         return self.turns
@@ -59,6 +60,9 @@ class FakeGoalHandler:
 
     def record_verification_tokens(self, context: GoalRuntimeContext, tokens: int):
         self.charged.append(tokens)
+
+    def record_review(self, context: GoalRuntimeContext, review) -> None:
+        self.reviews.append(review)
 
     def completion_request(
         self,
@@ -500,7 +504,7 @@ async def test_rule_setting_arms_the_router_and_off_disarms_it_on_rebuild(
     router = GoalRuntimeRouter()
     handler = FakeGoalHandler()
     handler.completion_request = lambda context, *, reason: GoalCompletionRequest(  # type: ignore[method-assign]
-        objective="Ship it.", reason=reason or "", evidence=()
+        objective=handler.objective, reason=reason or "", evidence=()
     )
     router.configure(handler)
     router.activate(_context())
@@ -522,6 +526,9 @@ async def test_rule_setting_arms_the_router_and_off_disarms_it_on_rebuild(
     build(GoalConfig(completion_verifier="off"))
     accepted = await router.request(status="complete", reason="Nothing done.")
     assert accepted["status"] == "complete"
+    # Nothing was checked, so there is no verdict to report or keep.
+    assert "verdict" not in accepted
+    assert [review["stage"] for review in handler.reviews] == ["rule"]
     for session in sessions:
         await session.aclose()
 

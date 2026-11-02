@@ -311,3 +311,26 @@ def test_a_budget_used_up_mid_turn_still_holds() -> None:
 )
 def test_remaining_tokens_has_no_limit_otherwise(view: object, active: bool) -> None:
     assert _budget_router(view, active=active).remaining_tokens() is None
+
+
+def _timed_view(limit: int | None, used: int, tokens: int | None = None) -> dict:
+    view = _goal_view(tokens, 0)
+    view["goal"].update(timeBudgetSeconds=limit, timeUsedSeconds=used)
+    return view
+
+
+def test_a_used_up_time_limit_stops_the_turn_counting_this_turns_time(
+    monkeypatch,
+) -> None:
+    import core.agent_runtime.goal_runtime as goal_runtime
+
+    clock = [1000.0]
+    monkeypatch.setattr(goal_runtime.time, "monotonic", lambda: clock[0])
+    router = _budget_router(_timed_view(600, 500))
+    assert router.remaining_tokens() is None  # 100s left, no token budget
+    clock[0] += 99
+    assert router.remaining_tokens() is None
+    clock[0] += 1
+    assert router.remaining_tokens() == 0
+    # The token budget still counts while time is left.
+    assert _budget_router(_timed_view(600, 0, tokens=50)).remaining_tokens() == 50
