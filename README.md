@@ -144,6 +144,13 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 
 ## What's new
 
+- **2026-11-02** — Goals you can trust to finish: the agent proposes a
+  checklist, and once you confirm it DeepCode runs those commands itself
+  before it accepts "complete"; an optional independent reviewer checks every
+  requirement, switched on in Settings, and each check is shown on the Goal
+  card. A Goal can have a time limit, stops when it is stuck or keeps
+  repeating itself, wraps up when its budget runs out, and pauses when
+  DeepCode restarts.
 - **2026-10-31** — Long tasks read better on the Web (folded steps, a Goal
   outcome, faster long Sessions), declined tools say so, the terminal UI
   wraps Chinese text and resumes a running Turn cleanly, the Chinese
@@ -158,13 +165,11 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
   the TUI shows when it waits for you and what will change, "always allow"
   covers one kind of command instead of the whole tool, and trusting a folder
   asks first.
-- **2026-10-28** — Agent presets can remove tools with `disallowed-tools`,
-  file tools ask before writing hook files, and `deepcode mcp list` flags MCP
-  packages without a fixed version.
 
 <details>
 <summary><strong>Earlier updates</strong></summary>
 
+- **2026-10-28** — Agent presets that remove tools, file tools that ask before writing hooks, and unpinned MCP packages flagged
 - **2026-10-21** — A quiet Windows service, a separate code font, and community fixes
 - **2026-10-14** — Sessions that keep their history, a tighter sandbox, and the Desktop and Web apps in Chinese
 - **2026-10-13** — Smoother streaming, a self-managing background service, and safer Web sign-in

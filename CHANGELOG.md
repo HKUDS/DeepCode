@@ -5,6 +5,35 @@ Released versions are named in the entry title; the version on PyPI is
 [deepcode-hku](https://pypi.org/project/deepcode-hku/). 中文版见
 [CHANGELOG_ZH.md](CHANGELOG_ZH.md).
 
+## 2026-11-02 · Goals that are checked before they count as complete
+
+- **A checklist DeepCode runs itself.** Early in a Goal the agent proposes a
+  checklist: each requirement with the command that proves it. Nothing runs
+  until you confirm it (Desktop and Web: **Use these checks** on the Goal
+  card; TUI: `/goal checks confirm`; `deepcode loop --test-cmd` and
+  `--check`). From then on, whenever the agent says the Goal is complete,
+  DeepCode runs those commands itself, with the agent's own command rights,
+  and turns the claim back with the output of one that fails. A pipeline
+  cannot hide a failure, and a command several checks share runs once.
+- **An independent reviewer, switched on in Settings.** Settings → General →
+  Goal completion checks offers off, a rule check, or an independent review:
+  a second, read-only agent checks every requirement against the workspace
+  and re-runs the checks before the Goal is recorded complete.
+- **Every check is kept.** The Goal card shows the latest result next to the
+  Goal's status; opened, it lists each requirement with its finding and
+  evidence, the commands DeepCode ran, and earlier checks. `/goal show`
+  prints the same in the TUI.
+- **Goals that stop on their own.** A Goal can have a time limit as well as
+  a token budget, and either holds inside a Turn: the agent gets one last
+  answer, without tools, to say what it finished and what is left. A Turn
+  whose tool calls keep bringing nothing new stops; so does a Goal whose
+  last three automatic Turns had no step that succeeded. The agent can
+  report a Goal blocked only from its third Turn, unless you declined an
+  approval, and a claim made while its sub-agents still run waits for them.
+- **A restart pauses the Goal.** If DeepCode restarts while a Goal is
+  active, the Goal waits for you to resume it instead of spending tokens
+  unattended. Goals that an Automation runs continue.
+
 ## 2026-10-31 · Long tasks that read well, the interface in your language, and a narrow-window layout
 
 - **Long tasks read better on the Web.** A run of tool steps folds into one
