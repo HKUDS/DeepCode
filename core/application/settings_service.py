@@ -33,7 +33,8 @@ from core.domain.project import TrustState
 from core.providers.catalog import known_model_ids, resolve_model_info
 from core.providers.registry import PROVIDERS
 
-_ALLOWED_ROOTS = {"agents", "providers", "security"}
+_ALLOWED_ROOTS = {"agents", "providers", "security", "goal"}
+_GOAL_FIELDS = {"completionVerifier", "maxRejections"}
 _AGENT_SECTIONS = {"defaults", "planning", "implementation"}
 _AGENT_FIELDS = {
     "connection",
@@ -212,6 +213,7 @@ class SettingsService:
             "configPath": str(self.store.path),
             "agents": config.agents.model_dump(by_alias=True),
             "security": config.security.model_dump(by_alias=True),
+            "goal": config.goal.model_dump(by_alias=True),
             "permissionModeExplicit": "permission_mode" in security_fields,
             "userAccessPreset": user_access_preset,
             "projectAccessPreset": project_access_preset,
@@ -249,6 +251,9 @@ class SettingsService:
                 if name not in known:
                     raise InvalidArgumentError(f"unsupported provider: {name}")
                 _require_fields(values, _PROVIDER_FIELDS, f"providers.{name}")
+        goal = patch.get("goal")
+        if goal is not None:
+            _require_fields(goal, _GOAL_FIELDS, "goal")
         security = patch.get("security")
         if security is not None:
             _require_fields(security, _SECURITY_FIELDS, "security")

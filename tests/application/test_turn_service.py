@@ -1519,12 +1519,13 @@ def test_open_recovers_incomplete_turn_and_pending_approval(tmp_path: Path) -> N
         recovered_goal = recovered.goals.read(thread_id)
         assert recovered_goal is not None
         assert recovered_goal.tokens_used == 40
-        assert recovered_goal.status.value == "active"
+        # Nobody may be watching after a restart: the Goal waits for the user.
+        assert recovered_goal.status.value == "paused"
         assert recovered.threads.read(thread_id).status is ThreadStatus.IDLE
         event_types = [event.type for event in recovered.events.replay(thread_id)]
         assert "turn.recovered" in event_types
         assert "thread.status_changed" in event_types
-        assert event_types[-1] == "goal.updated"
+        assert event_types[-2:] == ["goal.updated", "goal.paused"]
     finally:
         recovered.close()
 

@@ -248,6 +248,9 @@ def test_thread_goal_continue_has_one_explicit_typed_rpc() -> None:
             assert thread_id == goal.thread_id
             return goal, None
 
+        def read_reviews(self, thread_id: str, current):
+            return ()
+
         def continue_goal(
             self,
             thread_id: str,
@@ -280,6 +283,7 @@ def test_thread_goal_continue_has_one_explicit_typed_rpc() -> None:
     assert result == {
         "goal": thread_goal_view(goal),
         "outcome": None,
+        "reviews": [],
         "disposition": "started",
         "turnId": "turn_000000000000000000000001",
     }

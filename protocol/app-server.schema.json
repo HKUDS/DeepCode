@@ -1357,6 +1357,29 @@
         "security": {
           "$ref": "#/$defs/JsonObject"
         },
+        "goal": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Goal completion checking: goal.completionVerifier and goal.maxRejections.",
+          "properties": {
+            "completionVerifier": {
+              "type": "string",
+              "enum": [
+                "off",
+                "rule",
+                "reviewer"
+              ]
+            },
+            "maxRejections": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "completionVerifier",
+            "maxRejections"
+          ]
+        },
         "permissionModeExplicit": {
           "type": "boolean"
         },
@@ -4503,6 +4526,14 @@
           ],
           "minimum": 1
         },
+        "timeBudgetSeconds": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "description": "Active time the Goal may use; null for no limit."
+        },
         "tokensUsed": {
           "type": "integer",
           "minimum": 0
@@ -4519,6 +4550,22 @@
             "type": "string",
             "pattern": "^sk_[0-9a-f]{24}$"
           }
+        },
+        "checks": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/GoalCheck"
+          },
+          "description": "The checklist the user confirmed."
+        },
+        "proposedChecks": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/GoalCheck"
+          },
+          "description": "A checklist the agent proposed; never run until the user confirms it."
         },
         "createdAt": {
           "type": "string",
@@ -4538,8 +4585,55 @@
         "tokensUsed",
         "timeUsedSeconds",
         "skillIds",
+        "checks",
+        "proposedChecks",
         "createdAt",
         "updatedAt"
+      ]
+    },
+    "GoalCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requirement": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "command": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string"
+          },
+          "description": "An argument list DeepCode runs in the workspace without a shell when the Goal is claimed complete; empty when the requirement is left to the reviewer."
+        }
+      },
+      "required": [
+        "requirement",
+        "command"
+      ]
+    },
+    "GoalCheckInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requirement": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "command": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string"
+          },
+          "description": "An argument list DeepCode runs in the workspace without a shell when the Goal is claimed complete; empty when the requirement is left to the reviewer."
+        }
+      },
+      "required": [
+        "requirement"
       ]
     },
     "GoalEvidenceRef": {
@@ -4571,6 +4665,151 @@
         "kind",
         "status",
         "summary"
+      ]
+    },
+    "GoalReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One check of a completion claim, kept in the Goal's history.",
+      "properties": {
+        "goalId": {
+          "type": "string",
+          "pattern": "^goal_"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "rule",
+            "checks",
+            "reviewer",
+            "error",
+            "other"
+          ],
+          "description": "The step that reached the result."
+        },
+        "result": {
+          "type": "string",
+          "enum": [
+            "passed",
+            "rejected",
+            "impossible",
+            "unavailable"
+          ]
+        },
+        "justification": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "requirements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GoalReviewRequirement"
+          }
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GoalReviewCheck"
+          }
+        },
+        "checked": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tokens": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "goalId",
+        "turnId",
+        "recordedAt",
+        "stage",
+        "result",
+        "justification",
+        "summary",
+        "requirements",
+        "checks",
+        "checked",
+        "tokens"
+      ]
+    },
+    "GoalReviewRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requirement": {
+          "type": "string"
+        },
+        "finding": {
+          "type": "string",
+          "enum": [
+            "proved",
+            "contradicted",
+            "incomplete",
+            "weak",
+            "missing"
+          ]
+        },
+        "evidence": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requirement",
+        "finding",
+        "evidence"
+      ]
+    },
+    "GoalReviewCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requirement": {
+          "type": "string"
+        },
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exitCode": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "problem": {
+          "type": "string"
+        },
+        "seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "output": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requirement",
+        "command",
+        "exitCode",
+        "problem",
+        "seconds",
+        "output"
       ]
     },
     "GoalOutcome": {
@@ -4646,6 +4885,14 @@
           ],
           "minimum": 1
         },
+        "timeBudgetSeconds": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "description": "Active time the Goal may use, in seconds; null for no limit. Left out when editing, the current limit stays."
+        },
         "skills": {
           "type": "array",
           "maxItems": 8,
@@ -4664,6 +4911,14 @@
         },
         "start": {
           "type": "boolean"
+        },
+        "checks": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/GoalCheckInput"
+          },
+          "description": "Confirmed checks for a new Goal; only when creating one."
         }
       },
       "required": [
@@ -4687,6 +4942,33 @@
       "required": [
         "threadId",
         "expectedGoalId"
+      ]
+    },
+    "GoalChecksConfirmParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "expectedGoalId": {
+          "type": "string",
+          "pattern": "^goal_"
+        },
+        "checks": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/GoalCheckInput"
+          }
+        }
+      },
+      "required": [
+        "threadId",
+        "expectedGoalId",
+        "checks"
       ]
     },
     "GoalContinueResult": {
@@ -4716,6 +4998,14 @@
               "type": "null"
             }
           ]
+        },
+        "reviews": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/GoalReview"
+          },
+          "description": "The Goal's latest completion reviews, oldest first."
         }
       },
       "required": [
@@ -4752,6 +5042,14 @@
         "executionSettled": {
           "type": "boolean",
           "description": "Whether the terminal Goal deciding Turn has finished and its usage is durably accounted."
+        },
+        "reviews": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/GoalReview"
+          },
+          "description": "The Goal's latest completion reviews, oldest first."
         }
       },
       "required": [
@@ -6302,6 +6600,12 @@
         "thread/goal/clear": {
           "$ref": "#/$defs/GoalIdentityParams"
         },
+        "thread/goal/checks/confirm": {
+          "$ref": "#/$defs/GoalChecksConfirmParams"
+        },
+        "thread/goal/checks/dismiss": {
+          "$ref": "#/$defs/GoalIdentityParams"
+        },
         "turn/start": {
           "$ref": "#/$defs/TurnStartParams"
         },
@@ -6504,6 +6808,8 @@
         "thread/goal/resume",
         "thread/goal/continue",
         "thread/goal/clear",
+        "thread/goal/checks/confirm",
+        "thread/goal/checks/dismiss",
         "turn/start",
         "turn/enqueue",
         "turn/steer",
@@ -7145,6 +7451,12 @@
         "thread/goal/clear": {
           "$ref": "#/$defs/GoalResult"
         },
+        "thread/goal/checks/confirm": {
+          "$ref": "#/$defs/GoalResult"
+        },
+        "thread/goal/checks/dismiss": {
+          "$ref": "#/$defs/GoalResult"
+        },
         "turn/start": {
           "$ref": "#/$defs/TurnSnapshotResult"
         },
@@ -7634,6 +7946,8 @@
         "thread/goal/resume",
         "thread/goal/continue",
         "thread/goal/clear",
+        "thread/goal/checks/confirm",
+        "thread/goal/checks/dismiss",
         "turn/start",
         "turn/enqueue",
         "turn/steer",

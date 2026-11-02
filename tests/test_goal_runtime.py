@@ -243,3 +243,94 @@ async def test_terminal_request_blocks_later_tools_in_the_same_model_response() 
     assert denied and "not available in this turn" in denied[0]
     assert "Skill policy" not in denied[0]  # the Goal hid it
     assert "Available: none" in denied[0]
+
+
+class _BudgetHandler(FakeGoalHandler):
+    def __init__(self, view: object) -> None:
+        super().__init__()
+        self.view = view
+
+    def read_goal(self, context: GoalRuntimeContext):
+        if isinstance(self.view, Exception):
+            raise self.view
+        return self.view
+
+
+def _budget_router(view: object, *, active: bool = True) -> GoalRuntimeRouter:
+    router = GoalRuntimeRouter()
+    router.configure(_BudgetHandler(view))
+    if active:
+        router.activate(_context())
+    return router
+
+
+def _goal_view(
+    budget: int | None, used: int, *, goal_id: str = "goal_1", open_: bool = True
+) -> dict:
+    return {
+        "goal": {"id": goal_id, "tokenBudget": budget, "tokensUsed": used},
+        "canUpdate": open_,
+    }
+
+
+def test_remaining_tokens_is_what_the_budget_has_left() -> None:
+    assert _budget_router(_goal_view(1000, 400)).remaining_tokens() == 600
+
+
+def test_a_budget_used_up_mid_turn_still_holds() -> None:
+    """Review tokens or a lowered budget can end the budget inside a Turn.
+
+    The Goal is then budget_limited and no longer updatable, which is exactly
+    when the Turn must stop: it must not read as "no limit".
+    """
+    view = _goal_view(1000, 1200, open_=False)
+    assert _budget_router(view).remaining_tokens() == 0
+
+
+@pytest.mark.parametrize(
+    ("view", "active"),
+    [
+        (_goal_view(None, 400), True),  # no budget
+        (_goal_view(1000, 400, goal_id="goal_2"), True),  # a different Goal now
+        (  # done: only the closing answer is left
+            {
+                "goal": {
+                    "id": "goal_1",
+                    "status": "complete",
+                    "tokenBudget": 1000,
+                    "tokensUsed": 1200,
+                },
+                "canUpdate": False,
+            },
+            True,
+        ),
+        ({"goal": None, "canUpdate": False}, True),
+        (RuntimeError("store unavailable"), True),
+        (_goal_view(1000, 400), False),  # not a Goal Turn
+    ],
+)
+def test_remaining_tokens_has_no_limit_otherwise(view: object, active: bool) -> None:
+    assert _budget_router(view, active=active).remaining_tokens() is None
+
+
+def _timed_view(limit: int | None, used: int, tokens: int | None = None) -> dict:
+    view = _goal_view(tokens, 0)
+    view["goal"].update(timeBudgetSeconds=limit, timeUsedSeconds=used)
+    return view
+
+
+def test_a_used_up_time_limit_stops_the_turn_counting_this_turns_time(
+    monkeypatch,
+) -> None:
+    import core.agent_runtime.goal_runtime as goal_runtime
+
+    clock = [1000.0]
+    monkeypatch.setattr(goal_runtime.time, "monotonic", lambda: clock[0])
+    router = _budget_router(_timed_view(600, 500))
+    assert router.remaining_tokens() is None  # 100s left, no token budget
+    clock[0] += 99
+    assert router.remaining_tokens() is None
+    clock[0] += 1
+    assert router.remaining_tokens() == 0
+    # The token budget still counts while time is left.
+    assert _budget_router(_timed_view(600, 0, tokens=50)).remaining_tokens() == 50

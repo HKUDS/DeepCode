@@ -389,6 +389,21 @@ describe("TurnBlock", () => {
     expect(screen.queryByText(/agent stopped with reason/)).toBeNull();
   });
 
+  it("says the agent stopped because it was making no progress", () => {
+    renderTurn([], {
+      status: "failed",
+      errorCode: "AGENT_TURN_FAILED",
+      stopReason: "no_progress",
+      errorMessage: "service wording",
+    });
+
+    expect(
+      screen.getByText(
+        "The agent stopped: its recent tool calls kept bringing nothing new.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("names DeepCode's own tool by what it does, once", () => {
     renderTurn([
       item("goal", 1, "tool_call", "get_goal", {

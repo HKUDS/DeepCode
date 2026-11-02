@@ -3,6 +3,7 @@ import type {
   Event,
   Goal,
   GoalOutcome,
+  GoalReview,
   Artifact,
   Item,
   ItemDelta,
@@ -53,6 +54,8 @@ export interface WorkspaceState {
   plansByTurnId: Record<string, TurnPlanState>;
   goal: Goal | null;
   goalOutcome: GoalOutcome | null;
+  /** The Goal's latest completion reviews, oldest first. */
+  goalReviews: GoalReview[];
   entitySequences: Record<string, number>;
   /** UTF-8 bytes of streamed text per in-progress item channel. */
   liveBytes: Record<string, number>;
@@ -80,7 +83,13 @@ export type WorkspaceAction =
   | { type: "snapshot"; snapshot: TurnSnapshotResult }
   | { type: "approval-upsert"; approval: Approval }
   | { type: "workflow-snapshot"; snapshot: WorkflowSnapshotResult }
-  | { type: "goal"; goal: Goal | null; outcome: GoalOutcome | null }
+  | {
+      type: "goal";
+      goal: Goal | null;
+      outcome: GoalOutcome | null;
+      /** Left out by results that do not carry reviews: keep the known ones. */
+      reviews?: GoalReview[];
+    }
   | { type: "event"; event: Event }
   | { type: "live-delta"; delta: ItemDelta }
   | { type: "live-text"; turnId: string; items: Item[] }
@@ -114,6 +123,7 @@ export const initialWorkspaceState: WorkspaceState = {
   plansByTurnId: {},
   goal: null,
   goalOutcome: null,
+  goalReviews: [],
   entitySequences: {},
   liveBytes: {},
   liveGaps: [],
@@ -340,12 +350,17 @@ function applyDomainEvent(state: WorkspaceState, event: Event): WorkspaceState {
     }
     const rawGoal = event.payload.goal;
     const rawOutcome = event.payload.outcome;
+    const goal = isRecord(rawGoal) ? (rawGoal as unknown as Goal) : null;
     return {
       ...state,
-      goal: isRecord(rawGoal) ? (rawGoal as unknown as Goal) : null,
+      goal,
       goalOutcome: isRecord(rawOutcome)
         ? (rawOutcome as unknown as GoalOutcome)
         : null,
+      goalReviews: mergeGoalReviews(
+        goal && goal.id === state.goal?.id ? state.goalReviews : [],
+        goal ? eventReviews(event.payload.reviews, goal.id) : [],
+      ),
       entitySequences: {
         ...state.entitySequences,
         [key]: event.sequence,
@@ -442,6 +457,7 @@ export function workspaceReducer(
         plansByTurnId: {},
         goal: null,
         goalOutcome: null,
+        goalReviews: [],
         entitySequences: {},
         selectedItemId: null,
       };
@@ -491,6 +507,7 @@ export function workspaceReducer(
         plansByTurnId: {},
         goal: null,
         goalOutcome: null,
+        goalReviews: [],
         entitySequences: {},
         selectedItemId: null,
       };
@@ -508,6 +525,7 @@ export function workspaceReducer(
         plansByTurnId: {},
         goal: null,
         goalOutcome: null,
+        goalReviews: [],
         entitySequences: {},
         liveBytes: {},
         liveGaps: [],
@@ -567,6 +585,13 @@ export function workspaceReducer(
         ...state,
         goal: action.goal,
         goalOutcome: action.outcome,
+        goalReviews: !action.goal
+          ? []
+          : action.reviews
+            ? action.reviews.filter((review) => review.goalId === action.goal?.id)
+            : action.goal.id === state.goal?.id
+              ? state.goalReviews
+              : [],
       };
     case "event":
       return applyDomainEvent(state, action.event);
@@ -587,4 +612,35 @@ export function workspaceReducer(
     case "log":
       return { ...state, logs: [...state.logs.slice(-99), action.message] };
   }
+}
+
+/** How many reviews the Goal card keeps. */
+const MAX_GOAL_REVIEWS = 20;
+
+function eventReviews(raw: unknown, goalId: string): GoalReview[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (review): review is GoalReview =>
+      isRecord(review) &&
+      review.goalId === goalId &&
+      typeof review.recordedAt === "string",
+  );
+}
+
+/** Known reviews plus newly published ones, oldest first, without repeats. */
+export function mergeGoalReviews(
+  known: readonly GoalReview[],
+  incoming: readonly GoalReview[],
+): GoalReview[] {
+  const key = (review: GoalReview) =>
+    `${review.turnId}|${review.recordedAt}|${review.stage}`;
+  const seen = new Set(known.map(key));
+  const merged = [...known];
+  for (const review of incoming) {
+    if (seen.has(key(review))) continue;
+    seen.add(key(review));
+    merged.push(review);
+  }
+  merged.sort((left, right) => left.recordedAt.localeCompare(right.recordedAt));
+  return merged.slice(-MAX_GOAL_REVIEWS);
 }

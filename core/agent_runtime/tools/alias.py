@@ -51,6 +51,10 @@ class AliasedTool(Tool):
     def concurrency_safe(self) -> bool:
         return self._inner.concurrency_safe
 
+    @property
+    def waits(self) -> bool:
+        return self._inner.waits
+
     async def execute(self, **kwargs: Any) -> Any:
         return await self._inner.execute(**kwargs)
 

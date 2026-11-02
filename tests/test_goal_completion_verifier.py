@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 
 import pytest
@@ -28,6 +29,16 @@ class FakeGoalHandler:
         self.requests: list[dict[str, object]] = []
         self.objective = objective
         self.events: list[str] = []
+        self.charged: list[int] = []
+        self.turns = 3
+        self.declined = False
+        self.reviews: list[dict[str, object]] = []
+
+    def goal_turn_count(self, context: GoalRuntimeContext) -> int:
+        return self.turns
+
+    def user_declined_in_turn(self, context: GoalRuntimeContext) -> bool:
+        return self.declined
 
     def read_goal(self, context: GoalRuntimeContext):
         return {"goalId": context.goal_id, "objective": self.objective}
@@ -38,11 +49,20 @@ class FakeGoalHandler:
         *,
         status: str,
         reason: str | None,
+        expected_objective: str | None = None,
     ):
+        if expected_objective is not None and expected_objective != self.objective:
+            raise ValueError("objective changed")
         self.requests.append(
             {"turnId": context.turn_id, "status": status, "reason": reason}
         )
         return {"goalId": context.goal_id, "status": status}
+
+    def record_verification_tokens(self, context: GoalRuntimeContext, tokens: int):
+        self.charged.append(tokens)
+
+    def record_review(self, context: GoalRuntimeContext, review) -> None:
+        self.reviews.append(review)
 
     def completion_request(
         self,
@@ -165,7 +185,8 @@ async def test_goal_blocks_after_max_rejections_instead_of_burning_turns() -> No
             "status": "blocked",
             "reason": (
                 "Blocked by the completion verifier after 2 rejected completion "
-                "claims. Last rejection: No file change evidence."
+                "claims with no new changes in between. Last rejection: No file "
+                "change evidence."
             ),
         }
     ]
@@ -218,6 +239,59 @@ async def test_raising_verifier_fails_closed_and_reports_to_model() -> None:
     assert result["updated"] is False
     assert "verifier backend unavailable" in result["verdict"]["justification"]
     assert handler.requests == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("turns", [1, 2])
+async def test_blocked_before_the_third_turn_is_not_recorded(turns: int) -> None:
+    runtime = GoalRuntimeRouter()
+    handler = FakeGoalHandler()
+    handler.turns = turns
+    runtime.configure(handler)
+    runtime.activate(_context())
+
+    result = await runtime.request(status="blocked", reason="Upstream API is down.")
+
+    assert result["updated"] is False
+    assert f"Turn {turns} of the Goal" in result["note"]
+    assert handler.requests == []
+    # Not a terminal request: the model keeps its tools and goes on.
+    assert runtime.visible_tool_names(("bash", "update_goal")) == (
+        "bash",
+        "update_goal",
+    )
+
+
+@pytest.mark.asyncio
+async def test_blocked_is_recorded_at_once_when_the_user_declined() -> None:
+    """Asking again for an approval the user just declined would be worse."""
+
+    runtime = GoalRuntimeRouter()
+    handler = FakeGoalHandler()
+    handler.turns = 1
+    handler.declined = True
+    runtime.configure(handler)
+    runtime.activate(_context())
+
+    result = await runtime.request(status="blocked", reason="approval denied")
+
+    assert result["status"] == "blocked"
+
+
+@pytest.mark.asyncio
+async def test_blocked_is_recorded_when_the_turns_cannot_be_counted() -> None:
+    class Uncountable(FakeGoalHandler):
+        def goal_turn_count(self, context):
+            raise RuntimeError("store unavailable")
+
+    runtime = GoalRuntimeRouter()
+    handler = Uncountable()
+    runtime.configure(handler)
+    runtime.activate(_context())
+
+    result = await runtime.request(status="blocked", reason="Upstream API is down.")
+
+    assert result["status"] == "blocked"
 
 
 @pytest.mark.asyncio
@@ -430,7 +504,7 @@ async def test_rule_setting_arms_the_router_and_off_disarms_it_on_rebuild(
     router = GoalRuntimeRouter()
     handler = FakeGoalHandler()
     handler.completion_request = lambda context, *, reason: GoalCompletionRequest(  # type: ignore[method-assign]
-        objective="Ship it.", reason=reason or "", evidence=()
+        objective=handler.objective, reason=reason or "", evidence=()
     )
     router.configure(handler)
     router.activate(_context())
@@ -452,5 +526,251 @@ async def test_rule_setting_arms_the_router_and_off_disarms_it_on_rebuild(
     build(GoalConfig(completion_verifier="off"))
     accepted = await router.request(status="complete", reason="Nothing done.")
     assert accepted["status"] == "complete"
+    # Nothing was checked, so there is no verdict to report or keep.
+    assert "verdict" not in accepted
+    assert [review["stage"] for review in handler.reviews] == ["rule"]
     for session in sessions:
         await session.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_reviews_tokens_are_charged_whatever_the_verdict() -> None:
+    from core.harness.agents.goal_reviewer import ReviewFailed
+
+    class Costly:
+        def __init__(self, outcome):
+            self.outcome = outcome
+
+        async def __call__(self, request: GoalCompletionRequest) -> GoalVerdict:
+            if isinstance(self.outcome, Exception):
+                raise self.outcome
+            return self.outcome
+
+    for outcome, charged in (
+        (GoalVerdict(confirmed=True, justification="ok", tokens=300), [300]),
+        (GoalVerdict(confirmed=False, justification="no", tokens=200), [200]),
+        (ReviewFailed("provider down", tokens=50), [50]),
+        (GoalVerdict(confirmed=True, justification="rule only"), []),
+    ):
+        runtime = GoalRuntimeRouter()
+        handler = FakeGoalHandler()
+        runtime.configure(handler)
+        runtime.configure_completion_verifier(Costly(outcome))
+        runtime.activate(_context())
+        await runtime.request(status="complete", reason="Done.")
+        assert handler.charged == charged, outcome
+
+
+@pytest.mark.asyncio
+async def test_an_objective_edited_during_the_review_is_not_marked_complete() -> None:
+    runtime = GoalRuntimeRouter()
+    handler = FakeGoalHandler(objective="Ship the feature.")
+
+    class EditDuringReview:
+        async def __call__(self, request: GoalCompletionRequest) -> GoalVerdict:
+            handler.objective = "Ship the feature and its docs."
+            return GoalVerdict(confirmed=True, justification="ok", tokens=10)
+
+    runtime.configure(handler)
+    runtime.configure_completion_verifier(EditDuringReview())
+    runtime.activate(_context())
+
+    with pytest.raises(ValueError, match="objective changed"):
+        await runtime.request(status="complete", reason="Done.")
+    assert handler.requests == []
+    assert handler.charged == [10]  # the review still cost what it cost
+
+
+class _Verdict:
+    """A verifier returning a fixed verdict, optionally editing the Goal first."""
+
+    def __init__(self, verdict: GoalVerdict, before=None) -> None:
+        self.verdict = verdict
+        self.before = before
+
+    async def __call__(self, request: GoalCompletionRequest) -> GoalVerdict:
+        if self.before is not None:
+            self.before()
+        return self.verdict
+
+
+def _armed(handler, verifier, **kwargs) -> GoalRuntimeRouter:
+    runtime = GoalRuntimeRouter()
+    runtime.configure(handler)
+    runtime.configure_completion_verifier(verifier, **kwargs)
+    runtime.activate(_context())
+    return runtime
+
+
+@pytest.mark.asyncio
+async def test_a_stale_impossible_verdict_does_not_block_an_edited_goal() -> None:
+    handler = FakeGoalHandler(objective="Ship the feature.")
+    edit = lambda: setattr(handler, "objective", "Ship something else.")  # noqa: E731
+    runtime = _armed(
+        handler,
+        _Verdict(
+            GoalVerdict(confirmed=False, justification="no", impossible=True), edit
+        ),
+    )
+
+    with pytest.raises(ValueError, match="objective changed"):
+        await runtime.request(status="complete", reason="Done.")
+    assert handler.requests == []
+
+
+@pytest.mark.asyncio
+async def test_a_rejection_that_ends_the_goal_says_so_and_blocks_nothing() -> None:
+    class BudgetHandler(FakeGoalHandler):
+        active = True
+
+        def read_goal(self, context):
+            return {**super().read_goal(context), "canUpdate": self.active}
+
+        def record_verification_tokens(self, context, tokens):
+            super().record_verification_tokens(context, tokens)
+            self.active = False  # the review used up the budget
+
+    handler = BudgetHandler()
+    runtime = _armed(
+        handler,
+        _Verdict(GoalVerdict(confirmed=False, justification="no", tokens=99)),
+        max_rejections=1,
+    )
+
+    result = await runtime.request(status="complete", reason="Done.")
+    assert result["updated"] is False and "autoBlocked" not in result
+    assert (
+        "cannot be claimed complete in this Turn" in result["verdict"]["justification"]
+    )
+    assert handler.requests == [] and handler.charged == [99]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_charge_never_hides_the_decision() -> None:
+    class Broken(FakeGoalHandler):
+        def record_verification_tokens(self, context, tokens):
+            raise OSError("disk full")
+
+    handler = Broken()
+    runtime = _armed(
+        handler, _Verdict(GoalVerdict(confirmed=True, justification="ok", tokens=5))
+    )
+    result = await runtime.request(status="complete", reason="Done.")
+    assert result["verdict"]["confirmed"] is True
+    assert [r["status"] for r in handler.requests] == ["complete"]
+    assert runtime.visible_tool_names(("update_goal",)) == ()
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_review_still_charges_what_it_spent() -> None:
+    from core.harness.agents.goal_reviewer import AgentReviewVerifier
+
+    started = asyncio.Event()
+
+    async def run(section, task, on_usage):
+        on_usage(70)
+        started.set()
+        await asyncio.sleep(30)
+
+    handler = FakeGoalHandler()
+    runtime = _armed(handler, AgentReviewVerifier(run))
+    task = asyncio.create_task(runtime.request(status="complete", reason="Done."))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert handler.charged == [70] and handler.requests == []
+
+
+@pytest.mark.asyncio
+async def test_an_unverifiable_claim_blocks_the_goal_without_counting() -> None:
+    from core.agent_runtime.goal_verifier import VerificationUnavailable
+
+    class Down:
+        async def __call__(self, request):
+            raise VerificationUnavailable("provider down", tokens=12)
+
+    handler = FakeGoalHandler()
+    runtime = _armed(handler, Down())
+    result = await runtime.request(status="complete", reason="Done.")
+    assert result["unverified"] is True and "rejections" not in result
+    assert "could not be verified (provider down)" in result["verdict"]["justification"]
+    assert [r["status"] for r in handler.requests] == ["blocked"]
+    assert "Resume the Goal to try again" in handler.requests[0]["reason"]
+    assert handler.charged == [12]
+    assert runtime.visible_tool_names(("update_goal",)) == ()
+
+
+@pytest.mark.asyncio
+async def test_an_unverifiable_claim_on_an_ended_goal_records_nothing() -> None:
+    from core.agent_runtime.goal_verifier import VerificationUnavailable
+
+    class Down:
+        async def __call__(self, request):
+            raise VerificationUnavailable("provider down", tokens=12)
+
+    class Ended(FakeGoalHandler):
+        def read_goal(self, context):
+            return {**super().read_goal(context), "canUpdate": False}
+
+    handler = Ended()
+    runtime = _armed(handler, Down())
+    result = await runtime.request(status="complete", reason="Done.")
+    assert result["updated"] is False
+    assert "no longer active" in result["verdict"]["justification"]
+    assert handler.requests == []
+
+
+class _Marked(FakeGoalHandler):
+    """A handler whose claims carry a progress marker the test moves."""
+
+    marker = "item_a"
+
+    def completion_request(self, context, *, reason):
+        request = super().completion_request(context, reason=reason)
+        return dataclasses.replace(request, progress_marker=self.marker)
+
+
+@pytest.mark.asyncio
+async def test_rejections_count_only_while_nothing_changes() -> None:
+    handler = _Marked()
+    runtime = _armed(handler, RejectingVerifier(), max_rejections=2)
+
+    first = await runtime.request(status="complete", reason="Done.")
+    handler.marker = "item_b"  # the agent changed files
+    second = await runtime.request(status="complete", reason="Done.")
+    third = await runtime.request(status="complete", reason="Done.")  # no change
+
+    assert [r["rejections"] for r in (first, second, third)] == [1, 1, 2]
+    assert third["autoBlocked"] is True
+    assert "with no new changes in between" in handler.requests[-1]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_progress_never_buys_endless_claims() -> None:
+    from core.agent_runtime.goal_runtime import MAX_TOTAL_REJECTIONS
+
+    handler = _Marked()
+    runtime = _armed(handler, RejectingVerifier(), max_rejections=3)
+    for n in range(MAX_TOTAL_REJECTIONS):
+        handler.marker = f"item_{n}"
+        result = await runtime.request(status="complete", reason="Done.")
+    assert result["autoBlocked"] is True
+    assert result["totalRejections"] == MAX_TOTAL_REJECTIONS
+    assert handler.requests[-1]["reason"].startswith(
+        f"Blocked by the completion verifier after {MAX_TOTAL_REJECTIONS} rejected"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_claim_without_any_change_is_no_progress() -> None:
+    handler = _Marked()
+    handler.marker = "item_a"
+    runtime = _armed(handler, RejectingVerifier(), max_rejections=3)
+    await runtime.request(status="complete", reason="Done.")
+    handler.marker = ""  # a later Turn that changed nothing
+    second = await runtime.request(status="complete", reason="Done.")
+    handler.marker = "item_a"  # the same old change is no news either
+    third = await runtime.request(status="complete", reason="Done.")
+    assert [second["rejections"], third["rejections"]] == [2, 3]
+    assert third["autoBlocked"] is True

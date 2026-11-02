@@ -25,6 +25,10 @@ GOAL_OBJECTIVE_MAX_CHARS = 16_384
 GOAL_OUTCOME_EVIDENCE_MAX_ITEMS = 12
 GOAL_OUTCOME_EVIDENCE_SUMMARY_MAX_CHARS = 240
 GOAL_OUTCOME_REASON_MAX_CHARS = 2_000
+GOAL_CHECKS_MAX_ITEMS = 12
+GOAL_CHECK_REQUIREMENT_MAX_CHARS = 500
+GOAL_CHECK_COMMAND_MAX_ARGS = 64
+GOAL_CHECK_COMMAND_MAX_CHARS = 2_000
 
 
 class ThreadGoalStatus(StrEnum):
@@ -102,6 +106,62 @@ class GoalOutcome:
             )
 
 
+@dataclass(frozen=True, slots=True)
+class GoalCheck:
+    """One requirement on a Goal's checklist.
+
+    ``command`` is an argument list DeepCode runs itself in the workspace,
+    without a shell, whenever the agent claims the Goal complete; a non-zero
+    exit turns the claim back. An empty command leaves the requirement to the
+    completion reviewer.
+    """
+
+    requirement: str
+    command: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        require_non_empty(self.requirement, "requirement")
+        if len(self.requirement) > GOAL_CHECK_REQUIREMENT_MAX_CHARS:
+            raise ValueError(
+                "a Goal check requirement may contain at most "
+                f"{GOAL_CHECK_REQUIREMENT_MAX_CHARS} characters"
+            )
+        if not isinstance(self.command, tuple) or not all(
+            isinstance(part, str) for part in self.command
+        ):
+            raise ValueError("a Goal check command must be a list of strings")
+        if len(self.command) > GOAL_CHECK_COMMAND_MAX_ARGS:
+            raise ValueError(
+                f"a Goal check command may have at most {GOAL_CHECK_COMMAND_MAX_ARGS} arguments"
+            )
+        if sum(len(part) for part in self.command) > GOAL_CHECK_COMMAND_MAX_CHARS:
+            raise ValueError(
+                "a Goal check command may contain at most "
+                f"{GOAL_CHECK_COMMAND_MAX_CHARS} characters"
+            )
+        if self.command and not self.command[0].strip():
+            raise ValueError("a Goal check command must name a program")
+        if any("\x00" in part for part in self.command):
+            raise ValueError("a Goal check command cannot contain NUL characters")
+
+
+def validate_goal_checks(checks: tuple[GoalCheck, ...]) -> tuple[GoalCheck, ...]:
+    if len(checks) > GOAL_CHECKS_MAX_ITEMS:
+        raise ValueError(f"a Goal may have at most {GOAL_CHECKS_MAX_ITEMS} checks")
+    return checks
+
+
+class _Keep:
+    """Leave a value as it is (``ThreadGoal.edit``)."""
+
+    def __repr__(self) -> str:
+        return "KEEP_TIME_BUDGET"
+
+
+_KEEP = _Keep()
+KEEP_TIME_BUDGET = _KEEP
+
+
 _USER_TRANSITIONS: dict[ThreadGoalStatus, frozenset[ThreadGoalStatus]] = {
     ThreadGoalStatus.ACTIVE: frozenset({ThreadGoalStatus.PAUSED}),
     ThreadGoalStatus.PAUSED: frozenset({ThreadGoalStatus.ACTIVE}),
@@ -120,6 +180,14 @@ class ThreadGoal:
     tokens_used: int = 0
     time_used_seconds: int = 0
     skill_ids: tuple[str, ...] = ()
+    # Active time the Goal may use, like ``token_budget`` for tokens.
+    time_budget_seconds: int | None = None
+    # The checklist the user confirmed, and one the agent proposed that the
+    # user has not confirmed yet (never run).
+    checks: tuple[GoalCheck, ...] = ()
+    proposed_checks: tuple[GoalCheck, ...] = ()
+    # The user dismissed a proposal: the agent is not asked for another.
+    checks_dismissed: bool = False
     id: str = field(default_factory=lambda: new_id("goal"))
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
@@ -136,6 +204,10 @@ class ThreadGoal:
             self.token_budget is not None and self.token_budget < 1
         ):
             raise ValueError("token_budget must be positive when provided")
+        if isinstance(self.time_budget_seconds, bool) or (
+            self.time_budget_seconds is not None and self.time_budget_seconds < 1
+        ):
+            raise ValueError("time_budget_seconds must be positive when provided")
         if isinstance(self.tokens_used, bool) or self.tokens_used < 0:
             raise ValueError("tokens_used cannot be negative")
         if isinstance(self.time_used_seconds, bool) or self.time_used_seconds < 0:
@@ -149,6 +221,8 @@ class ThreadGoal:
                 SkillSelection(skill_id=skill_id)
         except (TypeError, ValueError) as exc:
             raise ValueError("skill_ids must contain opaque sk_ identifiers") from exc
+        validate_goal_checks(self.checks)
+        validate_goal_checks(self.proposed_checks)
         require_aware(self.created_at, "created_at")
         require_aware(self.updated_at, "updated_at")
         if self.updated_at < self.created_at:
@@ -160,25 +234,44 @@ class ThreadGoal:
         *,
         token_budget: int | None,
         skill_ids: tuple[str, ...],
+        time_budget_seconds: "int | None | _Keep" = _KEEP,
         now: datetime | None = None,
     ) -> "ThreadGoal":
-        """Update the same logical Goal without creating a hidden revision."""
+        """Update the same logical Goal without creating a hidden revision.
 
-        next_status = self.status
-        if (
-            self.status is ThreadGoalStatus.ACTIVE
-            and token_budget is not None
-            and self.tokens_used >= token_budget
-        ):
-            next_status = ThreadGoalStatus.BUDGET_LIMITED
-        return replace(
+        ``time_budget_seconds`` left as ``KEEP_TIME_BUDGET`` keeps the current one.
+        """
+
+        edited = replace(
             self,
             objective=objective.strip(),
-            status=next_status,
             token_budget=token_budget,
+            time_budget_seconds=(
+                self.time_budget_seconds
+                if time_budget_seconds is _KEEP
+                else time_budget_seconds
+            ),
             skill_ids=skill_ids,
             updated_at=now or utc_now(),
         )
+        if self.status is ThreadGoalStatus.ACTIVE and edited.budget_spent:
+            return replace(edited, status=ThreadGoalStatus.BUDGET_LIMITED)
+        return edited
+
+    @property
+    def budget_spent(self) -> bool:
+        """Whether the token budget or the time budget is used up."""
+
+        return (
+            self.token_budget is not None and self.tokens_used >= self.token_budget
+        ) or (
+            self.time_budget_seconds is not None
+            and self.time_used_seconds >= self.time_budget_seconds
+        )
+
+    @property
+    def has_budget(self) -> bool:
+        return self.token_budget is not None or self.time_budget_seconds is not None
 
     def user_transition(
         self,
@@ -201,6 +294,14 @@ class ThreadGoal:
         ):
             raise ValueError(
                 "increase or remove the exhausted token budget before resuming"
+            )
+        if (
+            status is ThreadGoalStatus.ACTIVE
+            and self.time_budget_seconds is not None
+            and self.time_used_seconds >= self.time_budget_seconds
+        ):
+            raise ValueError(
+                "increase or remove the used-up time limit before resuming"
             )
         return replace(self, status=status, updated_at=now or utc_now())
 
@@ -229,6 +330,35 @@ class ThreadGoal:
             updated_at=now or utc_now(),
         )
 
+    def with_checks(
+        self,
+        *,
+        checks: tuple[GoalCheck, ...] | None = None,
+        proposed_checks: tuple[GoalCheck, ...] | None = None,
+        dismissed: bool | None = None,
+        now: datetime | None = None,
+    ) -> "ThreadGoal":
+        """Replace the confirmed checklist, the proposal, or both."""
+
+        next_checks = self.checks if checks is None else checks
+        next_proposal = (
+            self.proposed_checks if proposed_checks is None else proposed_checks
+        )
+        next_dismissed = self.checks_dismissed if dismissed is None else dismissed
+        if (
+            next_checks == self.checks
+            and next_proposal == self.proposed_checks
+            and next_dismissed == self.checks_dismissed
+        ):
+            return self
+        return replace(
+            self,
+            checks=next_checks,
+            proposed_checks=next_proposal,
+            checks_dismissed=next_dismissed,
+            updated_at=now or utc_now(),
+        )
+
     def add_usage(
         self,
         *,
@@ -240,32 +370,30 @@ class ThreadGoal:
             raise ValueError("tokens must not be negative")
         if isinstance(elapsed_seconds, bool) or elapsed_seconds < 0:
             raise ValueError("elapsed_seconds must not be negative")
-        next_tokens = self.tokens_used + tokens
-        next_status = self.status
-        if (
-            self.status is ThreadGoalStatus.ACTIVE
-            and self.token_budget is not None
-            and next_tokens >= self.token_budget
-        ):
-            next_status = ThreadGoalStatus.BUDGET_LIMITED
-        return replace(
+        used = replace(
             self,
-            status=next_status,
-            tokens_used=next_tokens,
+            tokens_used=self.tokens_used + tokens,
             time_used_seconds=self.time_used_seconds + elapsed_seconds,
             updated_at=now or utc_now(),
         )
+        if self.status is ThreadGoalStatus.ACTIVE and used.budget_spent:
+            return replace(used, status=ThreadGoalStatus.BUDGET_LIMITED)
+        return used
 
 
 __all__ = [
+    "GOAL_CHECKS_MAX_ITEMS",
     "GOAL_OUTCOME_EVIDENCE_MAX_ITEMS",
     "GOAL_OUTCOME_EVIDENCE_SUMMARY_MAX_CHARS",
     "GOAL_OUTCOME_REASON_MAX_CHARS",
     "GOAL_OBJECTIVE_INPUT_MAX_CHARS",
     "GOAL_OBJECTIVE_MAX_CHARS",
+    "GoalCheck",
     "GoalDecisionSource",
+    "KEEP_TIME_BUDGET",
     "GoalEvidenceRef",
     "GoalOutcome",
     "ThreadGoal",
     "ThreadGoalStatus",
+    "validate_goal_checks",
 ]

@@ -1,6 +1,11 @@
 import type { TFunction } from "i18next";
 
-import type { Goal, GoalOutcome, Turn } from "../../generated/app-server";
+import type {
+  Goal,
+  GoalOutcome,
+  GoalReview,
+  Turn,
+} from "../../generated/app-server";
 
 export type GoalPresentationStatus =
   | "working"
@@ -104,4 +109,18 @@ export function formatOutcomeTime(value: string): string {
     dateStyle: "medium",
     timeStyle: "short",
   });
+}
+
+/** How a completion check ended, as the user reads it. */
+export function reviewResultLabel(review: GoalReview, t: TFunction): string {
+  switch (review.result) {
+    case "passed":
+      return t("goal.review.passed", "Completion check passed");
+    case "rejected":
+      return t("goal.review.rejected", "Completion claim turned back");
+    case "impossible":
+      return t("goal.review.impossible", "Found the Goal cannot be met");
+    case "unavailable":
+      return t("goal.review.unavailable", "Completion check could not run");
+  }
 }

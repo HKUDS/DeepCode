@@ -176,6 +176,17 @@ class AutomationService:
 
         self._scheduler = scheduler
 
+    def runs_unattended(self, goal: ThreadGoal) -> bool:
+        """Whether an open Automation Run owns the Goal.
+
+        Such a Goal was scheduled to run without anyone watching, so it keeps
+        going after DeepCode restarts.
+        """
+
+        with self.database.read() as connection:
+            run = AutomationRunRepository(connection).get_for_goal(goal.id)
+        return run is not None and not run.status.is_terminal
+
     def ensure_goal_continuable(self, goal: ThreadGoal) -> None:
         """Reject orphan Turns after an Automation Run has settled."""
 

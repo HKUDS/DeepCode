@@ -17,7 +17,7 @@ from core.domain.event import DomainEvent
 from core.domain.item import Item
 from core.domain.project import Project
 from core.domain.thread import Thread
-from core.domain.thread_goal import GoalOutcome, ThreadGoal
+from core.domain.thread_goal import GoalCheck, GoalOutcome, ThreadGoal
 from core.domain.turn import Turn
 from core.domain.workflow import WorkflowRun
 
@@ -398,12 +398,19 @@ def thread_goal_view(goal: ThreadGoal) -> dict[str, Any]:
         "objective": goal.objective,
         "status": goal.status.value,
         "tokenBudget": goal.token_budget,
+        "timeBudgetSeconds": goal.time_budget_seconds,
         "tokensUsed": goal.tokens_used,
         "timeUsedSeconds": goal.time_used_seconds,
         "skillIds": list(goal.skill_ids),
+        "checks": [goal_check_view(check) for check in goal.checks],
+        "proposedChecks": [goal_check_view(check) for check in goal.proposed_checks],
         "createdAt": timestamp(goal.created_at),
         "updatedAt": timestamp(goal.updated_at),
     }
+
+
+def goal_check_view(check: GoalCheck) -> dict[str, Any]:
+    return {"requirement": check.requirement, "command": list(check.command)}
 
 
 def goal_outcome_view(outcome: GoalOutcome) -> dict[str, Any]:

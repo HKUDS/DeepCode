@@ -38,10 +38,13 @@ from core.domain.thread_goal import (
     GOAL_OUTCOME_EVIDENCE_MAX_ITEMS,
     GOAL_OUTCOME_EVIDENCE_SUMMARY_MAX_CHARS,
     GOAL_OUTCOME_REASON_MAX_CHARS,
+    KEEP_TIME_BUDGET,
+    GoalCheck,
     GoalEvidenceRef,
     GoalOutcome,
     ThreadGoal,
     ThreadGoalStatus,
+    validate_goal_checks,
 )
 from core.domain.turn import Turn, TurnStatus
 from core.sessions.thread_goal_store import (
@@ -61,6 +64,10 @@ logger = logging.getLogger(__name__)
 # that never calls it must not open Turns forever, so after this many
 # continuations in a row that nobody asked for, the Goal waits for the user.
 GOAL_UNATTENDED_CONTINUATION_LIMIT = 20
+# Automatic Turns in a row in which no step succeeded (no tool calls at all,
+# or every step failed or was declined) before the Goal is stopped as
+# blocked, budget or not (Codex's rule).
+GOAL_STALLED_TURN_LIMIT = 3
 _EVIDENCE_KINDS = frozenset(
     {
         ItemKind.TOOL_CALL,
@@ -71,6 +78,8 @@ _EVIDENCE_KINDS = frozenset(
         ItemKind.ARTIFACT,
     }
 )
+# A finished file change: the agent got on with the work.
+_CHANGE_KINDS = frozenset({ItemKind.FILE_CHANGE, ItemKind.DIFF})
 # A recorded result. Anything else is a call still in flight.
 _SETTLED_STATUSES = frozenset(
     {ItemStatus.COMPLETED, ItemStatus.FAILED, ItemStatus.DECLINED}
@@ -79,6 +88,9 @@ _SETTLED_STATUSES = frozenset(
 GoalUpdateSink = Callable[[str, ThreadGoal | None], None]
 GoalLifecycleSink = Callable[[str, str, dict[str, Any]], None]
 GoalContinuationGuard = Callable[[ThreadGoal], None]
+# Says whether something that runs Goals without anyone watching (an
+# Automation) owns this Goal.
+GoalUnattendedOwner = Callable[[ThreadGoal], bool]
 
 
 def _is_goal_bookkeeping(item: Item) -> bool:
@@ -103,6 +115,48 @@ def _evidence_summary(item: Item) -> str:
     return (item.summary.strip() or item.kind.value.replace("_", " "))[
         :GOAL_OUTCOME_EVIDENCE_SUMMARY_MAX_CHARS
     ]
+
+
+def _checklist_section(goal: ThreadGoal) -> str:
+    """What the continuation prompt says about the Goal's checklist."""
+
+    if goal.checks:
+        lines = [
+            "The user confirmed this checklist. When you claim completion, "
+            "DeepCode runs each command itself in the workspace, with your "
+            "command rights, and turns the claim back if one does not exit 0:"
+        ]
+        for check in goal.checks:
+            command = (
+                f" — `{' '.join(check.command)}`"
+                if check.command
+                else " — no command: show it in your own audit"
+            )
+            lines.append(f"- {check.requirement}{command}")
+        lines.append(
+            "Make the work pass them; never change a check or what it tests "
+            "to make it pass."
+        )
+        return "\n".join(lines)
+    if goal.proposed_checks:
+        return (
+            "Your proposed checklist is waiting for the user to confirm it. "
+            "Keep working meanwhile; propose again only if the Goal changed."
+        )
+    if goal.checks_dismissed:
+        return (
+            "The user dismissed your proposed checklist. Do not propose "
+            "another unless the user asks for one."
+        )
+    return (
+        "The Goal has no checklist yet. Early in this Turn, once you know the "
+        "project, call propose_goal_checks with the Goal's requirements, each "
+        "with the command that proves it where one exists (an argument list "
+        "run in the workspace without a shell, such as "
+        '["python", "-m", "pytest", "-q", "tests/test_cart.py"]). The user '
+        "confirms the list; then DeepCode runs those commands whenever you "
+        "claim completion. Keep working on the Goal after proposing."
+    )
 
 
 class GoalContinueDisposition(StrEnum):
@@ -143,12 +197,28 @@ class GoalExtension(GoalRuntimeHandler):
         self._locks_guard = threading.Lock()
         self._locks: dict[str, threading.RLock] = {}
         self._continuation_guards: list[GoalContinuationGuard] = []
+        self._unattended_owners: list[GoalUnattendedOwner] = []
+        # Goals left active at a restart only for a Turn the user had queued:
+        # that Turn runs, then the Goal pauses instead of continuing alone.
+        self._pause_after_queued: set[str] = set()
         self._continuation_template = (
             files("core.application.goal_prompts")
             .joinpath("continuation.md")
             .read_text(encoding="utf-8")
             .strip()
         )
+
+    def add_unattended_owner(self, owner: GoalUnattendedOwner) -> None:
+        self._unattended_owners.append(owner)
+
+    def _runs_unattended(self, goal: ThreadGoal) -> bool:
+        for owner in tuple(self._unattended_owners):
+            try:
+                if owner(goal):
+                    return True
+            except Exception:
+                logger.warning("Could not ask who owns Goal %s", goal.id, exc_info=True)
+        return False
 
     def add_continuation_guard(self, guard: GoalContinuationGuard) -> None:
         """Register an owner policy without coupling Goal to that owner."""
@@ -254,6 +324,135 @@ class GoalExtension(GoalRuntimeHandler):
     def read_guarded(self, thread_id: str, directory: Path) -> ThreadGoal | None:
         return self.store.read_guarded(thread_id, directory)
 
+    def read_reviews(
+        self, thread_id: str, goal: ThreadGoal | None, *, limit: int = 5
+    ) -> tuple[dict[str, Any], ...]:
+        """The latest completion reviews of ``goal``, oldest first."""
+
+        if goal is None:
+            return ()
+        try:
+            return self.store.read_reviews(thread_id, goal_id=goal.id, limit=limit)
+        except Exception:  # noqa: BLE001 - history is never needed for state
+            logger.exception("Goal reviews of %s could not be read", thread_id)
+            return ()
+
+    def read_state(
+        self, thread_id: str, *, limit: int = 5
+    ) -> tuple[ThreadGoal | None, GoalOutcome | None, tuple[dict[str, Any], ...]]:
+        goal, outcome = self.read_with_outcome(thread_id)
+        return goal, outcome, self.read_reviews(thread_id, goal, limit=limit)
+
+    def confirm_checks(
+        self,
+        thread_id: str,
+        *,
+        expected_goal_id: str,
+        checks: tuple[GoalCheck, ...],
+    ) -> ThreadGoal:
+        """The user's checklist: it replaces the confirmed one and the proposal."""
+
+        clean = self._checks(checks)
+        return self._update_checks(
+            thread_id,
+            expected_goal_id=expected_goal_id,
+            # Removing every check also means: do not ask for a new list.
+            transform=lambda current: current.with_checks(
+                checks=clean, proposed_checks=(), dismissed=not clean
+            ),
+            reason="checks confirmed" if clean else "checks removed",
+            source="user",
+        )
+
+    def dismiss_proposed_checks(
+        self, thread_id: str, *, expected_goal_id: str
+    ) -> ThreadGoal:
+        return self._update_checks(
+            thread_id,
+            expected_goal_id=expected_goal_id,
+            transform=lambda current: current.with_checks(
+                proposed_checks=(), dismissed=True
+            ),
+            reason="proposed checks dismissed",
+            source="user",
+        )
+
+    def propose_checks(
+        self,
+        context: GoalRuntimeContext,
+        checks: tuple[GoalCheck, ...],
+    ) -> dict[str, Any]:
+        """The agent's checklist, kept as a proposal until the user confirms it."""
+
+        clean = self._checks(checks)
+        if not clean:
+            raise InvalidArgumentError("propose at least one check")
+        self._ensure_turn_owns_goal(context)
+
+        def propose(current: ThreadGoal) -> ThreadGoal:
+            if current.status is not ThreadGoalStatus.ACTIVE:
+                raise ThreadGoalConflictError(
+                    f"the Goal is {current.status.value}; checks can be "
+                    "proposed only while it is active"
+                )
+            return current.with_checks(proposed_checks=clean)
+
+        updated = self._update_checks(
+            context.thread_id,
+            expected_goal_id=context.goal_id,
+            transform=propose,
+            reason="checks proposed",
+            source="agent",
+        )
+        return {
+            "goalId": updated.id,
+            "proposed": len(clean),
+            "note": (
+                "Proposed. The user confirms the checklist; until then DeepCode "
+                "does not run it. Keep working on the Goal meanwhile."
+            ),
+        }
+
+    def _update_checks(
+        self,
+        thread_id: str,
+        *,
+        expected_goal_id: str,
+        transform: Callable[[ThreadGoal], ThreadGoal],
+        reason: str,
+        source: str,
+    ) -> ThreadGoal:
+        with self._lock(thread_id):
+            try:
+                updated = self.store.update(
+                    thread_id,
+                    expected_goal_id=expected_goal_id,
+                    transform=transform,
+                    reason=reason,
+                    source=source,
+                )
+            except ThreadGoalConflictError as exc:
+                raise ConflictError(str(exc)) from exc
+            self._notify(thread_id, updated)
+            return updated
+
+    @staticmethod
+    def _checks(checks: Iterable[GoalCheck]) -> tuple[GoalCheck, ...]:
+        clean: list[GoalCheck] = []
+        for check in checks:
+            requirement = " ".join(check.requirement.split())
+            command = tuple(check.command)
+            try:
+                normalized = GoalCheck(requirement=requirement, command=command)
+            except ValueError as exc:
+                raise InvalidArgumentError(str(exc)) from exc
+            if normalized not in clean:
+                clean.append(normalized)
+        try:
+            return validate_goal_checks(tuple(clean))
+        except ValueError as exc:
+            raise InvalidArgumentError(str(exc)) from exc
+
     def turn_association(self, thread_id: str) -> GoalTurnAssociation | None:
         record = self.store.read_record(thread_id)
         goal = record.goal
@@ -308,6 +507,8 @@ class GoalExtension(GoalRuntimeHandler):
         objective: str,
         token_budget: int | None = None,
         skill_ids: tuple[str, ...] = (),
+        checks: tuple[GoalCheck, ...] = (),
+        time_budget_seconds: int | None = None,
         start: bool = True,
         client_surface: ClientSurface = ClientSurface.INTERNAL,
     ) -> ThreadGoal:
@@ -315,7 +516,9 @@ class GoalExtension(GoalRuntimeHandler):
             thread_id=thread_id,
             objective=self._objective(objective),
             token_budget=token_budget,
+            time_budget_seconds=time_budget_seconds,
             skill_ids=self._skills(skill_ids),
+            checks=self._checks(checks),
         )
         with self._lock(thread_id):
             try:
@@ -430,6 +633,7 @@ class GoalExtension(GoalRuntimeHandler):
         objective: str,
         token_budget: int | None,
         skill_ids: tuple[str, ...],
+        time_budget_seconds: Any = KEEP_TIME_BUDGET,
         continue_work: bool = True,
         client_surface: ClientSurface = ClientSurface.INTERNAL,
     ) -> ThreadGoal:
@@ -444,6 +648,7 @@ class GoalExtension(GoalRuntimeHandler):
                         clean_objective,
                         token_budget=token_budget,
                         skill_ids=clean_skills,
+                        time_budget_seconds=time_budget_seconds,
                     ),
                     reason="objective edited",
                     source="user",
@@ -629,6 +834,7 @@ class GoalExtension(GoalRuntimeHandler):
         *,
         status: str,
         reason: str | None,
+        expected_objective: str | None = None,
     ) -> dict[str, Any]:
         try:
             requested = ThreadGoalStatus(status)
@@ -638,13 +844,7 @@ class GoalExtension(GoalRuntimeHandler):
             ) from exc
         if requested not in {ThreadGoalStatus.COMPLETE, ThreadGoalStatus.BLOCKED}:
             raise InvalidArgumentError("update_goal status must be complete or blocked")
-        turn = self.turns.read(context.turn_id).turn
-        if (
-            turn.thread_id != context.thread_id
-            or turn.goal_id != context.goal_id
-            or turn.status.is_terminal
-        ):
-            raise ConflictError("this Turn no longer owns the current Goal")
+        self._ensure_turn_owns_goal(context)
         clean_reason = self._reason(
             reason,
             fallback=(
@@ -653,12 +853,25 @@ class GoalExtension(GoalRuntimeHandler):
                 else "Agent reported a persistent blocker."
             ),
         )
+
+        def transform(current: ThreadGoal) -> ThreadGoal:
+            if (
+                expected_objective is not None
+                and current.objective != expected_objective
+            ):
+                raise ValueError(
+                    "The Goal's objective changed while this completion claim "
+                    "was being reviewed. Check the work against the new "
+                    "objective, then claim completion again."
+                )
+            return current.agent_transition(requested)
+
         with self._lock(context.thread_id):
             try:
                 updated = self.store.update(
                     context.thread_id,
                     expected_goal_id=context.goal_id,
-                    transform=lambda current: current.agent_transition(requested),
+                    transform=transform,
                     reason=clean_reason,
                     source="agent",
                     turn_id=context.turn_id,
@@ -686,6 +899,73 @@ class GoalExtension(GoalRuntimeHandler):
                 "updated": True,
             }
 
+    def _ensure_turn_owns_goal(self, context: GoalRuntimeContext) -> None:
+        turn = self.turns.read(context.turn_id).turn
+        if (
+            turn.thread_id != context.thread_id
+            or turn.goal_id != context.goal_id
+            or turn.status.is_terminal
+        ):
+            raise ConflictError("this Turn no longer owns the current Goal")
+
+    def record_verification_tokens(
+        self,
+        context: GoalRuntimeContext,
+        tokens: int,
+    ) -> None:
+        """Charge a completion review's tokens to the Goal's usage and budget.
+
+        Best effort: a Goal that changed or went away meanwhile is left as is.
+        """
+
+        if tokens <= 0:
+            return
+        with self._lock(context.thread_id):
+            try:
+                updated = self.store.update(
+                    context.thread_id,
+                    expected_goal_id=context.goal_id,
+                    transform=lambda current: current.add_usage(
+                        tokens=tokens, elapsed_seconds=0
+                    ),
+                    reason="completion review",
+                    source="runtime",
+                    # No turn id: a runtime entry with one settles that Turn,
+                    # and the Turn's own usage must still be charged.
+                )
+            except Exception as exc:  # noqa: BLE001 - best effort, see above
+                logger.info(
+                    "Completion review tokens were not charged to Goal %s: %s",
+                    context.goal_id,
+                    exc,
+                )
+                return
+            self._notify(context.thread_id, updated)
+
+    def record_review(
+        self, context: GoalRuntimeContext, review: dict[str, Any]
+    ) -> None:
+        with self._lock(context.thread_id):
+            self.store.append_review(context.thread_id, review)
+            goal = self.read(context.thread_id)
+        # Publish again so the Goal's view shows the new review.
+        self._notify(context.thread_id, goal)
+
+    def goal_turn_count(self, context: GoalRuntimeContext) -> int:
+        # Turns queued behind this one have not worked on the Goal yet.
+        return sum(
+            1
+            for turn in self.turns.list_for_goal(context.thread_id, context.goal_id)
+            if turn.status.is_terminal or turn.id == context.turn_id
+        )
+
+    def user_declined_in_turn(self, context: GoalRuntimeContext) -> bool:
+        return any(
+            item.kind is ItemKind.APPROVAL_REQUEST
+            and item.status is ItemStatus.DECLINED
+            for item in self.turns.read(context.turn_id).items
+        )
+
     def completion_request(
         self,
         context: GoalRuntimeContext,
@@ -706,8 +986,18 @@ class GoalExtension(GoalRuntimeHandler):
             GoalEvidenceItem,
         )
 
+        from core.agent_runtime.goal_checks import GoalCheckSpec
+
         goal = self.read(context.thread_id)
         objective = goal.objective if goal is not None else ""
+        checks = (
+            tuple(
+                GoalCheckSpec(requirement=check.requirement, command=check.command)
+                for check in goal.checks
+            )
+            if goal is not None and goal.id == context.goal_id
+            else ()
+        )
         try:
             snapshot = self.turns.read(context.turn_id)
         except TurnNotFoundError as exc:
@@ -720,6 +1010,7 @@ class GoalExtension(GoalRuntimeHandler):
                 objective=objective,
                 reason=reason or "",
                 evidence=(),
+                checks=checks,
             )
 
         def view(item: Item) -> GoalEvidenceItem:
@@ -738,7 +1029,25 @@ class GoalExtension(GoalRuntimeHandler):
             reason=reason or "",
             evidence=tuple(settled[-GOAL_OUTCOME_EVIDENCE_MAX_ITEMS:]),
             pending=tuple(pending[-GOAL_OUTCOME_EVIDENCE_MAX_ITEMS:]),
+            progress_marker=self._progress_marker(snapshot.items),
+            checks=checks,
         )
+
+    @staticmethod
+    def _progress_marker(items: Iterable[Item]) -> str:
+        """The latest file change in the claim's Turn, as an item id ("" for none).
+
+        The Goal runtime compares it with the marker of the previous rejected
+        claim: a new id means the agent changed files in between. Changes
+        made through shell commands do not count.
+        """
+
+        changes = [
+            item
+            for item in items
+            if item.kind in _CHANGE_KINDS and item.status is ItemStatus.COMPLETED
+        ]
+        return max(changes, key=lambda item: item.ordinal).id if changes else ""
 
     def recover_incomplete(self) -> int:
         """Replay committed Goal Turns whose ledger settlement may be missing."""
@@ -759,14 +1068,49 @@ class GoalExtension(GoalRuntimeHandler):
                 latest = turns[-1] if turns else None
                 current = self.read(discovered.thread_id)
                 if (
-                    current is not None
-                    and current.id == discovered.id
-                    and current.status is ThreadGoalStatus.ACTIVE
-                    and latest is not None
-                    and latest.status is not TurnStatus.INTERRUPTED
+                    current is None
+                    or current.id != discovered.id
+                    or current.status is not ThreadGoalStatus.ACTIVE
                 ):
+                    continue
+                unattended = self._runs_unattended(current)
+                if latest is not None and not latest.status.is_terminal:
+                    # A Turn the user queued before the restart still runs; it
+                    # was their decision. It approves that Turn, not more.
+                    if not unattended:
+                        self._pause_after_queued.add(current.id)
+                    continue
+                if not unattended:
+                    # The service stopped while the Goal was working. Nobody
+                    # may be watching now, so it waits for the user instead
+                    # of spending tokens on its own.
+                    self._pause_after_restart_locked(current)
+                elif latest is not None and latest.status is not TurnStatus.INTERRUPTED:
+                    # Scheduled to run unattended: carry on as before.
                     self._continue_if_idle_locked(current)
         return recovered
+
+    def _pause_after_restart_locked(self, goal: ThreadGoal) -> None:
+        reason = "Paused because DeepCode restarted; resume the Goal to continue."
+        try:
+            updated = self.store.update(
+                goal.thread_id,
+                expected_goal_id=goal.id,
+                transform=lambda current: current.user_transition(
+                    ThreadGoalStatus.PAUSED
+                ),
+                reason=reason,
+                source="runtime",
+            )
+        except (ThreadGoalConflictError, ValueError):
+            logger.info("Goal %s changed before it could be paused", goal.id)
+            return
+        self._notify(goal.thread_id, updated)
+        self._emit(
+            goal.thread_id,
+            "goal.paused",
+            {"goalId": updated.id, "status": updated.status.value, "reason": reason},
+        )
 
     def on_turn_settled(self, turn: Turn) -> None:
         """Account a durable Turn and continue only from normal completion."""
@@ -906,14 +1250,33 @@ class GoalExtension(GoalRuntimeHandler):
             or latest.status is not ThreadGoalStatus.ACTIVE
         ):
             return
-        if (
-            client_surface is ClientSurface.INTERNAL
-            and latest.token_budget is None
-            and self._unattended_continuations(latest)
-            >= GOAL_UNATTENDED_CONTINUATION_LIMIT
-        ):
-            self._block_unattended_locked(latest)
-            return
+        if latest.id in self._pause_after_queued:
+            self._pause_after_queued.discard(latest.id)
+            if client_surface is ClientSurface.INTERNAL:
+                self._pause_after_restart_locked(latest)
+                return
+        if client_surface is ClientSurface.INTERNAL:
+            automatic = self._automatic_turn_work(
+                latest,
+                limit=(
+                    GOAL_STALLED_TURN_LIMIT
+                    if latest.has_budget
+                    else GOAL_UNATTENDED_CONTINUATION_LIMIT
+                ),
+            )
+            stalled = self._stalled_reason(automatic)
+            if stalled is None and (
+                not latest.has_budget
+                and len(automatic) >= GOAL_UNATTENDED_CONTINUATION_LIMIT
+            ):
+                stalled = (
+                    f"Stopped after {GOAL_UNATTENDED_CONTINUATION_LIMIT} automatic "
+                    "continuations without a Goal decision; resume the Goal to "
+                    "keep working."
+                )
+            if stalled is not None:
+                self._block_unattended_locked(latest, stalled)
+                return
         try:
             self._start_continuation_locked(
                 latest,
@@ -971,24 +1334,22 @@ class GoalExtension(GoalRuntimeHandler):
             turn_id=snapshot.turn.id,
         )
 
-    def _unattended_continuations(self, goal: ThreadGoal) -> int:
-        """Count the latest completed Turns the runtime continued on its own.
+    def _automatic_turn_work(self, goal: ThreadGoal, *, limit: int) -> list[list[Item]]:
+        """The work of up to ``limit`` latest completed Turns the runtime
+        started on its own, newest first.
 
         A Turn the user started, including a continuation they requested by
         creating, editing, resuming, or continuing the Goal, ends the run.
         """
 
-        count = 0
+        found: list[list[Item]] = []
         recent = self.turns.list_for_goal(goal.thread_id, goal.id)
-        for turn in reversed(recent[-GOAL_UNATTENDED_CONTINUATION_LIMIT:]):
+        for turn in reversed(recent[-limit:]):
             if turn.status is not TurnStatus.COMPLETED:
                 break
+            items = self.turns.read(turn.id).items
             prompt = next(
-                (
-                    item
-                    for item in self.turns.read(turn.id).items
-                    if item.kind is ItemKind.USER_MESSAGE
-                ),
+                (item for item in items if item.kind is ItemKind.USER_MESSAGE),
                 None,
             )
             if (
@@ -996,15 +1357,36 @@ class GoalExtension(GoalRuntimeHandler):
                 or goal_prompt(prompt.payload) is not GoalPrompt.AUTOMATIC
             ):
                 break
-            count += 1
-        return count
+            found.append(_goal_work(items))
+        return found
 
-    def _block_unattended_locked(self, goal: ThreadGoal) -> None:
-        reason = (
-            f"Stopped after {GOAL_UNATTENDED_CONTINUATION_LIMIT} automatic "
-            "continuations without a Goal decision; resume the Goal to keep "
-            "working."
+    @staticmethod
+    def _stalled_reason(automatic: list[list[Item]]) -> str | None:
+        """Why the latest automatic Turns show the Goal is stuck, if they do."""
+
+        latest = automatic[:GOAL_STALLED_TURN_LIMIT]
+        if len(latest) < GOAL_STALLED_TURN_LIMIT:
+            return None
+
+        # Any step that succeeded may be progress: an edit through bash, a
+        # search, a check. Only a Turn where nothing worked is stuck.
+        def nothing_worked(work: list[Item]) -> bool:
+            return all(
+                item.status in {ItemStatus.FAILED, ItemStatus.DECLINED} for item in work
+            )
+
+        if not all(nothing_worked(work) for work in latest):
+            return None
+        if all(not work for work in latest):
+            what = "did no work"
+        else:
+            what = "had no step that succeeded"
+        return (
+            f"Stopped: the last {GOAL_STALLED_TURN_LIMIT} automatic Turns {what}. "
+            "Resume the Goal to keep working."
         )
+
+    def _block_unattended_locked(self, goal: ThreadGoal, reason: str) -> None:
         try:
             updated = self.store.update(
                 goal.thread_id,
@@ -1065,10 +1447,11 @@ class GoalExtension(GoalRuntimeHandler):
             guard(goal)
 
     def _continuation_prompt(self, goal: ThreadGoal) -> str:
-        return self._continuation_template.replace(
+        prompt = self._continuation_template.replace(
             "{{OBJECTIVE}}",
             goal.objective,
         )
+        return f"{prompt}\n\n{_checklist_section(goal)}"
 
     def _turn_tokens(self, turn_id: str) -> int:
         for item in reversed(self.turns.read(turn_id).items):
@@ -1078,8 +1461,9 @@ class GoalExtension(GoalRuntimeHandler):
             if not isinstance(usage, dict):
                 return 0
             total = usage.get("total_tokens")
-            if isinstance(total, int) and not isinstance(total, bool):
-                return max(0, total)
+            # A total of 0 means the provider left it out, not a free Turn.
+            if isinstance(total, int) and not isinstance(total, bool) and total > 0:
+                return total
             return sum(
                 value
                 for key, value in usage.items()

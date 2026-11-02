@@ -1,0 +1,298 @@
+.proposal,
+.confirmed,
+.review {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 7px;
+  font-size: var(--text-xs);
+}
+
+/* Waiting on the user: framed like the outcome, tinted with the signal. */
+.proposal {
+  grid-column: 1 / -1;
+  margin: 0 8px 8px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--signal) 28%, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  background: var(--signal-faint);
+}
+
+.proposal > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.proposal > header > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--signal);
+}
+
+.proposal > header > div,
+.confirmed > header {
+  display: grid;
+  gap: 2px;
+}
+
+.proposal strong,
+.confirmed strong {
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+}
+
+.proposal small,
+.confirmed small {
+  color: var(--text-tertiary);
+  font: var(--text-2xs) var(--font-ui);
+  line-height: 1.45;
+}
+
+.proposal > footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.proposal > footer button,
+.quiet {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  padding: 0 9px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+}
+
+.proposal > footer button:hover:not(:disabled),
+.quiet:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.proposal > footer .primary {
+  background: var(--text-primary);
+  color: var(--text-inverse);
+}
+
+.proposal > footer .primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 88%, var(--signal));
+}
+
+.quiet {
+  width: max-content;
+  margin-left: -9px;
+  color: var(--text-tertiary);
+}
+
+.checkList {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checkList li {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+  line-height: 1.45;
+}
+
+.checkList code,
+.runs code {
+  overflow: hidden;
+  color: var(--text-primary);
+  font: var(--text-2xs) var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review {
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text-secondary);
+}
+
+.review > header {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.review > header > svg {
+  flex: 0 0 auto;
+  color: var(--attention);
+}
+
+.review[data-result="passed"] > header > svg {
+  color: var(--success);
+}
+
+.review[data-result="unavailable"] > header > svg {
+  color: var(--text-tertiary);
+}
+
+.review > header strong {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+}
+
+.review > header small,
+.requirements > span,
+.earlier summary,
+.earlier small {
+  color: var(--text-tertiary);
+  font: var(--text-2xs) var(--font-ui);
+}
+
+.reviewText {
+  margin: 0;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.requirements {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.requirements table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-2xs);
+  line-height: 1.45;
+}
+
+.requirements th {
+  padding: 3px 8px 3px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  font-weight: var(--weight-semibold);
+  text-align: left;
+}
+
+.requirements td {
+  padding: 5px 8px 5px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: top;
+}
+
+.requirements td:first-child {
+  min-width: 140px;
+  color: var(--text-primary);
+}
+
+.requirements td:last-child {
+  color: var(--text-tertiary);
+}
+
+.requirements tr:last-child td {
+  border-bottom: 0;
+}
+
+.finding {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--attention-soft);
+  color: var(--attention);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+}
+
+tr[data-finding="proved"] .finding {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.runs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.runs li > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.runs li > div > svg {
+  flex: 0 0 auto;
+  color: var(--attention);
+}
+
+.runs li[data-passed="true"] > div > svg {
+  color: var(--success);
+}
+
+.runs small {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+}
+
+.runs details summary {
+  margin: 3px 0 0 18px;
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  cursor: pointer;
+}
+
+.runs pre {
+  max-height: 180px;
+  margin: 4px 0 0 18px;
+  overflow: auto;
+  padding: 7px 8px;
+  border-radius: var(--radius-xs);
+  background: var(--surface-code);
+  color: var(--text-secondary);
+  font: var(--text-2xs) var(--font-mono);
+  white-space: pre-wrap;
+}
+
+.earlier summary {
+  cursor: pointer;
+}
+
+.earlier ul {
+  display: grid;
+  gap: 3px;
+  margin: 5px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.earlier li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: var(--text-2xs);
+}
+
+.earlier li > span {
+  color: var(--attention);
+}
+
+.earlier li > span[data-result="passed"] {
+  color: var(--success);
+}
