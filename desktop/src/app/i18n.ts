@@ -455,6 +455,7 @@ const ZH_CN: Record<string, string> = {
   "settings.modelField.unavailable": "模型目录不可用 · 请输入准确的模型 ID",
   "settings.modelField.stale": "正在使用上次可用的模型列表",
   "settings.modelField.available": "{{total}} 个可用模型 · 也可输入准确的模型 ID",
+  "settings.modelField.available_other": "{{count}} 个可用模型 · 也可输入准确的模型 ID",
   "settings.modelField.chooseConnection": "选择一个连接以加载其模型",
   // Settings: AI provider connections
   "settings.connections.step": "第 1 步 · 连接提供方",

@@ -33,6 +33,10 @@ Released versions are named in the entry title; the version on PyPI is
 - **A restart pauses the Goal.** If DeepCode restarts while a Goal is
   active, the Goal waits for you to resume it instead of spending tokens
   unattended. Goals that an Automation runs continue.
+- **Fixes.** An opened Goal card with a long review scrolls inside the card
+  instead of pushing its header out of the window; the reviewer writes in the
+  language of the Goal; provider names in Settings → Models are no longer cut
+  short; the README has new diagrams and current screenshots.
 
 ## 2026-10-31 · Long tasks that read well, the interface in your language, and a narrow-window layout
 

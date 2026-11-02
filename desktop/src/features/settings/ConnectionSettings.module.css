@@ -1,4 +1,7 @@
+/* The whole row of the Models page: in one column of its grid, provider names
+   were cut short beside an empty column. */
 .section {
+  grid-column: 1 / -1;
   margin-top: 0;
 }
 

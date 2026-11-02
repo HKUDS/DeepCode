@@ -136,7 +136,7 @@ DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共
 - [📄 许可证](#license)
 
 <p align="center">
-  <img src="assets/readme/deepcode-overview.png" alt="DeepCode 完成并验证一个真实任务" width="1080" />
+  <img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/overview.zh.png" alt="DeepCode 的整体结构：TUI、桌面、网页和脚本连到同一个本地服务，服务里的智能体运行环境用你选择的模型在你的项目里工作" width="1080" />
 </p>
 
 ---
@@ -219,9 +219,9 @@ DeepCode 是一个面向真实软件工程的开源 Coding Agent。你可以把�
 
 DeepCode 最特别的地方可以归纳为三点：
 
-- **从复杂知识走向可运行系统。** DeepCode 不只处理 Issue 和代码片段。Paper2Code 可以从论文、文档、参考仓库和实验目标出发，完成理解、实现与验证。
-- **让长任务持续运行，同时始终可控。** Goal 不是一次性的提示词。你可以在运行中补充要求、修订目标、暂停、停止或继续，而不必丢掉已经完成的工作。
-- **从代码修改走到验证与审查。** DeepCode 不会停在生成 Patch。它会根据任务运行命令与测试、检查构建结果和文件变化，并把 Goal 的完成或受阻原因关联到相关执行记录，方便你审查最终修改。
+- **"完成"要经过验收。** 智能体说 Goal 完成时，DeepCode 会自己运行你确认的检查清单；还可以开启独立审查，逐条用证据证明需求。没达标的完成声明会带着缺什么退回给智能体。
+- **让长任务持续运行，同时始终可控。** Goal 不是一次性的提示词。你可以在运行中补充要求、修订目标、暂停、停止或继续，而不必丢掉已经完成的工作；卡住、预算或时间用完时，它也会自己停下。
+- **每处改动都可以审查。** 修改以 diff 呈现，敏感操作等你批准，每个 Goal 都保留工具调用和验收记录，让你看清结果为什么可信。
 
 DeepCode 的目标不是让 Agent 显得更忙，而是帮助你更可靠地完成真正的软件工程工作。
 
@@ -230,7 +230,8 @@ DeepCode 的目标不是让 Agent 显得更忙，而是帮助你更可靠地完�
 ## 为什么选 DeepCode
 
 - **不止回答一次。** 给 Agent 一个 Goal，它会跨多个回合持续工作并检查结果，
-  直到报告完成或受阻。运行过程中可以补充要求、修改 Goal、暂停或停止。
+  直到报告完成或受阻；它说完成了，要先通过验收才算数。运行过程中可以补充要求、
+  修改 Goal、暂停或停止。
 - **关掉客户端也不停。** 回合在本地后台服务里运行，而不是在启动它的窗口里。
   关掉 TUI，在浏览器里打开同一个会话，在那里处理待批准的操作。
 - **一个会话，四种客户端。** TUI、Desktop、Web 和 `deepcode exec` 读写同一批
@@ -241,11 +242,11 @@ DeepCode 的目标不是让 Agent 显得更忙，而是帮助你更可靠地完�
   Anthropic 兼容端点，或本地模型。
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/web-ui.png" alt="DeepCode Web 客户端：一个修复失败测试的会话，对话里是 Agent 的工具调用，右侧 Review 面板是改动的 diff" width="100%" />
+  <img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/web-ui.zh.png" alt="一个真实 Goal 完成后的 DeepCode 网页客户端：智能体修好了代码并补了测试，Goal 卡片上是通过的验收结果，逐条列出需求和证据" width="100%" />
 </p>
 
-<p align="center"><sub>一次真实任务后的 Web 客户端：Agent 跑了测试、改了一个文件、
-再跑测试，改动在右侧等待审阅。</sub></p>
+<p align="center"><sub>一个真实 Goal 完成后的网页客户端：智能体修好两个 bug 并补了测试，
+DeepCode 自己运行了确认过的检查，独立审查逐条证明需求后，Goal 才记为完成。</sub></p>
 
 ## 快速开始
 
@@ -270,10 +271,10 @@ deepcode provider test my-openrouter --model MODEL_ID
 ```
 
 把 `MODEL_ID` 换成列表里的模型。在 Desktop 或 Web 中，也可以在
-**设置 → AI 提供方** 里完成同样的操作。
+**设置 → 模型** 里完成同样的操作。
 
 <div align="center">
-  <img src="assets/setting_model.png" alt="在 DeepCode 设置中选择模型服务和模型" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.2); margin: 15px 0;"/>
+  <img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/settings-models.zh.png" alt="DeepCode 设置里的模型连接" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.2); margin: 15px 0;"/>
 </div>
 
 **3. 在项目里运行。**
@@ -356,14 +357,15 @@ Windows 工具链和排错见 [Desktop 指南](desktop/README.md)。
 ## 核心功能
 
 <p align="center">
-  <img src="assets/readme/verification-loop.png" alt="DeepCode Agent Harness 与验证循环" width="1080" />
+  <img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/goal-loop.zh.png" alt="一个 Goal 如何走到完成：多个回合的工作、完成声明，然后是规则检查、你确认的检查和独立审查；只要还缺东西，声明就被打回" width="1080" />
 </p>
 
 - **在仓库里干活。** 读取、搜索、编辑文件，应用补丁，运行命令和测试，每处改动
   都以 diff 呈现。[Getting started](docs/guide/getting-started.md)
 - **Goal。** 在 TUI 中用 `/goal <objective>`，在 Desktop 和 Web 中用 Goal 面板。
-  Goal 跨回合继续，重启后也能恢复；可选的完成检查会在最近一次检查失败时驳回
-  "已完成"。[Goals and automation](docs/guide/goals-and-headless.md)
+  Goal 跨回合继续，重启后仍然保留。完成要经过验收：DeepCode 运行你确认的检查清单，
+  还可以开启独立审查逐条证明需求（设置 → 通用）。token 预算或时间上限可以给它
+  设边界。[Goals and automation](docs/guide/goals-and-headless.md)
 - **会话与上下文。** 每个会话连同工具调用、批准记录和 Goal 状态一起保存。
   `/resume`、`/compact` 和会话级上下文上限让长任务能继续下去。
   [Sessions](docs/guide/sessions.md)

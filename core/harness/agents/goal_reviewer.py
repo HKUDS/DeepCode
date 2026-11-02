@@ -162,6 +162,9 @@ Goal cannot be met by the agent at all, for example when it needs credentials
 or a service that is not there, or contradicts itself; the agent saying so is
 not proof. Your own limits (read-only, no network) are never a reason for
 "impossible".
+
+Write the summary, each requirement and its evidence in the language the Goal
+is written in; keep code, commands and file names as they are.
 """
 
 

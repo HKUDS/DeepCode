@@ -1,0 +1,175 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  :root {
+    --canvas: #f7f8f7; --shell: #eef1ef; --raised: #ffffff; --inset: #e8ece9;
+    --text: #202321; --text2: #474b48; --text3: #626964;
+    --border: #dfe4e1; --border2: #cfd6d2;
+    --signal: #4d5bd5; --signal-ink: #3b48b0; --signal-soft: rgba(77, 91, 213, 0.1);
+    --success: #3a725e; --success-soft: #e7f1ed;
+    --attention: #935b2f; --attention-soft: #f8eee6;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    width: 1600px; height: 790px; background: var(--canvas); color: var(--text);
+    font-family: system-ui, "Helvetica Neue", "PingFang SC", Arial, sans-serif;
+    position: relative; overflow: hidden;
+  }
+  .mono { font-family: Monaco, Menlo, monospace; font-size: 0.95em; }
+  h1 { position: absolute; left: 64px; top: 48px; font-size: 30px; font-weight: 650; letter-spacing: -0.01em; }
+  .lede { position: absolute; left: 64px; top: 92px; font-size: 17px; color: var(--text2); }
+  .box { position: absolute; background: var(--raised); border: 1px solid var(--border); border-radius: 16px; padding: 18px 20px; }
+  .box h2 { font-size: 18px; font-weight: 650; }
+  .box .k { font-size: 13px; color: var(--text3); font-weight: 600; margin-bottom: 6px; }
+  .box p, .box li { font-size: 14px; line-height: 1.5; color: var(--text2); }
+  .box ul { margin-top: 10px; padding-left: 18px; }
+  .box li + li { margin-top: 4px; }
+  .objective { margin-top: 6px; font-size: 15px; line-height: 1.45; color: var(--text); font-weight: 500; }
+  .check { margin-top: 8px; padding: 9px 11px; border-radius: 10px; background: var(--canvas); border: 1px solid var(--border); }
+  .check b { display: block; font-size: 13.5px; font-weight: 600; }
+  .check span { display: block; margin-top: 3px; font-size: 12.5px; color: var(--signal-ink); }
+  .note { margin-top: 12px; font-size: 13px; color: var(--text3); line-height: 1.45; }
+
+  .claim { position: absolute; padding: 12px 16px; border-radius: 999px; background: var(--raised); border: 1px solid var(--border2); font-size: 15px; font-weight: 600; }
+  .gate { position: absolute; background: var(--shell); border: 1px solid var(--border2); border-radius: 20px; padding: 20px 22px; }
+  .gate h2 { font-size: 18px; font-weight: 650; }
+  .gate .sub { margin-top: 3px; font-size: 13.5px; color: var(--text3); }
+  .stage { margin-top: 12px; display: grid; grid-template-columns: 30px 1fr auto; gap: 12px; align-items: start; background: var(--raised); border: 1px solid var(--border); border-radius: 12px; padding: 13px 14px; }
+  .stage .n { width: 30px; height: 30px; border-radius: 50%; background: var(--signal-soft); color: var(--signal-ink); display: grid; place-items: center; font-weight: 650; font-size: 14px; }
+  .stage b { font-size: 15px; font-weight: 600; }
+  .stage p { margin-top: 3px; font-size: 13.5px; line-height: 1.45; color: var(--text2); }
+  .stage .when { font-size: 12px; color: var(--text3); background: var(--canvas); border: 1px solid var(--border); border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
+  .done { position: absolute; background: var(--success-soft); border: 1px solid rgba(58, 114, 94, 0.35); border-radius: 16px; padding: 18px 20px; }
+  .done h2 { font-size: 18px; font-weight: 650; color: var(--success); }
+  .done p { margin-top: 6px; font-size: 14px; line-height: 1.5; color: var(--text2); }
+  .back { position: absolute; font-size: 14px; color: var(--attention); font-weight: 600; background: var(--canvas); padding: 0 8px; }
+
+  .stops { position: absolute; left: 64px; top: 628px; width: 1472px; }
+  .stops .k { font-size: 13px; color: var(--text3); font-weight: 600; }
+  .stops .row { margin-top: 10px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .stop { background: var(--raised); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; }
+  .stop b { font-size: 15px; font-weight: 600; }
+  .stop p { margin-top: 5px; font-size: 13.5px; line-height: 1.45; color: var(--text2); }
+  svg { position: absolute; left: 0; top: 0; }
+</style>
+</head>
+<body>
+<svg width="1600" height="860" viewBox="0 0 1600 860">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#4d5bd5" /></marker>
+    <marker id="g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3a725e" /></marker>
+    <marker id="b" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#935b2f" /></marker>
+  </defs>
+  <path d="M 324 330 H 362" stroke="#4d5bd5" stroke-width="2" fill="none" marker-end="url(#a)" />
+  <path d="M 660 330 H 692" stroke="#4d5bd5" stroke-width="2" fill="none" marker-end="url(#a)" />
+  <path d="M 834 330 H 878" stroke="#4d5bd5" stroke-width="2" fill="none" marker-end="url(#a)" />
+  <path d="M 1316 330 H 1352" stroke="#3a725e" stroke-width="2" fill="none" marker-end="url(#g)" />
+  <!-- turned back: from the gate's bottom to the Turns box's bottom -->
+  <path d="M 1100 556 V 596 H 512 V 524" stroke="#935b2f" stroke-width="2" stroke-dasharray="7 6" fill="none" marker-end="url(#b)" />
+</svg>
+
+<h1 data-i18n="title"></h1>
+<p class="lede" data-i18n="lede"></p>
+
+<div class="box" style="left:64px; top:160px; width:260px;">
+  <div class="k" data-i18n="goalK"></div>
+  <div class="objective" data-i18n="objective"></div>
+  <div class="k" style="margin-top:16px" data-i18n="checklistK"></div>
+  <div class="check"><b data-i18n="ck1"></b><span class="mono">python -m pytest -q</span></div>
+  <div class="check"><b data-i18n="ck2"></b><span style="color:var(--text3)" data-i18n="ck2c"></span></div>
+  <p class="note" data-i18n="goalNote"></p>
+</div>
+
+<div class="box" style="left:364px; top:216px; width:296px; height:308px;">
+  <h2 data-i18n="turns"></h2>
+  <ul>
+    <li data-i18n="t1"></li>
+    <li data-i18n="t2"></li>
+    <li data-i18n="t3"></li>
+  </ul>
+  <p class="note" data-i18n="turnsNote"></p>
+</div>
+
+<div class="claim" style="left:694px; top:306px; width:140px; text-align:center;" data-i18n="claim"></div>
+
+<div class="gate" style="left:880px; top:150px; width:436px;">
+  <h2 data-i18n="gate"></h2>
+  <div class="sub" data-i18n="gateSub"></div>
+  <div class="stage"><span class="n">1</span><div><b data-i18n="s1"></b><p data-i18n="s1p"></p></div><span class="when" data-i18n="s1w"></span></div>
+  <div class="stage"><span class="n">2</span><div><b data-i18n="s2"></b><p data-i18n="s2p"></p></div><span class="when" data-i18n="s2w"></span></div>
+  <div class="stage"><span class="n">3</span><div><b data-i18n="s3"></b><p data-i18n="s3p"></p></div><span class="when" data-i18n="s3w"></span></div>
+</div>
+
+<div class="done" style="left:1354px; top:250px; width:182px;">
+  <h2 data-i18n="done"></h2>
+  <p data-i18n="doneP"></p>
+</div>
+
+<div class="back" style="left:640px; top:584px;" data-i18n="back"></div>
+
+<div class="stops">
+  <div class="k" data-i18n="stopsK"></div>
+  <div class="row">
+    <div class="stop"><b data-i18n="p1"></b><p data-i18n="p1p"></p></div>
+    <div class="stop"><b data-i18n="p2"></b><p data-i18n="p2p"></p></div>
+    <div class="stop"><b data-i18n="p3"></b><p data-i18n="p3p"></p></div>
+    <div class="stop"><b data-i18n="p4"></b><p data-i18n="p4p"></p></div>
+  </div>
+</div>
+
+<script>
+const text = {
+  en: {
+    title: "How a Goal reaches complete",
+    lede: "The agent keeps working across Turns. When it says the Goal is complete, the claim is checked before it counts.",
+    goalK: "Goal", objective: "Make the inventory module match SPEC.md, with a test for every rule.",
+    checklistK: "Checklist you confirmed",
+    ck1: "Every rule has a passing test", ck2: "Zero stock removes the item", ck2c: "checked by the reviewer",
+    goalNote: "The agent proposes the checklist; nothing runs until you confirm it.",
+    turns: "Turns of work",
+    t1: "Read and search the project", t2: "Edit files, each change a diff", t3: "Run commands and tests",
+    turnsNote: "Inside your access preset and sandbox. Approvals wait for you, and Goals continue after you close the client.",
+    claim: "“Complete”",
+    gate: "Completion check", gateSub: "Cheapest step first; any step can turn the claim back.",
+    s1: "Rule check", s1p: "The latest check passed, and the Turn did real work.", s1w: "rule · reviewer",
+    s2: "Your checks", s2p: "DeepCode runs each confirmed command itself. A pipe cannot hide a failure.", s2w: "always",
+    s3: "Independent review", s3p: "A read-only agent proves every requirement with evidence, or lists what is missing.", s3w: "reviewer",
+    done: "Complete", doneP: "Every check is kept on the Goal card: requirement, finding, evidence.",
+    back: "Turned back with what is missing: the agent keeps working",
+    stopsK: "A Goal also stops on its own",
+    p1: "Budget or time limit", p1p: "The Turn stops; the agent gets one answer, without tools, to say what is done and what is left.",
+    p2: "Nothing new", p2p: "A Turn whose tool calls keep returning what it has already seen is ended, after a warning.",
+    p3: "Stuck", p3p: "Three automatic Turns in a row with no successful step: the Goal is blocked for you to look at.",
+    p4: "Restart", p4p: "If DeepCode restarts mid-Goal, the Goal pauses instead of spending tokens unattended.",
+  },
+  zh: {
+    title: "一个 Goal 如何走到完成",
+    lede: "智能体跨多个回合持续工作；它说 Goal 完成了，这个说法要先经过验收才算数。",
+    goalK: "Goal", objective: "让 inventory 模块符合 SPEC.md，每条规则都有测试。",
+    checklistK: "你确认的检查清单",
+    ck1: "每条规则都有通过的测试", ck2: "库存为 0 的商品被移除", ck2c: "由审查员核对",
+    goalNote: "清单由智能体提出；你确认之前，什么都不会运行。",
+    turns: "多个回合的工作",
+    t1: "阅读和搜索项目", t2: "修改文件，每处改动都是 diff", t3: "运行命令和测试",
+    turnsNote: "在你设定的访问权限和沙箱之内。审批会等你处理；关掉客户端后，Goal 照常继续。",
+    claim: "“完成了”",
+    gate: "完成验收", gateSub: "先做代价最小的一步；任何一步都可以打回。",
+    s1: "规则检查", s1p: "最近一次检查通过，而且这个回合确实做了事。", s1w: "规则 · 审查",
+    s2: "你确认的检查", s2p: "DeepCode 自己运行每条已确认的命令，管道藏不住失败。", s2w: "始终",
+    s3: "独立审查", s3p: "只读的智能体逐条用证据证明需求，或列出还缺什么。", s3w: "审查",
+    done: "完成", doneP: "每次验收都记在 Goal 卡片上：需求、结论、证据。",
+    back: "带着缺什么被打回：智能体继续工作",
+    stopsK: "Goal 也会自己停下",
+    p1: "预算或时间用完", p1p: "回合停下；智能体最后再回答一次（不能用工具），说明做完了什么、还剩什么。",
+    p2: "没有新进展", p2p: "工具调用一直拿到已经看过的结果，先警告，再结束这个回合。",
+    p3: "卡住了", p3p: "连续三个自动回合没有一步成功：Goal 转为受阻，等你来看。",
+    p4: "重启", p4p: "Goal 进行中 DeepCode 重启了：Goal 暂停，不会在无人看着时花 token。",
+  },
+};
+const lang = new URLSearchParams(location.search).get("lang") || "en";
+for (const el of document.querySelectorAll("[data-i18n]")) el.textContent = text[lang][el.dataset.i18n];
+</script>
+</body>
+</html>
