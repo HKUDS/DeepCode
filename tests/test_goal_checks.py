@@ -990,3 +990,15 @@ def test_a_cmd_program_never_gets_cmd_syntax_in_its_arguments(monkeypatch) -> No
         "-c",
         "npm test --grep 'a b'",
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_command_shared_by_several_checks_runs_once(tmp_path) -> None:
+    counter = tmp_path / "count"
+    code = f"open({str(counter)!r}, 'a').write('x')"
+    runs = await run_checks(
+        (_spec(code, "adds"), _spec("pass", "other"), _spec(code, "removes")),
+        cwd=str(tmp_path),
+    )
+    assert counter.read_text() == "x"
+    assert [run.requirement for run in runs] == ["adds; removes", "other"]

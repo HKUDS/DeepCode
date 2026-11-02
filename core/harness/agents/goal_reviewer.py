@@ -214,9 +214,10 @@ def review_task(request: GoalCompletionRequest) -> str:
         )
     if request.checks:
         parts.append(
-            "The user confirmed this checklist for the Goal. Each item is a "
-            "requirement: list every one in your requirements, besides any "
-            "others the Goal states.\n"
+            "The user confirmed this checklist for the Goal. List each item "
+            "in your requirements. It may group or miss rules: still list "
+            "every requirement of the Goal, and of any document it points "
+            "to, as its own entry.\n"
             + "\n".join(
                 f"- {_clip(check.requirement, 400)}"
                 + (f" (command: `{' '.join(check.command)}`)" if check.command else "")

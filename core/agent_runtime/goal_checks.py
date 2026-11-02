@@ -35,6 +35,8 @@ _KEEP_BYTES = 64 * 1024
 # After the command exits, how long its output may still arrive: a process it
 # left running in the background may hold the pipe open for good.
 _DRAIN_SECONDS = 2.0
+# The requirements one shared command proves, as one run names them.
+_REQUIREMENTS_MAX_CHARS = 1_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,13 +78,15 @@ async def run_checks(
     total_seconds: float = CHECKS_TOTAL_SECONDS,
     sandbox_enabled: bool | None = None,
 ) -> tuple[GoalCheckRun, ...]:
-    """Run every check with a command, in order; return how each went."""
+    """Run every distinct command once, in order; return how each went.
+
+    Checks that share a command (several requirements proved by one test
+    suite) are run once, as one run naming all of their requirements.
+    """
 
     runs: list[GoalCheckRun] = []
     deadline = time.monotonic() + total_seconds
-    for check in checks:
-        if not check.command:
-            continue
+    for check in _merged(checks):
         left = deadline - time.monotonic()
         if left <= 0:
             runs.append(
@@ -108,6 +112,20 @@ async def run_checks(
             )
         )
     return tuple(runs)
+
+
+def _merged(checks: tuple[GoalCheckSpec, ...]) -> list[GoalCheckSpec]:
+    requirements: dict[tuple[str, ...], list[str]] = {}
+    for check in checks:
+        if check.command:
+            requirements.setdefault(check.command, []).append(check.requirement)
+    merged = []
+    for command, names in requirements.items():
+        joined = "; ".join(names)
+        if len(joined) > _REQUIREMENTS_MAX_CHARS:
+            joined = joined[: _REQUIREMENTS_MAX_CHARS - 1] + "…"
+        merged.append(GoalCheckSpec(requirement=joined, command=command))
+    return merged
 
 
 async def _run_one(

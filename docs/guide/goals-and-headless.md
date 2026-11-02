@@ -96,8 +96,8 @@ the Goal complete, in the project folder. A proposed command is an argument
 list run without a shell. A command you type yourself runs the same way unless
 it uses shell syntax (a pipe, `&&`, a glob, a variable); then it runs in
 `bash -o pipefail -c`, so a failing stage fails the check: `pytest | tail`
-cannot hide failing tests. Each command may take up to 10 minutes, all of them
-30 minutes, and anything a command leaves running is stopped when it exits. If
+cannot hide failing tests. A command several checks share runs once. Each
+command may take up to 10 minutes, all of them 30 minutes, and anything a command leaves running is stopped when it exits. If
 one does not exit 0, the claim is turned back with the end of its output, and
 the agent keeps working. A check runs with the same rights as the agent's own
 commands, in the same sandbox: the agent may have written the code it runs. A
