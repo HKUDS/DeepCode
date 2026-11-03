@@ -184,6 +184,107 @@ def test_a_tool_result_pruned_under_pressure_is_not_saved_again() -> None:
     assert [(item.role, item.content) for item in added] == [("assistant", "done")]
 
 
+def test_a_nameless_call_is_dropped_before_it_is_stored() -> None:
+    # A parser glitch can hand back a call whose function carries the raw
+    # payload but no name. The API rejects a request that replays one
+    # (400/422 missing field name), so it must never reach the store.
+    history = [
+        {"role": "user", "content": "run echo"},
+        {
+            "role": "assistant",
+            "content": "calling",
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"arguments": '{"command":"echo hi"}'},
+                },
+                {"id": "c2", "type": "function", "function": {"name": "   "}},
+                {
+                    "id": "c3",
+                    "type": "function",
+                    "function": {"name": "bash", "arguments": '{"command":"echo hi"}'},
+                },
+            ],
+        },
+        {"role": "tool", "content": "hi", "tool_call_id": "c3", "name": "bash"},
+    ]
+    stored = new_records_from_history(history, stored=())
+    calls = (stored[1].metadata or {})["toolCalls"]
+    assert [call["id"] for call in calls] == ["c3"]
+
+
+def test_a_stored_nameless_call_is_dropped_on_resume() -> None:
+    # A record poisoned before this guard existed self-heals on resume:
+    # its text stays, the undeliverable call goes.
+    stored = [
+        SessionMessage(role="user", content="run echo"),
+        SessionMessage(
+            role="assistant",
+            content="calling",
+            metadata={
+                "toolCalls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"arguments": '{"command":"echo hi"}'},
+                    }
+                ]
+            },
+        ),
+    ]
+    rebuilt = visible_kernel_history(stored)
+    assert rebuilt[1]["content"] == "calling"
+    assert "tool_calls" not in rebuilt[1]
+
+
+def test_a_turn_of_only_nameless_calls_leaves_nothing_behind() -> None:
+    # No text and no deliverable call means there is no message to keep.
+    history = [
+        {"role": "user", "content": "run echo"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "c1", "type": "function", "function": {}}],
+        },
+    ]
+    stored = new_records_from_history(history, stored=())
+    assert [item.role for item in stored] == ["user"]
+    assert [item["role"] for item in visible_kernel_history(stored)] == ["user"]
+
+
+def test_a_resumed_poisoned_turn_is_not_stored_again() -> None:
+    # The fingerprint must see the same surviving calls the replay does,
+    # or every resume re-saves the cleaned turn as a second message.
+    stored = [
+        SessionMessage(role="user", content="run echo"),
+        SessionMessage(
+            role="assistant",
+            content="calling",
+            metadata={
+                "toolCalls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"arguments": "{}"},
+                    },
+                    {
+                        "id": "c2",
+                        "type": "function",
+                        "function": {"name": "bash", "arguments": "{}"},
+                    },
+                ]
+            },
+        ),
+    ]
+    history = [
+        *visible_kernel_history(stored),
+        {"role": "assistant", "content": "done"},
+    ]
+    added = new_records_from_history(history, stored)
+    assert [(item.role, item.content) for item in added] == [("assistant", "done")]
+
+
 def test_only_runtime_notes_count_as_context_notes() -> None:
     def user(**metadata: str) -> SessionMessage:
         return SessionMessage("user", "text", metadata=metadata)
