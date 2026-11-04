@@ -88,6 +88,80 @@ async def test_explicit_protocol_and_no_auth_use_the_selected_gateway(
 
 
 @pytest.mark.asyncio
+async def test_responses_preserves_image_detail(monkeypatch):
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer
+
+    seen = []
+
+    async def handler(request):
+        seen.append(await request.json())
+        return web.json_response(RESPONSE)
+
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
+    application = web.Application()
+    application.router.add_post("/v1/responses", handler)
+    async with TestServer(application) as server:
+        provider = OpenAICompatProvider(
+            api_base=str(server.make_url("/v1/")),
+            default_model="plain-model",
+            protocol="openai_responses",
+            auth_mode="none",
+            spec=find_by_name("custom"),
+        )
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Compare these images"},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "https://example.org/high.png",
+                            "detail": "high",
+                        },
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "https://example.org/low.png",
+                            "detail": "low",
+                        },
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "https://example.org/default.png"},
+                    },
+                ],
+            }
+        ]
+        original = json.dumps(messages)
+        try:
+            assert (await provider.chat(messages)).content == "OK"
+            assert seen[0]["input"][0]["content"] == [
+                {"type": "input_text", "text": "Compare these images"},
+                {
+                    "type": "input_image",
+                    "image_url": "https://example.org/high.png",
+                    "detail": "high",
+                },
+                {
+                    "type": "input_image",
+                    "image_url": "https://example.org/low.png",
+                    "detail": "low",
+                },
+                {
+                    "type": "input_image",
+                    "image_url": "https://example.org/default.png",
+                    "detail": "auto",
+                },
+            ]
+            assert json.dumps(messages) == original
+        finally:
+            await provider.aclose()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("protocol", ["auto", "openai_responses"])
 async def test_only_legacy_auto_may_fallback(monkeypatch, protocol):
     paths = []
