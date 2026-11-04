@@ -4,6 +4,10 @@ DeepCode 的主要变化，最新的在前，每天一条。正式版本号写�
 PyPI 上的包名是 [deepcode-hku](https://pypi.org/project/deepcode-hku/)。
 English: [CHANGELOG.md](CHANGELOG.md).
 
+## 2026-11-04 · 修复
+
+- Responses API 请求会保留调用方设置的图片细节级别。
+
 ## 2026-11-02 · Goal 先验收，再算完成
 
 - **DeepCode 自己运行的检查清单。** Goal 开始不久，智能体会提出检查清单：每项需求

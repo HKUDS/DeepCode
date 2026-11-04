@@ -5,6 +5,10 @@ Released versions are named in the entry title; the version on PyPI is
 [deepcode-hku](https://pypi.org/project/deepcode-hku/). 中文版见
 [CHANGELOG_ZH.md](CHANGELOG_ZH.md).
 
+## 2026-11-04 · Fixes
+
+- Preserve the caller's image detail setting in Responses API requests.
+
 ## 2026-11-02 · Goals that are checked before they count as complete
 
 - **A checklist DeepCode runs itself.** Early in a Goal the agent proposes a
