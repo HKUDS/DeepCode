@@ -14,6 +14,8 @@ import io
 import json
 import re
 import sys
+import threading
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -65,11 +67,11 @@ class _ScriptedProvider:
         self,
         replies: list[Any],
         *,
-        first_call_delay: float = 0,
+        before_first_reply: Callable[[], Awaitable[None]] | None = None,
     ):
         self.replies = list(replies)
         self.calls = 0
-        self.first_call_delay = first_call_delay
+        self.before_first_reply = before_first_reply
 
     def get_default_model(self):
         return "fake-model"
@@ -77,8 +79,8 @@ class _ScriptedProvider:
     async def chat_with_retry(self, **kwargs: Any):
         i = min(self.calls, len(self.replies) - 1)
         self.calls += 1
-        if i == 0 and self.first_call_delay:
-            await asyncio.sleep(self.first_call_delay)
+        if self.calls == 1 and self.before_first_reply is not None:
+            await self.before_first_reply()
         reply = self.replies[i]
         if isinstance(reply, LLMResponse):
             return reply
@@ -111,15 +113,15 @@ def _patch_provider(monkeypatch, provider):
 def _run_tui(
     monkeypatch,
     tmp_path,
-    stdin_text: str,
+    stdin: str | io.StringIO,
     replies: list[Any],
     workspace: str = "ws",
-    first_call_delay: float = 0,
+    before_first_reply: Callable[[], Awaitable[None]] | None = None,
 ) -> tuple[int, Any]:
     (tmp_path / workspace).mkdir(parents=True, exist_ok=True)
     provider = _ScriptedProvider(
         replies,
-        first_call_delay=first_call_delay,
+        before_first_reply=before_first_reply,
     )
     _patch_provider(monkeypatch, provider)
     monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
@@ -128,7 +130,9 @@ def _run_tui(
     import core.sessions.store as store_mod
 
     monkeypatch.setattr(store_mod, "_DEFAULT_STORE", None)
-    monkeypatch.setattr("sys.stdin", io.StringIO(stdin_text))
+    monkeypatch.setattr(
+        "sys.stdin", io.StringIO(stdin) if isinstance(stdin, str) else stdin
+    )
     rc = tui_app.main(["--workspace", str(tmp_path / workspace), "--trust"])
     return rc, provider
 
@@ -1505,21 +1509,59 @@ def test_goal_edit_and_steer_remain_available_while_work_runs_in_background(
     from core.domain import ThreadGoalStatus
     from core.sessions import SessionStore, ThreadGoalStore
 
-    _configure_fake_goal_provider(monkeypatch, tmp_path)
-    rc, _provider = _run_tui(
-        monkeypatch,
-        tmp_path,
+    from types import SimpleNamespace
+
+    provider_started = threading.Event()
+    allow_reply = threading.Event()
+    reply_timed_out = threading.Event()
+    steer_input = "Keep the public API compatible."
+    inputs = iter(
         (
-            "/goal preserve the current behavior\n"
-            "Keep the public API compatible.\n"
-            "/goal edit preserve the behavior and public API\n"
-            "/goal pause\n"
-            "/exit\n"
-        ),
-        ["work remains"],
-        first_call_delay=0.5,
+            "/goal preserve the current behavior",
+            steer_input,
+            "/goal edit preserve the behavior and public API",
+            "/goal pause",
+            "/goal wait",
+            "/exit",
+        )
     )
 
+    async def hold_first_reply() -> None:
+        provider_started.set()
+        if not await asyncio.to_thread(allow_reply.wait, 15):
+            reply_timed_out.set()
+            raise TimeoutError("TUI did not reach /goal wait after pausing the Goal")
+
+    async def prompt_async(_message: Any, **_kwargs: Any) -> str:
+        line = next(inputs)
+        if line == steer_input:
+            assert await asyncio.to_thread(provider_started.wait, 15), (
+                "Goal did not reach the scripted provider"
+            )
+        elif line == "/goal wait":
+            # The interactive REPL has processed /goal pause before prompting again.
+            allow_reply.set()
+        return line
+
+    monkeypatch.setattr(
+        "cli.tui.input.PromptSession",
+        lambda **_kwargs: SimpleNamespace(
+            prompt_async=prompt_async, app=SimpleNamespace(invalidate=lambda: None)
+        ),
+    )
+    _configure_fake_goal_provider(monkeypatch, tmp_path)
+    try:
+        rc, _provider = _run_tui(
+            monkeypatch,
+            tmp_path,
+            _Terminal(),
+            ["work remains"],
+            before_first_reply=hold_first_reply,
+        )
+    finally:
+        allow_reply.set()
+
+    assert not reply_timed_out.is_set()
     assert rc == 0
     output = capsys.readouterr().out
     assert "Steered the active Turn" in output or "Queued — runs after" in output
