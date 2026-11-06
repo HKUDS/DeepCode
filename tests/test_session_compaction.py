@@ -80,7 +80,9 @@ def test_long_history_is_trimmed_before_the_model():
     # Trimmed: strictly fewer than the 20 preloaded + 1 new user message.
     assert len(received) < 21
     joined = " ".join(str(m.get("content")) for m in received)
-    # Newest turn survives; oldest is dropped.
+    # Newest turn survives; the old turns are replaced by the summary. The
+    # checkpoint carries the user's NEWEST earlier wording, so the oldest turn
+    # (MSG0) is genuinely gone rather than resurrected.
     assert "FINAL newest question" in joined
     assert "MSG0 " not in joined
     # The system prompt is always preserved at the head.
@@ -104,7 +106,11 @@ def test_short_history_is_untouched():
 
 # -- C4a: summarization-based compaction ------------------------------------
 
-from core.agent_runtime.compaction import SUMMARY_PREFIX as _SUMMARY_PREFIX  # noqa: E402
+from core.agent_runtime.compaction import (  # noqa: E402
+    EARLIER_USER_CHARS as _EARLIER_USER_CHARS,
+    EARLIER_USER_LABEL as _EARLIER_USER_LABEL,
+    SUMMARY_PREFIX as _SUMMARY_PREFIX,
+)
 from core.agent_runtime.runner import (  # noqa: E402
     AgentRunner,
     AgentRunSpec,
@@ -118,7 +124,9 @@ def test_build_compacted_history_keeps_recent_tail_and_checkpoint():
     messages = [
         {"role": "system", "content": "sys"},
         {"role": "user", "content": "u1"},
-        {"role": "assistant", "content": "a1"},
+        # Bulky on purpose: the block may only use the space the summary frees,
+        # so a toy history would legitimately carry nothing.
+        {"role": "assistant", "content": "a1 " + "x" * 3_000},
         {"role": "user", "content": "u2"},
         {
             "role": "assistant",
@@ -130,7 +138,11 @@ def test_build_compacted_history_keeps_recent_tail_and_checkpoint():
     ]
     out = AgentRunner._build_compacted_history(messages, "THE SUMMARY")
     assert out[0]["role"] == "system"
-    assert out[1]["content"] == f"{_SUMMARY_PREFIX}\nTHE SUMMARY"
+    # The dropped turn's user wording (u1) survives verbatim inside the
+    # checkpoint; u2 is already in the kept tail, so it is not repeated.
+    assert out[1]["content"] == (
+        f"{_SUMMARY_PREFIX}\nTHE SUMMARY\n\n{_EARLIER_USER_LABEL}\nu1"
+    )
     assert out[1].get("compaction", {}).get("reset") is True
     # The newest user turn and everything it produced survive verbatim.
     assert [m.get("role") for m in out[2:]] == [
@@ -142,7 +154,155 @@ def test_build_compacted_history_keeps_recent_tail_and_checkpoint():
     assert any(m.get("content") == "a2" for m in out)
     assert any(m.get("role") == "tool" for m in out)
     # The older turn is what the checkpoint stands in for.
-    assert not any(m.get("content") in {"u1", "a1"} for m in out)
+    assert not any(m.get("content") == "u1" for m in out)
+    assert not any("x" * 3_000 in str(m.get("content") or "") for m in out)
+
+
+def test_earlier_user_messages_are_newest_first_and_skip_noise():
+    """Newest first, and never the environment slot or a checkpoint."""
+    from core.agent_runtime.compaction import _earlier_user_messages
+
+    non_system = [
+        {"role": "user", "content": "<environment_context/>", "env_context": True},
+        {"role": "user", "content": "u1 the first ask"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "u2"},
+        {"role": "assistant", "content": "a2"},
+        {
+            "role": "user",
+            "content": "summary of everything",
+            "compaction": {"reset": True, "retain": 0},
+        },
+        {"role": "assistant", "content": "a3"},
+        {"role": "user", "content": "u3 the current ask"},
+    ]
+    assert _earlier_user_messages(non_system) == [
+        "u3 the current ask",
+        "u2",
+        "u1 the first ask",
+    ]
+
+
+def test_earlier_user_messages_stop_at_the_budget():
+    """A budget keeps the newest wording and refuses to grow with history."""
+    from core.agent_runtime.compaction import _earlier_user_messages
+
+    non_system = [{"role": "user", "content": f"m{i} " + "x" * 40} for i in range(6)]
+    picked = _earlier_user_messages(non_system, budget=100)
+    assert len(picked) == 2, picked  # 45 chars each, 100 budget
+    assert picked[0].startswith("m5")  # newest first
+    assert picked[1].startswith("m4")
+
+
+def test_checkpoint_carries_the_users_earlier_wording():
+    """The user's own words survive compaction, under a neutral heading."""
+    ask = "please refactor the widget pipeline end to end"
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": ask},
+        # Bulky on purpose: the block may only use the space the summary frees.
+        {"role": "assistant", "content": "a1 " + "x" * 3_000},
+        {"role": "user", "content": "u2"},
+        {"role": "assistant", "content": "a2"},
+    ]
+    out = AgentRunner._build_compacted_history(messages, "THE SUMMARY")
+    assert out[1]["content"] == (
+        f"{_SUMMARY_PREFIX}\nTHE SUMMARY\n\n{_EARLIER_USER_LABEL}\n{ask}"
+    )
+    # Not called "the original task": that label pulls the model back to old work.
+    assert "ORIGINAL TASK" not in out[1]["content"]
+    assert out[1]["compaction"] == {"reset": True, "retain": 2}
+
+
+def test_checkpoint_never_carries_more_than_the_earlier_user_budget():
+    """A huge first message cannot swamp the checkpoint."""
+    ask = "T" * 70_000
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": ask},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "u2"},
+        {"role": "assistant", "content": "a2"},
+    ]
+    out = AgentRunner._build_compacted_history(messages, "THE SUMMARY")
+    content = out[1]["content"]
+    assert len(content) < _EARLIER_USER_CHARS + 1_000
+    assert ask not in content
+
+
+def test_recompaction_keeps_carrying_the_user_wording():
+    """A checkpoint's own block is re-read, not lost on the next round."""
+    from core.agent_runtime.compaction import _earlier_user_messages
+
+    ask = "please refactor the widget pipeline end to end"
+    checkpoint = {
+        "role": "user",
+        "content": (f"{_SUMMARY_PREFIX}\nSUMMARY 1\n\n{_EARLIER_USER_LABEL}\n{ask}"),
+        "compaction": {"reset": True, "retain": 0},
+    }
+    assert _earlier_user_messages([checkpoint]) == [ask]
+
+
+class _TurnOrSummaryProvider:
+    """Real turns answer 'ok'; the summarization request gets a handoff."""
+
+    def __init__(self) -> None:
+        self.turns = 0
+        self.summaries = 0
+
+    def get_default_model(self) -> str:
+        return "fake-model"
+
+    async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
+        messages = kwargs.get("messages") or []
+        joined = " ".join(str(m.get("content") or "") for m in messages)
+        if "CONTEXT CHECKPOINT COMPACTION" in joined:
+            self.summaries += 1
+            return LLMResponse(content="HANDOFF: did X", finish_reason="stop")
+        self.turns += 1
+        return LLMResponse(content="ok", finish_reason="stop")
+
+
+def test_compaction_in_a_workspace_session_skips_the_environment_slot(tmp_path):
+    """The app path: a workspace prepends an env slot that must not be carried.
+
+    This is the case the unit-level shapes miss: in a real session every history
+    starts with ``{"role": "user", "env_context": True}``, so "the first user
+    message" is the environment, not the request. It also has to stay bounded:
+    a large first message must not ride into every later checkpoint.
+    """
+
+    async def scenario() -> None:
+        workspace = tmp_path / "repo"
+        workspace.mkdir()
+        provider = _TurnOrSummaryProvider()
+        session = AgentSession(
+            provider, ToolRegistry(), model="fake-model", workspace=workspace
+        )
+        task = (
+            "REFACTOR-THE-PIPELINE: stream it, keep bytes identical " + "-detail" * 900
+        )
+        await session.submit(UserInput(text=task))
+        session.drain_events()
+        for i in range(5):
+            await session.submit(UserInput(text=f"follow-up {i}: " + "y" * 300))
+            session.drain_events()
+
+        # Sanity: the workspace put an environment slot at the head of history.
+        assert session.history[0].get("env_context") is True
+
+        await session.compact()
+
+        checkpoint = next(m for m in session.history if m.get("compaction"))
+        content = str(checkpoint.get("content") or "")
+        assert provider.summaries == 1
+        assert "environment_context" not in content
+        assert "ORIGINAL TASK" not in content
+        assert len(content) < _EARLIER_USER_CHARS + 2_000
+        # The user's own recent wording is what the block carries.
+        assert "follow-up" in content
+
+    asyncio.run(scenario())
 
 
 class _CompactProvider:
@@ -213,6 +373,7 @@ def test_over_budget_history_is_summarized_not_just_dropped():
     assert _SUMMARY_PREFIX in joined and "HANDOFF: did X" in joined
     assert "FINAL question" in joined
     assert "MSG0 " not in joined  # old turns replaced by the summary
+    assert "MSG1 " not in joined
     assert result.final_content == "done"
     assert result.usage == {
         "prompt_tokens": 150,
