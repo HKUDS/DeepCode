@@ -252,7 +252,7 @@ class _InstrumentedTool(AliasedTool):
         if state.abort_reason:
             return f"Error: tool execution aborted: {state.abort_reason}"
 
-        loop_status = state.loop_detector.check_tool_call(self.name)
+        loop_status = state.loop_detector.check_tool_call(self.name, kwargs)
         if loop_status["should_stop"]:
             state.abort_reason = loop_status["message"]
             state.run_status = (

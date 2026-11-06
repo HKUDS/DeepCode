@@ -5,6 +5,12 @@ Released versions are named in the entry title; the version on PyPI is
 [deepcode-hku](https://pypi.org/project/deepcode-hku/). 中文版见
 [CHANGELOG_ZH.md](CHANGELOG_ZH.md).
 
+## 2026-11-06 · Keep distinct Paper2Code tool calls running
+
+- **Different tool arguments are not a loop.** Paper2Code can read or write several
+  different files consecutively without stopping at the repeated-tool limit.
+  Repeated calls with the same tool and arguments still stop the workflow.
+
 ## 2026-11-02 · Goals that are checked before they count as complete
 
 - **A checklist DeepCode runs itself.** Early in a Goal the agent proposes a
