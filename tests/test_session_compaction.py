@@ -80,9 +80,12 @@ def test_long_history_is_trimmed_before_the_model():
     # Trimmed: strictly fewer than the 20 preloaded + 1 new user message.
     assert len(received) < 21
     joined = " ".join(str(m.get("content")) for m in received)
-    # Newest turn survives; oldest is dropped.
+    # Newest turn survives. The old turns are replaced by the summary — but
+    # the original task (MSG0) survives, embedded verbatim in the checkpoint;
+    # MSG1 is the oldest turn that is genuinely gone.
     assert "FINAL newest question" in joined
-    assert "MSG0 " not in joined
+    assert "MSG0 " in joined
+    assert "MSG1 " not in joined
     # The system prompt is always preserved at the head.
     assert any(m.get("role") == "system" for m in received)
     # And the run completes cleanly despite the compaction.
@@ -104,7 +107,11 @@ def test_short_history_is_untouched():
 
 # -- C4a: summarization-based compaction ------------------------------------
 
-from core.agent_runtime.compaction import SUMMARY_PREFIX as _SUMMARY_PREFIX  # noqa: E402
+from core.agent_runtime.compaction import (  # noqa: E402
+    COMPACT_KEEP_USER_CHARS as _COMPACT_KEEP_USER_CHARS,
+    SUMMARY_PREFIX as _SUMMARY_PREFIX,
+    TASK_BLOCK_LABEL as _TASK_BLOCK_LABEL,
+)
 from core.agent_runtime.runner import (  # noqa: E402
     AgentRunner,
     AgentRunSpec,
@@ -130,7 +137,11 @@ def test_build_compacted_history_keeps_recent_tail_and_checkpoint():
     ]
     out = AgentRunner._build_compacted_history(messages, "THE SUMMARY")
     assert out[0]["role"] == "system"
-    assert out[1]["content"] == f"{_SUMMARY_PREFIX}\nTHE SUMMARY"
+    # The dropped turn's task (u1) survives verbatim inside the checkpoint.
+    assert (
+        out[1]["content"]
+        == f"{_SUMMARY_PREFIX}\nTHE SUMMARY\n\n{_TASK_BLOCK_LABEL}\nu1"
+    )
     assert out[1].get("compaction", {}).get("reset") is True
     # The newest user turn and everything it produced survive verbatim.
     assert [m.get("role") for m in out[2:]] == [
@@ -143,6 +154,56 @@ def test_build_compacted_history_keeps_recent_tail_and_checkpoint():
     assert any(m.get("role") == "tool" for m in out)
     # The older turn is what the checkpoint stands in for.
     assert not any(m.get("content") in {"u1", "a1"} for m in out)
+
+
+def test_checkpoint_embeds_original_task_verbatim():
+    # The task is ground truth: it survives compaction byte-for-byte, in a
+    # labeled block appended after the summary.
+    task = "please refactor the widget pipeline end to end"
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": task},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "u2"},
+        {"role": "assistant", "content": "a2"},
+    ]
+    out = AgentRunner._build_compacted_history(messages, "THE SUMMARY")
+    assert (
+        out[1]["content"]
+        == f"{_SUMMARY_PREFIX}\nTHE SUMMARY\n\n{_TASK_BLOCK_LABEL}\n{task}"
+    )
+    assert out[1]["compaction"] == {"reset": True, "retain": 3}
+
+
+def test_checkpoint_task_block_is_capped_at_the_keep_limit():
+    task = "T" * 70_000
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": task},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "u2"},
+        {"role": "assistant", "content": "a2"},
+    ]
+    out = AgentRunner._build_compacted_history(messages, "THE SUMMARY")
+    content = out[1]["content"]
+    assert content.endswith("\n[original task truncated]")
+    assert task[:_COMPACT_KEEP_USER_CHARS] in content
+    assert f"{_TASK_BLOCK_LABEL}\n{task}" not in content
+
+
+def test_recompaction_keeps_the_original_task_block():
+    task = "please refactor the widget pipeline end to end"
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": task},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "u2"},
+        {"role": "assistant", "content": "a2"},
+    ]
+    once = AgentRunner._build_compacted_history(messages, "THE SUMMARY")
+    twice = AgentRunner._build_compacted_history(once, "THE SUMMARY 2")
+    assert twice[1]["content"].startswith(f"{_SUMMARY_PREFIX}\nTHE SUMMARY 2")
+    assert f"{_TASK_BLOCK_LABEL}\n{task}" in twice[1]["content"]
 
 
 class _CompactProvider:
@@ -212,7 +273,8 @@ def test_over_budget_history_is_summarized_not_just_dropped():
     joined = " ".join(str(m.get("content")) for m in (provider.main_request or []))
     assert _SUMMARY_PREFIX in joined and "HANDOFF: did X" in joined
     assert "FINAL question" in joined
-    assert "MSG0 " not in joined  # old turns replaced by the summary
+    assert "MSG0 " in joined  # the original task survives in the checkpoint
+    assert "MSG1 " not in joined  # old turns replaced by the summary
     assert result.final_content == "done"
     assert result.usage == {
         "prompt_tokens": 150,

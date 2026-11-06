@@ -49,6 +49,12 @@ SUMMARY_PREFIX = (
     "messages it replaced, not as a report from someone else. Do not repeat "
     "work it says is done. Summary:"
 )
+# Labeled block appended to the checkpoint AFTER the summary: the session's
+# original task, verbatim. Appended after the prefix (never before) so
+# ``SUMMARY_PREFIX`` keeps offset 0 and the ``content[:200]`` anchor window
+# of compact_governance is untouched.
+TASK_BLOCK_LABEL = "ORIGINAL TASK (preserved verbatim):"
+_TASK_BLOCK_MARK = f"\n\n{TASK_BLOCK_LABEL}\n"
 
 
 class CompactionStrategy(Protocol):
@@ -90,6 +96,27 @@ def _unit_start(messages: list[dict[str, Any]], end: int) -> int:
                 return index - 1
         break
     return index
+
+
+def _original_task(non_system: list[dict[str, Any]]) -> str:
+    """Recover the session's original task text for re-embedding.
+
+    Scans user messages in order. The first user message WITHOUT a
+    compaction marker is the original task. If the first user message is a
+    checkpoint, the task lives in its labeled task block — ``rfind`` because
+    a re-summarized checkpoint may echo the label. Old checkpoints that
+    predate the block yield ``""``: re-compaction then behaves exactly as it
+    did before the block existed.
+    """
+    for item in non_system:
+        if item.get("role") != "user":
+            continue
+        content = str(item.get("content") or "")
+        if not item.get("compaction"):
+            return content
+        at = content.rfind(_TASK_BLOCK_MARK)
+        return content[at + len(_TASK_BLOCK_MARK) :] if at >= 0 else ""
+    return ""
 
 
 class TailRetainingCompactionStrategy:
@@ -153,9 +180,23 @@ class TailRetainingCompactionStrategy:
             kept = chunk + kept
             used += chunk_chars
             index = start - 1
+        # Embed the session's original task verbatim in the checkpoint. The
+        # summary is lossy by design; the task is the one piece of ground
+        # truth that must survive every round of compaction. Skipped when the
+        # tail already ends with it (nothing to preserve) and when the first
+        # user is a pre-block checkpoint (legacy behavior).
+        checkpoint_content = f"{SUMMARY_PREFIX}\n{summary}"
+        task = _original_task(non_system)
+        if task and not any(
+            str(item.get("content") or "").endswith(task) for item in kept
+        ):
+            task_block = f"{_TASK_BLOCK_MARK}{task[:COMPACT_KEEP_USER_CHARS]}"
+            if len(task) > COMPACT_KEEP_USER_CHARS:
+                task_block += "\n[original task truncated]"
+            checkpoint_content += task_block
         checkpoint = {
             "role": "user",
-            "content": f"{SUMMARY_PREFIX}\n{summary}",
+            "content": checkpoint_content,
             "compaction": {"reset": True, "retain": len(kept)},
         }
         return system + [checkpoint] + kept
