@@ -11,6 +11,7 @@ newest turn survives, the oldest is dropped, and the run still completes.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -247,3 +248,54 @@ def test_pre_compact_hook_can_skip_compaction():
     spec = _compact_spec(provider, [], pre_compact_hook=block)
     out = asyncio.run(AgentRunner(provider)._maybe_compact(spec, messages))
     assert out is messages and provider.calls == 0  # skipped, no summary call
+
+
+# -- fog observation wiring (M15 companion) ---------------------------------
+
+
+def test_auto_compaction_appends_fog_row_when_opted_in(tmp_path):
+    provider = _CompactProvider()
+    messages = [{"role": "system", "content": "sys"}] + _big_history()
+    fog_path = tmp_path / "fog.jsonl"
+    spec = _compact_spec(provider, [], fog_ledger_path=str(fog_path))
+    out = asyncio.run(AgentRunner(provider)._maybe_compact(spec, messages))
+    assert out is not messages  # compaction happened
+    lines = fog_path.read_text(encoding="utf-8").splitlines()
+    rows = [json.loads(line) for line in lines]
+    assert len(rows) == 1
+    # First compaction: the replaced history holds no checkpoint yet.
+    assert rows[0]["compactions"] == 0
+    assert rows[0]["post_steps"] == 0
+    assert rows[0]["window_steps"] == 28
+    assert rows[0]["baseline_steps"] > 0
+
+
+def test_fog_row_not_written_when_compaction_skipped(tmp_path):
+    provider = _CompactProvider()
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "yo"},
+        {"role": "user", "content": "more"},
+        {"role": "assistant", "content": "ok"},
+    ]
+    fog_path = tmp_path / "fog.jsonl"
+    spec = _compact_spec(
+        provider,
+        [],
+        context_window_tokens=400_000,
+        fog_ledger_path=str(fog_path),
+    )
+    out = asyncio.run(AgentRunner(provider)._maybe_compact(spec, messages))
+    assert out is messages
+    assert not fog_path.exists()  # zero I/O when no compaction happens
+
+
+def test_fog_ledger_failure_is_swallowed(tmp_path):
+    provider = _CompactProvider()
+    messages = [{"role": "system", "content": "sys"}] + _big_history()
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x", encoding="utf-8")
+    spec = _compact_spec(provider, [], fog_ledger_path=str(blocker / "fog.jsonl"))
+    out = asyncio.run(AgentRunner(provider)._maybe_compact(spec, messages))
+    assert out is not messages  # compaction completed despite fog failure
