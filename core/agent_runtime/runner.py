@@ -49,6 +49,7 @@ from core.agent_runtime.evidence_ledger import (
     DEFAULT_NO_PROGRESS_THRESHOLD,
     EvidenceLedger,
 )
+from core.agent_runtime.fog_ledger import FogLedger, measure_post_compaction_fog
 from core.agent_runtime.hook import AgentHook, AgentHookContext, ToolEvent
 from core.agent_runtime.microcompact import (
     MicrocompactPolicy,
@@ -315,6 +316,10 @@ class AgentRunSpec:
     # sessions stay retrievable instead of vanishing. Must never raise; a
     # failing sink is logged and swallowed.
     compaction_summary_sink: Any | None = None
+    # Opt-in fog observation (M15 companion): when set, each successful
+    # compaction appends one count snapshot of the history it replaced to
+    # this JSONL path. None (the default) records nothing: zero I/O.
+    fog_ledger_path: str | Path | None = None
 
     def allowed_tool_names(self) -> frozenset[str] | None:
         if self.tool_filter is None:
@@ -2140,6 +2145,14 @@ class AgentRunner:
             _COMPACT_TRIGGER_FRACTION,
         )
         self._notify_compaction_summary(spec, summary, messages, compacted, "auto")
+        if spec.fog_ledger_path is not None:
+            try:
+                FogLedger(spec.fog_ledger_path).append(
+                    measure_post_compaction_fog(messages)
+                )
+            except Exception:
+                # Persistence trouble must not abort the run it documents.
+                logger.exception("fog_ledger_path failed")
         if on_summarized is not None:
             on_summarized()
         return compacted
