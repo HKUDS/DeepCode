@@ -431,10 +431,10 @@ Problems: [Troubleshooting](docs/guide/troubleshooting.md).
 
 ### Models and providers
 
-Built-in templates: OpenRouter, Requesty, Opper, Forge, Amazon Bedrock,
-Anthropic, OpenAI, DeepSeek, Gemini, Zhipu AI, DashScope, MiniMax, Ollama and
-vLLM. A **Custom** connection points at any endpoint that speaks the OpenAI
-Chat Completions, OpenAI Responses or Anthropic Messages API.
+Built-in templates: OpenRouter, Requesty, Opper, Standard Compute, Forge,
+Amazon Bedrock, Anthropic, OpenAI, DeepSeek, Gemini, Zhipu AI, DashScope,
+MiniMax, Ollama and vLLM. A **Custom** connection points at any endpoint that
+speaks the OpenAI Chat Completions, OpenAI Responses or Anthropic Messages API.
 `deepcode provider list` shows them and which ones are ready.
 
 ## Security and data

@@ -389,7 +389,7 @@ Windows 工具链和排错见 [Desktop 指南](desktop/README.md)。
 
 ### 模型与服务商
 
-内置模板：OpenRouter、Requesty、Opper、Forge、Amazon Bedrock、Anthropic、
+内置模板：OpenRouter、Requesty、Opper、Standard Compute、Forge、Amazon Bedrock、Anthropic、
 OpenAI、DeepSeek、Gemini、智谱 AI（Zhipu AI）、DashScope、MiniMax、Ollama 和
 vLLM。**Custom** 连接可以指向任何支持 OpenAI Chat Completions、OpenAI Responses
 或 Anthropic Messages API 的端点。`deepcode provider list` 会列出它们以及哪些

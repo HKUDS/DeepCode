@@ -240,6 +240,22 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         # route, so the prefix must survive rather than be stripped.
     ),
     ProviderSpec(
+        name="standardcompute",
+        keywords=("standardcompute",),
+        env_key="STANDARDCOMPUTE_API_KEY",
+        display_name="Standard Compute",
+        backend="openai_compat",
+        is_gateway=True,
+        endpoint_class="gateway",
+        detect_by_base_keyword="stdcmpt.com",
+        default_api_base="https://api.stdcmpt.com/v1",
+        # The default model id ``StandardCompute`` routes each request to the
+        # cheapest enabled model that can handle it, with automatic fallback.
+        # Pinned ids are ``vendor/model`` (``anthropic/claude-opus-5.5``), so
+        # the prefix must survive rather than be stripped. Prompt caching stays
+        # off: the gateway places its own cache markers on Claude requests.
+    ),
+    ProviderSpec(
         name="forge",
         keywords=("forge",),
         env_key="FORGE_API_KEY",
