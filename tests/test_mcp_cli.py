@@ -128,7 +128,7 @@ def test_mcp_cli_adds_enables_and_really_probes_mcp_servers(
 
     assert run(["presets", "--json"]) == 0
     presets = _json_output(capsys)
-    assert len(presets["presets"]) == 16
+    assert len(presets["presets"]) == 17
     assert any(preset["id"] == "context7" for preset in presets["presets"])
 
     assert run(["add", "context7", "--json"]) == 0
