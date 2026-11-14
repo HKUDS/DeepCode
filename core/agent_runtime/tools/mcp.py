@@ -59,7 +59,17 @@ class MCPToolWrapper(Tool):
         self._session = session
         self._original_name = tool_def.name
         self._name = f"mcp_{server_name}_{tool_def.name}"
-        self._description = tool_def.description or tool_def.name
+        # An MCP tool's description is attacker-controlled text that lands in the
+        # model's context unvalidated (arXiv:2611.03555).  The scan below is
+        # observe-only by default -- see core/harness/tool_description_scan.py for
+        # why a regex filter must not be sold as a defence (the paper measures it
+        # at 20/45 scenarios rejected with a 7.2% false-positive rate).
+        #
+        # Imported lazily on purpose: a module-level ``core.harness`` import here
+        # changes package init order and trips a circular ``core.config`` import.
+        from core.harness.tool_description_scan import review_description
+
+        self._description = review_description(tool_def.description or tool_def.name)
         raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
         self._parameters = _normalize_schema_for_openai(raw_schema)
         self._tool_timeout = tool_timeout
