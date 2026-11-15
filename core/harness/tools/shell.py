@@ -206,7 +206,15 @@ class BashTool(Tool):
         # Destructive argv is always refused; under DEEPCODE_COMMAND_SCREEN=strict
         # so are remote scripts piped into an interpreter, installs from unknown
         # indexes and one-edit package names (see command_guard.screen_all).
-        screened = screen_all(command, known_packages=self._known_packages())
+        # ``workspace`` enables the working-directory shadow screen: a Python
+        # started here imports same-named files from its cwd before the stdlib,
+        # and that chain never leaves the workspace, so the write fence cannot
+        # see it (see command_guard.screen_cwd_shadow).
+        screened = screen_all(
+            command,
+            workspace=self._workspace,
+            known_packages=self._known_packages(),
+        )
         if screened:
             return (
                 f"Error: command blocked by policy screen ({screened}). "

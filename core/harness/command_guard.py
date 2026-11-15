@@ -43,11 +43,14 @@ from urllib.parse import urlparse
 from core.network.hostnames import is_domain_allowed
 
 __all__ = [
+    "PYTHON_SHADOW_WAIVER_ENV_VAR",
     "find_confusables",
     "screen_all",
+    "screen_cwd_shadow",
     "screen_command",
     "screen_egress",
     "screen_install",
+    "shadow_names_in",
     "strict_screens_enabled",
 ]
 
@@ -803,9 +806,119 @@ def screen_install(
     return None
 
 
+# --------------------------------------------------------------------------
+# Working-directory module shadowing
+# --------------------------------------------------------------------------
+# A Python interpreter puts its cwd on ``sys.path``, so a same-named file in
+# that directory shadows the standard library. An archive shipping ``struct.py``
+# executes arbitrary code as soon as the caller types ``import base64`` (base64
+# imports struct transitively). Every step of that chain — download, unpack,
+# run — stays *inside* the workspace, which is why a write fence does not stop
+# it: the fence governs where bytes may land, not whether what just landed may
+# run.
+#
+# That makes this the one class the sandbox structurally cannot see, so it gets
+# its own screen. Scope is deliberately narrow: only names auto-imported at
+# interpreter start (sitecustomize/usercustomize) or pulled in by very common
+# stdlib modules (struct, via base64/json/pickle) are listed. A blanket "any
+# .py beside the command" rule would fire on ordinary source trees and get
+# switched off within a day, which is worse than not having it at all.
+
+_CWD_SHADOW_MODULES = frozenset(
+    {"sitecustomize.py", "usercustomize.py", "struct.py", "_struct.py"}
+)
+
+#: Explicit waiver for the rare project that genuinely vendors one of these
+#: names. Same shape as the other screens: opt out loudly, not silently.
+PYTHON_SHADOW_WAIVER_ENV_VAR = "DEEPCODE_ALLOW_CWD_SHADOW"
+
+_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def _is_python_program(name: str) -> bool:
+    """True for ``python`` / ``python3`` / ``python3.12`` / ``py`` / ``py3``."""
+    return name in {"python", "python3", "py"} or name.startswith(("python3.", "py3"))
+
+
+def _simple_argvs(command: str) -> list[list[str]]:
+    """Unwrapped simple commands in ``command`` (empty on unparseable input)."""
+    argvs: list[list[str]] = []
+    for tokens in _command_argvs(command):
+        unwrapped = _unwrap(tokens)
+        if unwrapped:
+            argvs.append(unwrapped)
+    return argvs
+
+
+def shadow_names_in(directory: str) -> tuple[str, ...]:
+    """Shadow-module names present in ``directory`` (sorted, empty on error)."""
+    try:
+        present = {
+            entry.name.lower() for entry in os.scandir(directory) if entry.is_file()
+        }
+    except OSError:
+        return ()
+    return tuple(sorted(present & _CWD_SHADOW_MODULES))
+
+
+def _cd_targets(command: str) -> list[str]:
+    """Directories the command line is likely to ``cd`` into (best effort).
+
+    An unpack-and-run chain typically looks like ``cd <archive-dir> && python3
+    -c ...``, so checking only the workspace root would miss it. Targets are
+    resolved against the workspace by the caller.
+    """
+    targets: list[str] = []
+    for tokens in _simple_argvs(command):
+        if _program(tokens[0]) not in {"cd", "pushd"}:
+            continue
+        for arg in tokens[1:]:
+            if arg and not arg.startswith("-"):
+                targets.append(arg)
+                break
+    return targets
+
+
+def screen_cwd_shadow(command: str, workspace: str | None = None) -> str | None:
+    """Refuse a Python call that would import a shadow module from disk.
+
+    Returns a reason string, or ``None``. Never raises: an unreadable workspace
+    degrades to "nothing found", because a screening layer must not block on a
+    filesystem quirk.
+    """
+    if not workspace:
+        return None
+    if os.environ.get(PYTHON_SHADOW_WAIVER_ENV_VAR, "").strip().lower() in _TRUE_VALUES:
+        return None
+
+    if not any(
+        _is_python_program(_program(tokens[0])) for tokens in _simple_argvs(command)
+    ):
+        return None
+
+    candidates = [workspace]
+    for target in _cd_targets(command):
+        candidates.append(
+            target if os.path.isabs(target) else os.path.join(workspace, target)
+        )
+
+    for directory in candidates:
+        found = shadow_names_in(directory)
+        if found:
+            return (
+                f"python module shadowing in {directory} "
+                f"({', '.join(found)}) — a file there is imported instead of the "
+                f"standard library, so a downloaded archive could run code on "
+                f"import. Remove it, run from a clean directory, or set "
+                f"{PYTHON_SHADOW_WAIVER_ENV_VAR}=1 if the file is intentional."
+            )
+    return None
+
+
 def screen_all(
     command: str,
     *,
+    workspace: str | None = None,
     allowed_domains: tuple[str, ...] = (),
     blocked_domains: tuple[str, ...] = (),
     known_packages: frozenset[str] | tuple[str, ...] | set[str] = (),
@@ -813,14 +926,20 @@ def screen_all(
 ) -> str | None:
     """Run every screen and return the first reason, or ``None``.
 
-    The destructive-command screen always runs. The egress and install screens
-    run only under ``DEEPCODE_COMMAND_SCREEN=strict`` (see
-    :func:`strict_screens_enabled`). Order matters only for the quality of the
-    message: the destructive check is the cheapest and the most certain, so it
-    speaks first.
+    The destructive-command screen always runs, followed by the working-directory
+    shadow screen — that one is cheap (a couple of ``scandir`` calls) and covers
+    the single class the sandbox cannot, so it does not wait for
+    ``DEEPCODE_COMMAND_SCREEN=strict``. The egress and install screens run only
+    under strict (see :func:`strict_screens_enabled`).
+
+    ``workspace`` is optional so existing callers keep working; without it the
+    shadow screen is inert (it needs a directory to inspect).
     """
 
     reason = screen_command(command)
+    if reason:
+        return reason
+    reason = screen_cwd_shadow(command, workspace)
     if reason or not strict_screens_enabled():
         return reason
     return screen_egress(
