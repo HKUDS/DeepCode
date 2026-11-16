@@ -292,6 +292,31 @@ def build_assistant_message(
     return msg
 
 
+def named_tool_calls(tool_calls: Any) -> list[dict[str, Any]]:
+    """Keep only the tool calls that name the function to run.
+
+    A call whose ``function.name`` is missing or blank names nothing: the model
+    API rejects the whole request that carries one, and the records round-trip
+    verbatim, so a single such entry poisons a session on every resume. A parser
+    glitch that turns raw tool-call text into a ``tool_calls`` entry while
+    dropping the name is enough to produce one.
+
+    Shared by the transcript boundary, which drops them on save and on rebuild,
+    and by the request path, which drops them from the provider-visible view so
+    a live session heals without a restart.
+    """
+    if not isinstance(tool_calls, (list, tuple)):
+        return []
+    return [
+        call
+        for call in tool_calls
+        if isinstance(call, dict)
+        and isinstance(call.get("function"), dict)
+        and isinstance(call["function"].get("name"), str)
+        and call["function"]["name"].strip()
+    ]
+
+
 def estimate_prompt_tokens(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,

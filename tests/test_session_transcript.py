@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+import pytest
+
+from core.agent_runtime.tools.registry import ToolRegistry
+from core.events import AgentSession
+from core.events.protocol import UserInput
+from core.providers.base import LLMResponse, ToolCallRequest
 from core.sessions.models import SessionMessage
 from core.sessions.transcript import (
     is_context_note,
@@ -184,6 +192,107 @@ def test_a_tool_result_pruned_under_pressure_is_not_saved_again() -> None:
     assert [(item.role, item.content) for item in added] == [("assistant", "done")]
 
 
+def test_a_nameless_call_is_dropped_before_it_is_stored() -> None:
+    # A parser glitch can hand back a call whose function carries the raw
+    # payload but no name. The API rejects a request that replays one
+    # (400/422 missing field name), so it must never reach the store.
+    history = [
+        {"role": "user", "content": "run echo"},
+        {
+            "role": "assistant",
+            "content": "calling",
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"arguments": '{"command":"echo hi"}'},
+                },
+                {"id": "c2", "type": "function", "function": {"name": "   "}},
+                {
+                    "id": "c3",
+                    "type": "function",
+                    "function": {"name": "bash", "arguments": '{"command":"echo hi"}'},
+                },
+            ],
+        },
+        {"role": "tool", "content": "hi", "tool_call_id": "c3", "name": "bash"},
+    ]
+    stored = new_records_from_history(history, stored=())
+    calls = (stored[1].metadata or {})["toolCalls"]
+    assert [call["id"] for call in calls] == ["c3"]
+
+
+def test_a_stored_nameless_call_is_dropped_on_resume() -> None:
+    # A record poisoned before this guard existed self-heals on resume:
+    # its text stays, the undeliverable call goes.
+    stored = [
+        SessionMessage(role="user", content="run echo"),
+        SessionMessage(
+            role="assistant",
+            content="calling",
+            metadata={
+                "toolCalls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"arguments": '{"command":"echo hi"}'},
+                    }
+                ]
+            },
+        ),
+    ]
+    rebuilt = visible_kernel_history(stored)
+    assert rebuilt[1]["content"] == "calling"
+    assert "tool_calls" not in rebuilt[1]
+
+
+def test_a_turn_of_only_nameless_calls_leaves_nothing_behind() -> None:
+    # No text and no deliverable call means there is no message to keep.
+    history = [
+        {"role": "user", "content": "run echo"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "c1", "type": "function", "function": {}}],
+        },
+    ]
+    stored = new_records_from_history(history, stored=())
+    assert [item.role for item in stored] == ["user"]
+    assert [item["role"] for item in visible_kernel_history(stored)] == ["user"]
+
+
+def test_a_resumed_poisoned_turn_is_not_stored_again() -> None:
+    # The fingerprint must see the same surviving calls the replay does,
+    # or every resume re-saves the cleaned turn as a second message.
+    stored = [
+        SessionMessage(role="user", content="run echo"),
+        SessionMessage(
+            role="assistant",
+            content="calling",
+            metadata={
+                "toolCalls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"arguments": "{}"},
+                    },
+                    {
+                        "id": "c2",
+                        "type": "function",
+                        "function": {"name": "bash", "arguments": "{}"},
+                    },
+                ]
+            },
+        ),
+    ]
+    history = [
+        *visible_kernel_history(stored),
+        {"role": "assistant", "content": "done"},
+    ]
+    added = new_records_from_history(history, stored)
+    assert [(item.role, item.content) for item in added] == [("assistant", "done")]
+
+
 def test_only_runtime_notes_count_as_context_notes() -> None:
     def user(**metadata: str) -> SessionMessage:
         return SessionMessage("user", "text", metadata=metadata)
@@ -197,3 +306,73 @@ def test_only_runtime_notes_count_as_context_notes() -> None:
     assert not is_context_note(
         SessionMessage("assistant", "text", metadata={"delivery": "mid_turn"})
     )
+
+
+class _NamelessCallProvider:
+    """Records every request and replays a scripted response list."""
+
+    def __init__(self, responses: list[LLMResponse]) -> None:
+        self.responses = list(responses)
+        self.calls = 0
+        self.requests: list[list[dict[str, Any]]] = []
+
+    def get_default_model(self) -> str:
+        return "fake-model"
+
+    async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
+        self.requests.append(list(kwargs.get("messages") or []))
+        index = min(self.calls, len(self.responses) - 1)
+        self.calls += 1
+        return self.responses[index]
+
+
+def _nameless_calls(messages: list[dict[str, Any]]) -> list[str]:
+    """Ids of the tool calls in ``messages`` that name no function."""
+    found: list[str] = []
+    for message in messages:
+        if message.get("role") != "assistant":
+            continue
+        for call in message.get("tool_calls") or ():
+            function = call.get("function") if isinstance(call, dict) else None
+            name = (function or {}).get("name")
+            if not isinstance(name, str) or not name.strip():
+                found.append(str(call.get("id")))
+    return found
+
+
+@pytest.mark.asyncio
+async def test_a_live_session_never_sends_a_nameless_tool_call() -> None:
+    """Storage is healed by the record boundary; a live run must heal too.
+
+    ``AgentSession._history`` is kept in memory between turns, so dropping the
+    nameless call on save and on rebuild is not enough: the follow-up request in
+    the same turn, and every later turn, would still carry it until a restart.
+    """
+    provider = _NamelessCallProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[ToolCallRequest(id="nameless-1", name="", arguments={})],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="after the tool turn", finish_reason="stop"),
+            LLMResponse(content="second turn", finish_reason="stop"),
+        ]
+    )
+    session = AgentSession(provider, ToolRegistry(), model="fake-model")
+
+    await session.submit(UserInput(text="first"))
+    first_events = session.drain_events()
+    await session.submit(UserInput(text="second"))
+    second_events = session.drain_events()
+
+    # The follow-up request of the same turn, and every later request, is clean.
+    assert len(provider.requests) >= 3
+    for index, request in enumerate(provider.requests[1:], start=1):
+        assert _nameless_calls(request) == [], (
+            f"request {index} carried a nameless tool call"
+        )
+
+    # The poisoned turn ends, and the turn after it succeeds.
+    assert [event.msg.type for event in first_events][-1] == "task_complete"
+    assert [event.msg.type for event in second_events][-1] == "task_complete"
