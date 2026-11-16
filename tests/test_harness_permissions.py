@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -509,3 +511,145 @@ def test_rule_reasons_name_the_users_rule():
         PermissionDecision.DENY,
         "Blocked by your permission rule `bash rm *`.",
     )
+
+
+# ---- shell command paths must reach the sensitive-path check ----------------
+#
+# An approval prompt shows the command text, so an innocent-looking symlink can
+# hide the real target: the command touches the link, the kernel writes through
+# it to a protected file.  Key-based path extraction never looked inside a shell
+# command string, so that shape was auto-allowed.
+
+
+def _symlink_fixture(tmp_path):
+    """Create a protected credential file (victim) + ``video.mp4`` link (bait)."""
+    import os
+
+    victim = tmp_path / ".env"
+    victim.write_text("SECRET=x", encoding="utf-8")
+    bait = tmp_path / "video.mp4"
+    try:
+        os.symlink(victim, bait)
+    except (OSError, NotImplementedError) as exc:  # Windows without privilege
+        import pytest
+
+        pytest.skip(f"cannot create symlink here: {exc}")
+    return victim, bait
+
+
+def test_shell_symlink_alias_reports_the_hidden_target(tmp_path):
+    """Only an existing link with an innocent name counts as an alias."""
+    import os
+
+    from core.harness.permissions import _shell_symlink_alias
+
+    victim, bait = _symlink_fixture(tmp_path)
+    found = _shell_symlink_alias(f"cp {bait.name} out/", str(tmp_path))
+    assert found is not None, "a link to a protected file was not reported"
+    alias, target = found
+    assert alias == bait.name
+    assert os.path.realpath(target) == os.path.realpath(victim)
+
+
+def test_key_only_extraction_never_saw_shell_paths():
+    """Baseline of the hole: key-based extraction yields nothing."""
+    from core.harness.permissions import _path_values
+
+    assert list(_path_values({"command": "cp video.mp4 docs/"})) == []
+
+
+def test_copy_through_symlink_asks_and_names_the_target(tmp_path):
+    """The payload becomes a confirmation naming both ends, never a silent allow."""
+    import os
+
+    victim, bait = _symlink_fixture(tmp_path)
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd=str(tmp_path))
+    decision, reason = engine.evaluate("bash", {"command": f"cp {bait.name} out/"})
+    assert decision is PermissionDecision.ASK, reason
+    assert bait.name in reason
+    assert os.path.basename(str(victim)) in reason
+
+    # Ask mode is where the prompt is shown: the same command must name the
+    # target there too, not fall back to the generic "needs your approval".
+    ask_mode = PermissionEngine(mode=PermissionMode.DEFAULT, cwd=str(tmp_path))
+    decision, reason = ask_mode.evaluate("bash", {"command": f"cp {bait.name} out/"})
+    assert decision is PermissionDecision.ASK, reason
+    assert bait.name in reason
+    assert os.path.basename(str(victim)) in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo x >{bait}",
+        "echo x>{bait}",
+        "echo x >>{bait}",
+        "cat <{bait}",
+        "cat<{bait}",
+        "make 2>{bait}",
+        "echo x | tee {bait}; ls",
+        "docker compose --env-file={bait} up",
+    ],
+)
+def test_a_redirect_or_option_value_through_a_symlink_is_named(tmp_path, command):
+    """A redirection target or an ``--opt=value`` operand is an operand too."""
+    import os
+
+    victim, bait = _symlink_fixture(tmp_path)
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd=str(tmp_path))
+    decision, reason = engine.evaluate(
+        "bash", {"command": command.format(bait=bait.name)}
+    )
+    assert decision is PermissionDecision.ASK, reason
+    assert os.path.basename(str(victim)) in reason
+
+
+def test_shell_operators_alone_are_not_operands(tmp_path):
+    """``2>&1`` and friends split into words that name no file."""
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd=str(tmp_path))
+    decision, reason = engine.evaluate(
+        "bash", {"command": "make 2>&1 | tee build.log && echo ok; (cd src)"}
+    )
+    assert decision is PermissionDecision.ALLOW, reason
+
+
+def test_a_symlink_alias_asks_even_when_an_allow_rule_matches(tmp_path):
+    """An allow rule may not quietly wave the hidden target through."""
+    _victim, bait = _symlink_fixture(tmp_path)
+    engine = PermissionEngine(
+        mode=PermissionMode.DEFAULT,
+        cwd=str(tmp_path),
+        rules=[PermissionRule("*", "*", PermissionDecision.ALLOW)],
+    )
+    decision, reason = engine.evaluate("bash", {"command": f"cp {bait.name} out/"})
+    assert decision is PermissionDecision.ASK, reason
+    assert "links to" in reason
+
+
+def test_ordinary_shell_commands_still_ask(tmp_path):
+    """Everyday commands stay ask; naming a secret is not itself a denial."""
+    engine = PermissionEngine(mode=PermissionMode.DEFAULT, cwd=str(tmp_path))
+    for command in (
+        "cp .env.example .env",
+        "source .env",
+        "docker compose --env-file .env up",
+        "echo PORT=3000 >> .env",
+        "git add .env.example",
+        "jq -r .key package.json",
+        "curl -O https://curl.se/ca/cacert.pem",
+        "openssl req -keyout key.pem -out cert.pem",
+        "uvicorn --ssl-keyfile key.pem",
+        "grep -n id_rsa README.md",
+    ):
+        decision, reason = engine.evaluate("bash", {"command": command})
+        assert decision is PermissionDecision.ASK, f"{command!r}: {reason}"
+
+
+def test_non_shell_tool_command_arg_is_not_scanned(tmp_path):
+    """Only shell tools get argv probing; an MCP ``command`` arg is untouched."""
+    _victim, bait = _symlink_fixture(tmp_path)
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd=str(tmp_path))
+    arguments = {"command": f"cp {bait.name} out/"}
+    assert engine.shell_symlink_alias("mcp_custom", arguments) is None
+    # ...while the same argument on a shell tool is reported.
+    assert engine.shell_symlink_alias("bash", arguments) is not None

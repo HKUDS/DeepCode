@@ -37,6 +37,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
+import shlex
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
@@ -333,6 +334,92 @@ def _is_shell_tool(tool_name: str) -> bool:
     )
 
 
+_SHELL_OPERATOR_CHARS = frozenset("();<>|&")
+
+
+def _shell_words(command: str) -> list[str]:
+    """Split a command into words, with shell operators as words of their own.
+
+    ``echo x >out`` and ``echo x>out`` both yield ``[..., ">", "out"]``, so a
+    redirection target is a word like any other operand. Unbalanced quotes
+    fall back to whitespace splitting.
+    """
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        return list(lexer)
+    except ValueError:
+        return command.split()
+
+
+def _shell_symlink_alias(
+    command: str, cwd: str | None = None
+) -> tuple[str, str] | None:
+    """Return ``(alias, target)`` when a command word is a link to a secret.
+
+    A shell tool carries its operands inside the command string, under a key no
+    path rule names, so ``_path_values`` never sees them. Screening every word
+    would make ordinary commands impossible to approve, though: ``cp
+    .env.example .env``, ``source .env`` and ``git add .env.example`` would all
+    become denials that no rule can override, and builds legitimately read
+    files with those names.
+
+    The shape that actually hides a target from the approval prompt is narrower:
+    an existing symlink whose own name says nothing, but whose resolved target
+    is protected. The prompt then shows ``video.mp4`` while the write lands on
+    ``.env``. Only that shape is returned here.
+
+    ``argv[0]`` is skipped because it is the program name. A word that is not
+    an existing symlink is left alone: a plain ``.env`` is already governed by
+    the sandbox, which keeps shell commands away from the home credential
+    stores. A link whose own name is already sensitive is also left to the
+    ordinary path check, so this helper never weakens it.
+
+    Redirections count as operands: ``echo x >video.mp4`` and ``cat
+    <video.mp4`` touch the link as surely as ``cp video.mp4 out/``, so shell
+    operators are split off their words. An option's ``=value``
+    (``--env-file=video.mp4``) is checked too.
+    """
+    for index, token in enumerate(_shell_words(command)):
+        if not token or set(token) <= _SHELL_OPERATOR_CHARS:
+            continue
+        if token.startswith("-"):
+            # ``--env-file=video.mp4``: the value is an operand, the flag is not.
+            token = token.partition("=")[2]
+            if not token:
+                continue
+        # Strip shell punctuation that wraps a path (``a.mp4;``, ``(x)``).
+        cleaned = token.strip("'\"").rstrip(";,&|)")
+        if not cleaned:
+            continue
+        # argv[0] is the program name, not an operand.
+        if index == 0 and "/" not in cleaned and "\\" not in cleaned:
+            continue
+        path = _normalize_path(cleaned, cwd)
+        try:
+            if not os.path.islink(path):
+                continue
+        except OSError:
+            continue
+        # "Own name" is judged without resolving the link. is_sensitive_path()
+        # resolves realpath first, so asking it here would answer for the
+        # TARGET and skip the one shape this helper exists to report.
+        own = path.replace(os.sep, "/").casefold()
+        own_name = own.rsplit("/", 1)[-1]
+        if any(
+            fnmatch.fnmatchcase(own, pattern) or fnmatch.fnmatchcase(own_name, pattern)
+            for pattern in SENSITIVE_PATH_PATTERNS
+        ):
+            continue
+        try:
+            target = os.path.realpath(path)
+        except (OSError, ValueError):
+            continue
+        if is_sensitive_path(target, cwd):
+            return cleaned, target
+    return None
+
+
 def is_shell_tool(tool_name: str) -> bool:
     """Whether ``tool_name`` runs a shell command."""
 
@@ -461,6 +548,34 @@ class PermissionEngine:
                 return raw
         return None
 
+    def shell_symlink_alias(
+        self, tool_name: str, arguments: Mapping[str, object]
+    ) -> tuple[str, str] | None:
+        """Return ``(alias, target)`` for a shell word that links to a secret.
+
+        Shell operands live inside the command string, so no path-keyed rule
+        sees them; the aliasing shape is described on
+        :func:`_shell_symlink_alias`. Kept separate from
+        :meth:`hits_sensitive_path` because the two answer different questions:
+        that one is a non-overridable deny, this one is a named confirmation.
+        """
+        if not tool_name or not _is_shell_tool(tool_name):
+            return None
+        for key in ("command", "cmd", "commands", "script"):
+            value = arguments.get(key)
+            if isinstance(value, str):
+                found = _shell_symlink_alias(value, self.cwd)
+                if found is not None:
+                    return found
+            elif isinstance(value, (list, tuple)):
+                for item in value:
+                    if not isinstance(item, str):
+                        continue
+                    found = _shell_symlink_alias(item, self.cwd)
+                    if found is not None:
+                        return found
+        return None
+
     def hits_hook_config_path(self, arguments: Mapping[str, object]) -> str | None:
         """Return the raw path if any argument targets a hook-discovery file."""
         for raw in self._candidate_paths(arguments):
@@ -565,6 +680,16 @@ class PermissionEngine:
                 ),
             )
 
+        # A shell word that is a link to a secret hides its target from the
+        # approval prompt: the operator reads ``video.mp4`` and the write lands
+        # on ``.env``. This is a named confirmation, not a deny -- the denylist
+        # above stays reserved for paths that are secret by their own name.
+        symlink_alias = (
+            self.shell_symlink_alias(tool_name, arguments)
+            if self.protect_sensitive_paths
+            else None
+        )
+
         read_only = (
             self.is_read_only(tool_name)
             if read_only_override is None
@@ -595,6 +720,11 @@ class PermissionEngine:
             if rule.matches(tool_name, argument):
                 matched = rule
         if matched is not None:
+            if matched.action is PermissionDecision.ALLOW and symlink_alias is not None:
+                return self._apply_approval_policy(
+                    PermissionDecision.ASK,
+                    self._alias_reason(symlink_alias),
+                )
             if matched.action is PermissionDecision.ALLOW and hook_config is not None:
                 return self._apply_approval_policy(
                     PermissionDecision.ASK,
@@ -625,6 +755,11 @@ class PermissionEngine:
                 "exploration is permitted until the plan is approved.",
             )
         if self.mode is PermissionMode.FULL_AUTO:
+            if symlink_alias is not None:
+                return self._apply_approval_policy(
+                    PermissionDecision.ASK,
+                    self._alias_reason(symlink_alias),
+                )
             if hook_config is not None:
                 return self._apply_approval_policy(
                     PermissionDecision.ASK,
@@ -640,6 +775,14 @@ class PermissionEngine:
         if read_only:
             return self._mode_default_allow(
                 tool_name, arguments, "default mode: read-only tool allowed"
+            )
+        # Ask mode is where the prompt is shown, so it is where a hidden
+        # target must be named: otherwise the operator approves "cp video.mp4"
+        # without ever seeing that the write lands on .env.
+        if symlink_alias is not None:
+            return self._apply_approval_policy(
+                PermissionDecision.ASK,
+                self._alias_reason(symlink_alias),
             )
         return self._apply_approval_policy(
             PermissionDecision.ASK,
@@ -667,6 +810,16 @@ class PermissionEngine:
         feature.
         """
 
+        if symlink_alias := (
+            self.shell_symlink_alias(tool_name, arguments)
+            if self.protect_sensitive_paths
+            else None
+        ):
+            return self._apply_approval_policy(
+                PermissionDecision.ASK,
+                self._alias_reason(symlink_alias),
+            )
+
         if self.risk_evaluator is None:
             return PermissionDecision.ALLOW, reason
 
@@ -676,6 +829,14 @@ class PermissionEngine:
         return self._apply_approval_policy(
             PermissionDecision.ASK,
             f"risk evaluator flagged this call: {risk_reason}",
+        )
+
+    @staticmethod
+    def _alias_reason(symlink_alias: tuple[str, str]) -> str:
+        """Name both ends of the link: the visible word and the real target."""
+        alias, target = symlink_alias
+        return (
+            f"'{alias}' links to '{target}', a protected path; confirm before this runs"
         )
 
     def _risk_opinion(
