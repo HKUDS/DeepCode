@@ -89,10 +89,13 @@ class LoopDetector:
             self.tool_history.append(tool_name)
             self._tool_argument_history.append(argument_signature)
 
-            # Keep only recent history (last 10 calls)
-            if len(self.tool_history) > 10:
-                self.tool_history = self.tool_history[-10:]
-                self._tool_argument_history = self._tool_argument_history[-10:]
+            # Keep enough history to detect the configured repeat threshold.
+            history_limit = max(10, self.max_repeats)
+            if len(self.tool_history) > history_limit:
+                self.tool_history = self.tool_history[-history_limit:]
+                self._tool_argument_history = self._tool_argument_history[
+                    -history_limit:
+                ]
 
         # Check for repeated tool calls
         if len(self.tool_history) >= self.max_repeats:

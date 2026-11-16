@@ -80,3 +80,67 @@ def test_argument_key_order_does_not_hide_a_repeat():
     status = detector.check_tool_call("read_file", first)
     assert status["should_stop"]
     assert status["status"] == "loop_detected"
+
+
+@pytest.mark.parametrize("max_repeats", [5, 10, 12, 20])
+def test_configured_repeat_limit_stops_at_the_requested_call(max_repeats):
+    detector = LoopDetector(max_repeats=max_repeats)
+
+    for _ in range(max_repeats - 1):
+        assert detector.check_tool_call("write_file")["should_stop"] is False
+        assert detector.should_abort() is False
+        assert detector.get_abort_reason() is None
+
+    result = detector.check_tool_call("write_file")
+
+    assert result["status"] == "loop_detected"
+    assert result["should_stop"] is True
+    assert detector.should_abort() is True
+    assert "write_file" in detector.get_abort_reason()
+
+
+@pytest.mark.parametrize("max_repeats", [12, 20])
+def test_different_tool_restarts_a_long_repeat_sequence(max_repeats):
+    detector = LoopDetector(max_repeats=max_repeats)
+
+    for _ in range(3):
+        for _ in range(max_repeats - 1):
+            assert detector.check_tool_call("write_file")["should_stop"] is False
+        assert detector.check_tool_call("read_file")["should_stop"] is False
+
+    for _ in range(max_repeats - 1):
+        assert detector.check_tool_call("write_file")["should_stop"] is False
+    assert detector.check_tool_call("write_file")["status"] == "loop_detected"
+
+
+@pytest.mark.parametrize(("max_repeats", "history_bound"), [(5, 10), (12, 12)])
+def test_history_stays_bounded_without_a_repeated_tool(max_repeats, history_bound):
+    detector = LoopDetector(max_repeats=max_repeats)
+
+    for index in range(200):
+        tool = "write_file" if index % 2 == 0 else "read_file"
+        assert detector.check_tool_call(tool)["should_stop"] is False
+        assert len(detector.tool_history) <= history_bound
+
+    assert detector.get_status_summary()["recent_tools"] == [
+        "read_file",
+        "write_file",
+        "read_file",
+        "write_file",
+        "read_file",
+    ]
+
+
+def test_long_repeat_limit_compares_arguments_across_the_whole_window():
+    detector = LoopDetector(max_repeats=12)
+
+    # Enough earlier calls that the history has already been trimmed.
+    for index in range(5):
+        detector.check_tool_call("read_file", {"file_path": f"src/{index}.py"})
+    detector.check_tool_call("write_file", {"file_path": "a.py"})
+    for _ in range(11):
+        status = detector.check_tool_call("write_file", {"file_path": "b.py"})
+        assert not status["should_stop"]
+
+    status = detector.check_tool_call("write_file", {"file_path": "b.py"})
+    assert status["status"] == "loop_detected"
