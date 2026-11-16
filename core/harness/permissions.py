@@ -334,28 +334,79 @@ def _is_shell_tool(tool_name: str) -> bool:
     )
 
 
-_SHELL_OPERATOR_CHARS = frozenset("();<>|&")
+# Shell operators are split off the words around them. A newline ends a
+# command as ``;`` does, so a second line or a here-document body is read too.
+_SHELL_OPERATORS = "();<>|&\n"
+_SHELL_OPERATOR_CHARS = frozenset(_SHELL_OPERATORS)
+# shlex slows down sharply on very long words; past this, split by pattern.
+_SHLEX_MAX_CHARS = 20_000
+_SHELL_WORD_RE = re.compile(r"[();<>|&\n]+|[^\s();<>|&]+")
+# Command text inside a word (``bash -c '…'``, ``"$(…)"``) is read this deep.
+_NESTED_COMMAND_DEPTH = 2
 
 
 def _shell_words(command: str) -> list[str]:
     """Split a command into words, with shell operators as words of their own.
 
     ``echo x >out`` and ``echo x>out`` both yield ``[..., ">", "out"]``, so a
-    redirection target is a word like any other operand. Unbalanced quotes
-    fall back to whitespace splitting.
+    redirection target is a word like any other operand. ``#`` is an ordinary
+    character, as it is for bash anywhere but the start of a word. Unbalanced
+    quotes and very long commands are split by a pattern instead.
     """
-    try:
-        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
-        lexer.whitespace_split = True
-        return list(lexer)
-    except ValueError:
-        return command.split()
+    if len(command) <= _SHLEX_MAX_CHARS:
+        try:
+            lexer = shlex.shlex(command, posix=True, punctuation_chars=_SHELL_OPERATORS)
+            lexer.whitespace = " \t\r"
+            lexer.whitespace_split = True
+            lexer.commenters = ""
+            return list(lexer)
+        except ValueError:
+            pass
+    return _SHELL_WORD_RE.findall(command)
 
 
-def _shell_symlink_alias(
+def _shell_operands(command: str, depth: int = 0) -> Iterable[str]:
+    """The words of ``command`` that may name a file, as written.
+
+    ``argv[0]`` is the program, not an operand. ``--opt=value``, ``if=value``
+    and curl's ``@file`` name a file by their value. A word that itself holds
+    command text is read again, so ``bash -c 'cat video.mp4'`` and
+    ``"$(cat video.mp4)"`` reach ``video.mp4``.
+    """
+    words = _shell_words(command)
+    for index, word in enumerate(words):
+        if not word or set(word) <= _SHELL_OPERATOR_CHARS:
+            continue
+        if depth < _NESTED_COMMAND_DEPTH and (
+            "$(" in word or "`" in word or any(ch.isspace() for ch in word)
+        ):
+            nested = word.replace("$(", " ( ").replace("`", " ")
+            yield from _shell_operands(nested, depth + 1)
+        if word.startswith("-"):
+            values = [word.partition("=")[2]]
+        elif "=" in word:
+            values = [word, word.partition("=")[2]]
+        else:
+            values = [word]
+        for value in values:
+            # Strip shell punctuation that wraps a path (``a.mp4;``, ``(x)``).
+            cleaned = value.strip("'\"`").rstrip(";,&|)").lstrip("@")
+            if not cleaned:
+                continue
+            if (
+                index == 0
+                and value is word
+                and "/" not in cleaned
+                and "\\" not in cleaned
+            ):
+                continue
+            yield cleaned
+
+
+def shell_command_symlink_alias(
     command: str, cwd: str | None = None
 ) -> tuple[str, str] | None:
-    """Return ``(alias, target)`` when a command word is a link to a secret.
+    """Return ``(alias, target)`` when a command word reaches a secret through a link.
 
     A shell tool carries its operands inside the command string, under a key no
     path rule names, so ``_path_values`` never sees them. Screening every word
@@ -365,42 +416,30 @@ def _shell_symlink_alias(
     files with those names.
 
     The shape that actually hides a target from the approval prompt is narrower:
-    an existing symlink whose own name says nothing, but whose resolved target
-    is protected. The prompt then shows ``video.mp4`` while the write lands on
-    ``.env``. Only that shape is returned here.
+    a word whose own path says nothing, but which resolves through a symlink --
+    the file itself or a directory on the way (``data/credentials`` with
+    ``data`` linked to ``~/.aws``) -- to a protected path. The prompt then shows
+    ``video.mp4`` while the write lands on ``.env``. Only that shape is
+    returned here.
 
-    ``argv[0]`` is skipped because it is the program name. A word that is not
-    an existing symlink is left alone: a plain ``.env`` is already governed by
-    the sandbox, which keeps shell commands away from the home credential
-    stores. A link whose own name is already sensitive is also left to the
-    ordinary path check, so this helper never weakens it.
+    A word that reaches no link is left alone: a plain ``.env`` is already
+    governed by the sandbox, which keeps shell commands away from the home
+    credential stores. A word whose own path is already sensitive is also left
+    to the ordinary path check, so this helper never weakens it.
 
     Redirections count as operands: ``echo x >video.mp4`` and ``cat
-    <video.mp4`` touch the link as surely as ``cp video.mp4 out/``, so shell
-    operators are split off their words. An option's ``=value``
-    (``--env-file=video.mp4``) is checked too.
+    <video.mp4`` touch the link as surely as ``cp video.mp4 out/``. A word-based
+    reading cannot follow ``cd`` or expand globs and variables; the sandbox
+    remains the boundary.
     """
-    for index, token in enumerate(_shell_words(command)):
-        if not token or set(token) <= _SHELL_OPERATOR_CHARS:
-            continue
-        if token.startswith("-"):
-            # ``--env-file=video.mp4``: the value is an operand, the flag is not.
-            token = token.partition("=")[2]
-            if not token:
-                continue
-        # Strip shell punctuation that wraps a path (``a.mp4;``, ``(x)``).
-        cleaned = token.strip("'\"").rstrip(";,&|)")
-        if not cleaned:
-            continue
-        # argv[0] is the program name, not an operand.
-        if index == 0 and "/" not in cleaned and "\\" not in cleaned:
-            continue
-        path = _normalize_path(cleaned, cwd)
+    for word in _shell_operands(command):
+        path = _normalize_path(word, cwd)
         try:
-            if not os.path.islink(path):
-                continue
-        except OSError:
+            target = os.path.realpath(path)
+        except (OSError, ValueError):
             continue
+        if target == path:
+            continue  # no link anywhere on the way
         # "Own name" is judged without resolving the link. is_sensitive_path()
         # resolves realpath first, so asking it here would answer for the
         # TARGET and skip the one shape this helper exists to report.
@@ -411,12 +450,8 @@ def _shell_symlink_alias(
             for pattern in SENSITIVE_PATH_PATTERNS
         ):
             continue
-        try:
-            target = os.path.realpath(path)
-        except (OSError, ValueError):
-            continue
         if is_sensitive_path(target, cwd):
-            return cleaned, target
+            return word, target
     return None
 
 
@@ -555,7 +590,7 @@ class PermissionEngine:
 
         Shell operands live inside the command string, so no path-keyed rule
         sees them; the aliasing shape is described on
-        :func:`_shell_symlink_alias`. Kept separate from
+        :func:`shell_command_symlink_alias`. Kept separate from
         :meth:`hits_sensitive_path` because the two answer different questions:
         that one is a non-overridable deny, this one is a named confirmation.
         """
@@ -564,14 +599,14 @@ class PermissionEngine:
         for key in ("command", "cmd", "commands", "script"):
             value = arguments.get(key)
             if isinstance(value, str):
-                found = _shell_symlink_alias(value, self.cwd)
+                found = shell_command_symlink_alias(value, self.cwd)
                 if found is not None:
                     return found
             elif isinstance(value, (list, tuple)):
                 for item in value:
                     if not isinstance(item, str):
                         continue
-                    found = _shell_symlink_alias(item, self.cwd)
+                    found = shell_command_symlink_alias(item, self.cwd)
                     if found is not None:
                         return found
         return None
@@ -720,7 +755,12 @@ class PermissionEngine:
             if rule.matches(tool_name, argument):
                 matched = rule
         if matched is not None:
-            if matched.action is PermissionDecision.ALLOW and symlink_alias is not None:
+            if (
+                matched.action is not PermissionDecision.DENY
+                and symlink_alias is not None
+            ):
+                # An allow rule must not let the link through unasked, and an
+                # ask rule's own reason would hide the target it reaches.
                 return self._apply_approval_policy(
                     PermissionDecision.ASK,
                     self._alias_reason(symlink_alias),
@@ -748,6 +788,7 @@ class PermissionEngine:
                     tool_name,
                     arguments,
                     "plan mode: read-only tool allowed",
+                    symlink_alias=symlink_alias,
                 )
             return (
                 PermissionDecision.DENY,
@@ -774,7 +815,10 @@ class PermissionEngine:
         # DEFAULT
         if read_only:
             return self._mode_default_allow(
-                tool_name, arguments, "default mode: read-only tool allowed"
+                tool_name,
+                arguments,
+                "default mode: read-only tool allowed",
+                symlink_alias=symlink_alias,
             )
         # Ask mode is where the prompt is shown, so it is where a hidden
         # target must be named: otherwise the operator approves "cp video.mp4"
@@ -794,6 +838,8 @@ class PermissionEngine:
         tool_name: str,
         arguments: Mapping[str, object],
         reason: str,
+        *,
+        symlink_alias: tuple[str, str] | None = None,
     ) -> tuple[PermissionDecision, str]:
         """Return the mode-default ``allow``, after an optional risk second look.
 
@@ -810,11 +856,7 @@ class PermissionEngine:
         feature.
         """
 
-        if symlink_alias := (
-            self.shell_symlink_alias(tool_name, arguments)
-            if self.protect_sensitive_paths
-            else None
-        ):
+        if symlink_alias is not None:
             return self._apply_approval_policy(
                 PermissionDecision.ASK,
                 self._alias_reason(symlink_alias),

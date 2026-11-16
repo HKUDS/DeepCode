@@ -36,7 +36,11 @@ import shlex
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
-from core.harness.permissions import is_file_edit_tool, is_shell_tool
+from core.harness.permissions import (
+    is_file_edit_tool,
+    is_shell_tool,
+    shell_command_symlink_alias,
+)
 
 _PREFIX = "cmd:"  # program (+ subcommand): any arguments
 _EXACT = "cmd="  # this exact command text
@@ -280,7 +284,14 @@ def session_scope(
 
     arguments = arguments or {}
     if is_shell_tool(tool_name):
-        keys = command_keys(_command_text(arguments))
+        text = _command_text(arguments)
+        if shell_command_symlink_alias(text, workspace) is not None:
+            # A word that reaches a protected file through a link: an earlier
+            # "always allow `cp …`" must not cover it, and answering this one
+            # covers only this exact line.
+            keys: tuple[str, ...] = (_EXACT + text.strip(),)
+        else:
+            keys = command_keys(text)
         return SessionScope(tool_name, keys, _command_target(keys))
     if is_file_edit_tool(tool_name):
         return _edit_scope(tool_name, arguments, workspace)

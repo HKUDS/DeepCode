@@ -311,3 +311,25 @@ def test_exec_and_automation_prompts_say_what_always_allow_covers(
     assert "always allow `npm test …` this Session [a]" in prompts[0]
     assert "a (always allow `npm test …` this Session)" in prompts[1]
     assert responses == [ApprovalStatus.APPROVED_SESSION]
+
+
+def test_a_link_to_a_secret_is_not_covered_by_an_earlier_grant(tmp_path):
+    """ "Always allow `cp …`" must not wave through a copy of a disguised .env."""
+    import os
+
+    import pytest
+
+    victim = tmp_path / ".env"
+    victim.write_text("SECRET=x", encoding="utf-8")
+    try:
+        os.symlink(victim, tmp_path / "video.mp4")
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"cannot create symlink here: {exc}")
+    workspace = str(tmp_path)
+    granted = session_scope("bash", {"command": "cp README.md out/"}, workspace)
+    aliased = session_scope("bash", {"command": "cp video.mp4 /tmp/leak"}, workspace)
+    assert not is_covered(aliased, [("bash", granted.keys)])
+    # Answering the aliased call itself covers exactly that line, nothing more.
+    assert aliased.keys == ("cmd=cp video.mp4 /tmp/leak",)
+    plain = session_scope("bash", {"command": "cp notes.txt out/"}, workspace)
+    assert is_covered(plain, [("bash", granted.keys)])
