@@ -111,6 +111,17 @@ _TOKEN_BUDGET_WRAP_UP = (
     "not run or did not see; never state a result you did not observe."
 )
 _MAX_EMPTY_RETRIES = 2
+# Replies in a row that only call nameless tools before the reply is taken as
+# one without tool calls (and so ends the Turn like any reply without them).
+_MAX_NAMELESS_RETRIES = 2
+# Said to the model when its reply carried a tool call that names no function.
+# Such a call is not run (nothing to run) and not kept (the API rejects every
+# later request that replays one), so without this the model never learns its
+# call went nowhere and sends the same reply again.
+_NAMELESS_CALL_NOTE = (
+    "Your previous reply contained a tool call with no function name, so it "
+    "was not run. If you meant to call a tool, call it again by its name."
+)
 _MAX_LENGTH_RECOVERIES = 3
 _SNIP_SAFETY_BUFFER = 1024
 
@@ -579,6 +590,7 @@ class AgentRunner:
         )
         empty_content_retries = 0
         length_recovery_count = 0
+        nameless_retries = 0
         overflow_recoveries = 0
         had_injections = False
         stop_hook_active = False  # C3.1: set once a Stop hook has forced a continuation
@@ -748,6 +760,54 @@ class AgentRunner:
             )
             raw_usage = await record_response(response, context)
 
+            # A call that names no function cannot run, and replaying it would
+            # make the provider reject every later request: drop it here and
+            # tell the model, rather than running it into an "unknown tool"
+            # error that the request view then hides from the model.
+            named = [
+                tc
+                for tc in response.tool_calls
+                if isinstance(tc.name, str) and tc.name.strip()
+            ]
+            nameless_dropped = len(named) != len(response.tool_calls)
+            if not nameless_dropped or named:
+                nameless_retries = 0
+            if nameless_dropped:
+                response.tool_calls = named
+                logger.warning(
+                    "Dropped a tool call with no function name for {}",
+                    spec.session_key or "default",
+                )
+                if not response.tool_calls:
+                    nameless_retries += 1
+                if (
+                    not response.tool_calls
+                    and nameless_retries <= _MAX_NAMELESS_RETRIES
+                ):
+                    # Nothing left to run. Keep what the reply said, tell the
+                    # model, and ask again instead of ending the Turn on a
+                    # reply that meant to call a tool.
+                    if hook.wants_streaming():
+                        await hook.on_stream_end(context, resuming=True)
+                    if not is_blank_text(response.content or ""):
+                        messages.append(
+                            build_assistant_message(
+                                response.content or "",
+                                reasoning_content=response.reasoning_content,
+                                reasoning_summary=response.reasoning_summary,
+                                provider_state=response.provider_state,
+                                thinking_blocks=response.thinking_blocks,
+                            )
+                        )
+                    self._enter_noted(
+                        spec,
+                        messages,
+                        {"role": "user", "content": _NAMELESS_CALL_NOTE},
+                        "nameless_tool_call",
+                    )
+                    await hook.after_iteration(context)
+                    continue
+
             if response.should_execute_tools:
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=True)
@@ -805,13 +865,19 @@ class AgentRunner:
                     messages.append(tool_message)
                     completed_tool_results.append(tool_message)
                 self._report_history(spec, messages)
-                if repeat_tracker is not None or evidence_ledger is not None:
+                if (
+                    repeat_tracker is not None
+                    or evidence_ledger is not None
+                    or nameless_dropped
+                ):
                     # Observed at the result boundary so denied and failed
                     # calls count too — a model hammering a rejected call is
                     # exactly the loop worth interrupting. The reminder rides
                     # a user message AFTER the results, so the model reads
                     # what happened and then why it should change course.
-                    reminders: list[str] = []
+                    reminders: list[str] = (
+                        [_NAMELESS_CALL_NOTE] if nameless_dropped else []
+                    )
                     flagged: set[str] = set()
                     if repeat_tracker is not None:
                         for tc in response.tool_calls:
@@ -850,7 +916,11 @@ class AgentRunner:
                             spec,
                             messages,
                             {"role": "user", "content": "\n\n".join(reminders)},
-                            "repeat_guard",
+                            (
+                                "nameless_tool_call"
+                                if reminders == [_NAMELESS_CALL_NOTE]
+                                else "repeat_guard"
+                            ),
                         )
                 if fatal_error is not None:
                     error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
@@ -1892,28 +1962,60 @@ class AgentRunner:
     def _drop_nameless_tool_calls(
         messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Drop tool calls that name no function, and turns left empty by them.
+        """Drop tool calls that name no function, their results, and empty turns.
 
         A live session keeps ``AgentSession._history`` in memory between turns,
         so the record boundary in :mod:`core.sessions.transcript` cannot heal a
         run that is already poisoned: the nameless call sits in the message list
         the provider is about to receive, and the request is rejected until the
-        process restarts.
+        process restarts. (New replies never get this far: the loop drops such
+        calls before they run. This heals histories written before that.)
 
-        Runs before :meth:`_drop_orphan_tool_results` on purpose. Dropping a
-        call orphans its tool result, and the orphan pass that follows then
-        removes it, so calls and results still pair up.
+        The results dropped are exactly the ones that answered a dropped call,
+        read from the tool messages right after it. Matching by id alone is not
+        enough: ids repeat across turns with some providers, and a stream that
+        splits one call in two can give a named and a nameless call one id, in
+        which case the id keeps a single result.
         """
         updated: list[dict[str, Any]] | None = None
+        # Ids whose results to drop in the tool block after a changed turn,
+        # and ids that may keep one result only.
+        drop_ids: set[str] = set()
+        single_ids: set[str] = set()
+        answered: set[str] = set()
         for idx, msg in enumerate(messages):
+            role = msg.get("role")
+            if role == "tool" and (drop_ids or single_ids):
+                call_id = str(msg.get("tool_call_id") or "")
+                if call_id in drop_ids:
+                    if updated is None:
+                        updated = [dict(m) for m in messages[:idx]]
+                    continue
+                if call_id in single_ids:
+                    if call_id in answered:
+                        if updated is None:
+                            updated = [dict(m) for m in messages[:idx]]
+                        continue
+                    answered.add(call_id)
+            elif role != "tool":
+                drop_ids, single_ids, answered = set(), set(), set()
             current = msg
             raw = msg.get("tool_calls")
-            if msg.get("role") == "assistant" and isinstance(raw, (list, tuple)):
+            if role == "assistant" and isinstance(raw, (list, tuple)):
                 raw_calls = list(raw)
                 kept = named_tool_calls(raw_calls)
                 if len(kept) != len(raw_calls):
                     if updated is None:
                         updated = [dict(m) for m in messages[:idx]]
+                    kept_ids = {str(call.get("id") or "") for call in kept}
+                    kept_calls = {id(call) for call in kept}
+                    dropped_ids = {
+                        str(call.get("id") or "")
+                        for call in raw_calls
+                        if isinstance(call, dict) and id(call) not in kept_calls
+                    } - {""}
+                    drop_ids = dropped_ids - kept_ids
+                    single_ids = dropped_ids & kept_ids
                     if not kept and not msg.get("content"):
                         # Nothing survives this turn: no name to run, no text.
                         continue

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -411,3 +412,92 @@ async def test_a_live_session_never_sends_a_nameless_tool_call() -> None:
     # The poisoned turn ends, and the turn after it succeeds.
     assert [event.msg.type for event in first_events][-1] == "task_complete"
     assert [event.msg.type for event in second_events][-1] == "task_complete"
+
+
+@pytest.mark.asyncio
+async def test_a_nameless_call_is_not_run_and_the_model_is_told() -> None:
+    """The model learns its call went nowhere, instead of resending it blind."""
+    from core.agent_runtime.runner import _NAMELESS_CALL_NOTE
+
+    provider = _NamelessCallProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[ToolCallRequest(id="c1", name="", arguments={"x": 1})],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="done", finish_reason="stop"),
+        ]
+    )
+    session = AgentSession(provider, ToolRegistry(), model="fake-model")
+    await session.submit(UserInput(text="go"))
+    events = session.drain_events()
+
+    assert [event.msg.type for event in events][-1] == "task_complete"
+    assert not any(m.get("role") == "tool" for m in session.history)
+    follow_up = provider.requests[1]
+    assert follow_up[-1]["role"] == "user"
+    assert follow_up[-1]["content"] == _NAMELESS_CALL_NOTE
+
+
+@pytest.mark.asyncio
+async def test_a_model_that_keeps_sending_nameless_calls_still_ends_the_turn() -> None:
+    provider = _NamelessCallProvider(
+        [
+            LLMResponse(
+                content="Let me check.",
+                tool_calls=[ToolCallRequest(id="c1", name="", arguments={})],
+                finish_reason="tool_calls",
+            )
+        ]
+    )
+    session = AgentSession(provider, ToolRegistry(), model="fake-model")
+    await asyncio.wait_for(session.submit(UserInput(text="go")), 10)
+    events = session.drain_events()
+    assert [event.msg.type for event in events][-1] == "task_complete"
+    assert len(provider.requests) <= 4
+
+
+def test_the_request_view_drops_only_the_results_of_dropped_calls() -> None:
+    """Ids repeat across turns with some providers; pairing must not rely on them."""
+    from core.agent_runtime.runner import AgentRunner
+
+    def call(call_id: str, name: str) -> dict[str, Any]:
+        return {
+            "id": call_id,
+            "type": "function",
+            "function": {"name": name, "arguments": "{}"},
+        }
+
+    reused = [
+        {"role": "user", "content": "q1"},
+        {"role": "assistant", "content": "", "tool_calls": [call("call_0", "bash")]},
+        {"role": "tool", "tool_call_id": "call_0", "content": "ok"},
+        {"role": "assistant", "content": "done"},
+        {"role": "user", "content": "q2"},
+        {"role": "assistant", "content": "", "tool_calls": [call("call_0", "")]},
+        {"role": "tool", "tool_call_id": "call_0", "content": "Error: unknown tool"},
+    ]
+    view = AgentRunner._drop_nameless_tool_calls(reused)
+    assert [m["role"] for m in view] == [
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+        "user",
+    ]
+
+    # A stream split one call into a named and a nameless half with one id.
+    split = [
+        {"role": "user", "content": "list"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [call("call_X", "bash"), call("call_X", "")],
+        },
+        {"role": "tool", "tool_call_id": "call_X", "content": "result 1"},
+        {"role": "tool", "tool_call_id": "call_X", "content": "result 2"},
+    ]
+    view = AgentRunner._drop_nameless_tool_calls(split)
+    assert [m["role"] for m in view] == ["user", "assistant", "tool"]
+    assert view[1]["tool_calls"] == [call("call_X", "bash")]
