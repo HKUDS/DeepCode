@@ -238,16 +238,21 @@ def is_sensitive_path(raw: str, cwd: str | None = None) -> bool:
         candidates = {normalized, os.path.realpath(normalized)}
     except (OSError, ValueError):
         candidates = {normalized}
-    probes: set[str] = set()
-    for candidate in candidates:
-        probe = candidate.replace(os.sep, "/").casefold()
-        probes.add(probe)
-        # Keep "." and ".." components intact (rstrip would blank them).
-        probes.add("/".join(p.rstrip(" .") or p for p in probe.split("/")))
-    for probe in probes:
-        name = probe.rsplit("/", 1)[-1]
+    return any(_names_sensitive_path(candidate) for candidate in candidates)
+
+
+def _names_sensitive_path(path: str) -> bool:
+    """Whether the absolute ``path``, as given, matches a protected pattern.
+
+    Case is ignored, and a variant with trailing dots and spaces stripped from
+    each component is tried too (see :func:`is_sensitive_path`).
+    """
+    probe = path.replace(os.sep, "/").casefold()
+    # Keep "." and ".." components intact (rstrip would blank them).
+    for variant in {probe, "/".join(p.rstrip(" .") or p for p in probe.split("/"))}:
+        name = variant.rsplit("/", 1)[-1]
         for pattern in SENSITIVE_PATH_PATTERNS:
-            if fnmatch.fnmatchcase(probe, pattern) or fnmatch.fnmatchcase(
+            if fnmatch.fnmatchcase(variant, pattern) or fnmatch.fnmatchcase(
                 name, pattern
             ):
                 return True
@@ -432,25 +437,49 @@ def shell_command_symlink_alias(
     reading cannot follow ``cd`` or expand globs and variables; the sandbox
     remains the boundary.
     """
+    try:
+        base = os.path.abspath(cwd) if cwd else os.getcwd()
+        real_base = os.path.realpath(base)
+    except (OSError, ValueError):
+        return None
+    # Directories resolve once per scan: most words share a directory, and a
+    # word that is no link then costs one lstat.
+    real_dirs: dict[str, str] = {}
+    seen: set[str] = set()
     for word in _shell_operands(command):
-        path = _normalize_path(word, cwd)
+        if word in seen:
+            continue
+        seen.add(word)
         try:
-            target = os.path.realpath(path)
+            expanded = os.path.expanduser(_strip_file_scheme(word))
+            relative = not os.path.isabs(expanded)
+            joined = os.path.join(base, expanded) if relative else expanded
+            parent, name = os.path.split(joined)
+            real_parent = real_dirs.get(parent)
+            if real_parent is None:
+                # ``..`` is resolved after the link before it, as the OS does.
+                real_parent = real_dirs[parent] = os.path.realpath(parent)
+            reached = os.path.join(real_parent, name)
+            target = (
+                os.path.realpath(reached)
+                if os.path.islink(reached)
+                else os.path.normpath(reached)
+            )
         except (OSError, ValueError):
             continue
-        if target == path:
-            continue  # no link anywhere on the way
-        # "Own name" is judged without resolving the link. is_sensitive_path()
-        # resolves realpath first, so asking it here would answer for the
-        # TARGET and skip the one shape this helper exists to report.
-        own = path.replace(os.sep, "/").casefold()
-        own_name = own.rsplit("/", 1)[-1]
-        if any(
-            fnmatch.fnmatchcase(own, pattern) or fnmatch.fnmatchcase(own_name, pattern)
-            for pattern in SENSITIVE_PATH_PATTERNS
-        ):
+        # The workspace's own location is the user's choice, not a disguise: a
+        # relative word is measured from the workspace's resolved path.
+        expected = os.path.normpath(
+            os.path.join(real_base, expanded) if relative else expanded
+        )
+        if target == expected:
+            continue  # no link on the way
+        # "Own path" is judged without resolving the link, by the same rules
+        # as the target; is_sensitive_path() would resolve it and answer for
+        # the TARGET, skipping the one shape this helper exists to report.
+        if _names_sensitive_path(os.path.normpath(joined)):
             continue
-        if is_sensitive_path(target, cwd):
+        if _names_sensitive_path(target):
             return word, target
     return None
 

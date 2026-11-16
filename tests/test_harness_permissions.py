@@ -643,6 +643,42 @@ def test_a_linked_directory_on_the_way_is_named(tmp_path):
     assert ".aws" in reason
 
 
+def test_dot_dot_after_a_linked_directory_is_followed(tmp_path):
+    """``cache/../credentials`` opens a file beside the link's target."""
+    import os
+
+    store = tmp_path / "home" / ".aws"
+    (store / "sso").mkdir(parents=True)
+    (store / "credentials").write_text("[default]", encoding="utf-8")
+    try:
+        os.symlink(store / "sso", tmp_path / "cache")
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"cannot create symlink here: {exc}")
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd=str(tmp_path))
+    decision, reason = engine.evaluate("bash", {"command": "cat cache/../credentials"})
+    assert decision is PermissionDecision.ASK, reason
+
+
+def test_a_workspace_opened_through_a_link_raises_no_false_alias(tmp_path):
+    """Prose like "server.pem." in a commit message is not a link to anything."""
+    import os
+
+    real = tmp_path / "real"
+    real.mkdir()
+    try:
+        os.symlink(real, tmp_path / "via")
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"cannot create symlink here: {exc}")
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd=str(tmp_path / "via"))
+    for command in (
+        'git commit -m "Load the TLS cert from server.pem."',
+        'echo "Rotate secrets.json."',
+        "cat notes.txt",
+    ):
+        decision, reason = engine.evaluate("bash", {"command": command})
+        assert decision is PermissionDecision.ALLOW, (command, reason)
+
+
 def test_an_ask_rule_still_names_the_hidden_target(tmp_path):
     """A matching ask rule's own reason would hide where the link leads."""
     _victim, bait = _symlink_fixture(tmp_path)
