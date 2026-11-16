@@ -22,12 +22,19 @@ this layer sits on top and folds in the per-*model* behavior.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 # Model-name tokens marking a "reasoning" model that rejects a temperature
 # parameter once reasoning is active (OpenAI gpt-5 family + o-series).
 _REASONING_MODEL_TOKENS: tuple[str, ...] = ("gpt-5", "o1", "o3", "o4")
+
+# OpenAI models that always reason, so they reject temperature even with no
+# effort requested: the o-series and the gpt-5 line before 5.1 (gpt-5,
+# gpt-5-mini, gpt-5-nano and their variants). gpt-5.1 and later accept it at
+# their default effort ``none``; gpt-5-chat is not a reasoning model.
+_ALWAYS_REASONING_MODEL = re.compile(r"o[134](?:$|-)|gpt-5(?:$|-(?!chat(?:-|$)))")
 
 # Kimi (Moonshot) thinking-capable models: they take a top-level
 # ``thinking: {type: enabled|disabled}`` in extra_body and want an empty
@@ -58,6 +65,13 @@ def _bare_model_name(model_name: str) -> str:
 def is_reasoning_model(model_name: str) -> bool:
     name = model_name.lower()
     return any(token in name for token in _REASONING_MODEL_TOKENS)
+
+
+def always_reasons(model_name: str) -> bool:
+    """Whether the model rejects temperature with no reasoning effort set."""
+    return (
+        _ALWAYS_REASONING_MODEL.match(_bare_model_name(model_name.lower())) is not None
+    )
 
 
 def model_supports_thinking(model_name: str) -> bool:
@@ -136,8 +150,12 @@ def resolve_model_compat(
     semantic_effort = normalize_effort(reasoning_effort)
     reasoning_active = semantic_effort not in {None, "auto", "none"}
 
-    # Temperature: reasoning models reject it while reasoning is active.
-    include_temperature = not (reasoning_active and is_reasoning_model(resolved_name))
+    # Temperature: reasoning models reject it while reasoning is active, and
+    # the always-reasoning ones reject it at the default effort too.
+    include_temperature = not (
+        always_reasons(resolved_name)
+        or (reasoning_active and is_reasoning_model(resolved_name))
+    )
 
     # Token-limit field is a provider-level capability.
     token_limit_field = (

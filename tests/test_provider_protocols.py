@@ -553,3 +553,47 @@ async def test_cancelling_an_active_sdk_stream_releases_the_response(
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         await provider.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("protocol", ["openai_chat", "openai_responses"])
+@pytest.mark.parametrize(
+    ("model", "override", "has_temperature"),
+    [
+        ("gpt-5", None, False),
+        ("gpt-5-mini", None, False),
+        ("gpt-5-nano", None, False),
+        ("o3", None, False),
+        ("o4-mini", None, False),
+        ("gpt-5.1", None, True),
+        ("gpt-5-chat-latest", None, True),
+        ("gpt-4o", None, True),
+        ("gpt-5-mini", True, True),
+        ("gpt-5.1", False, False),
+    ],
+)
+async def test_auto_reasoning_temperature_compatibility(
+    monkeypatch, protocol, model, override, has_temperature
+):
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json=CHAT if protocol == "openai_chat" else RESPONSE)
+
+    mock_sdk(monkeypatch, handler)
+    provider = OpenAICompatProvider(
+        api_key="test-key",
+        api_base="https://api.openai.com/v1",
+        default_model=model,
+        protocol=protocol,
+        spec=find_by_name("openai"),
+        compat=ProviderCompat(temperature=override),
+    )
+    try:
+        reply = await provider.chat([{"role": "user", "content": "hello"}])
+        assert reply.content == "OK"
+        assert len(bodies) == 1
+        assert ("temperature" in bodies[0]) is has_temperature
+    finally:
+        await provider._client.close()
