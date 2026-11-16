@@ -421,3 +421,24 @@ def estimate_prompt_tokens_chain(
     if estimated > 0:
         return int(estimated), "estimated"
     return 0, "none"
+
+
+# A user-role history entry the runtime wrote rather than a person: a runner
+# note (repeat-guard reminder, stop-hook continuation, sub-agent result,
+# PreCompact checkpoint …) or a Goal continuation prompt. Model-visible like any
+# user message; providers send only the keys they know, so it never leaves the
+# process. Anything that speaks of "what the user said" must skip it.
+CONTEXT_NOTE_KEY = "context_note"
+
+
+def user_message(text: str, *, context_note: str | None = None) -> dict[str, Any]:
+    """A user-role history entry, marked when ``context_note`` names its source."""
+    message: dict[str, Any] = {"role": "user", "content": text}
+    if context_note:
+        message[CONTEXT_NOTE_KEY] = context_note
+    return message
+
+
+def is_context_note_message(message: dict[str, Any]) -> bool:
+    """Whether a user-role history entry was written by the runtime."""
+    return message.get("role") == "user" and bool(message.get(CONTEXT_NOTE_KEY))

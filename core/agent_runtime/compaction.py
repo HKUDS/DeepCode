@@ -11,10 +11,12 @@ from __future__ import annotations
 import json
 from typing import Any, Mapping, Protocol
 
-from core.agent_runtime.helpers import find_legal_message_start
+from core.agent_runtime.helpers import (
+    find_legal_message_start,
+    is_context_note_message,
+)
 
 COMPACT_TRIGGER_FRACTION = 0.9
-COMPACT_KEEP_USER_CHARS = 60_000
 # The estimator's own char/token ratio, reused so the window share and
 # the conversation share are measured in the same unit.
 _CHARS_PER_TOKEN = 4
@@ -49,6 +51,22 @@ SUMMARY_PREFIX = (
     "messages it replaced, not as a report from someone else. Do not repeat "
     "work it says is done. Summary:"
 )
+# Heading for the block appended to the checkpoint AFTER the summary: the
+# user's own earlier messages, newest first, quoted verbatim. Not labelled as
+# "the original task" — in a multi-turn session the first message is often no
+# longer the work in hand, and a permanent label pulls the model back to it.
+# Appended after the prefix (never before) so ``SUMMARY_PREFIX`` keeps offset 0.
+EARLIER_USER_LABEL = "Earlier messages from the user (most recent first):"
+_EARLIER_USER_MARK = f"\n\n{EARLIER_USER_LABEL}\n"
+# How much of the user's own earlier wording to carry. A few thousand
+# characters: enough to keep the request that started the work, small enough
+# that compaction still shrinks the history — the convergence rule refuses a
+# "compaction" that does not.
+EARLIER_USER_CHARS = 4_000
+# Room left for the runner's PreCompact checkpoint re-injection, which is bounded
+# by the same reduction this block draws on. Without a reserve this block would
+# consume it and the hook's context would be truncated to nothing.
+_PRECOMPACT_RESERVE = 1_000
 
 
 class CompactionStrategy(Protocol):
@@ -90,6 +108,73 @@ def _unit_start(messages: list[dict[str, Any]], end: int) -> int:
                 return index - 1
         break
     return index
+
+
+def _earlier_user_messages(
+    non_system: list[dict[str, Any]], budget: int = EARLIER_USER_CHARS
+) -> list[str]:
+    """The user's own earlier messages, newest first, within ``budget`` chars.
+
+    Deliberately not "the original task". In a real session the first user
+    message is the environment slot (``env_context``), and in a multi-turn
+    session the first thing the user said is often not what is being worked on
+    any more — a Goal may have been set or updated since. Keeping the NEWEST
+    earlier messages under a small budget preserves the words that still point
+    at the current work; a permanent "original task" label would pull the model
+    back to old work instead.
+
+    Skipped: the environment slot, compaction checkpoints, empty content, and
+    every user-role message the runtime wrote rather than the user — runner
+    notes and Goal continuation prompts, marked ``context_note`` both in the
+    live history and when a session is rebuilt from disk.
+
+    ``non_system`` is the part of the history the checkpoint replaces: the
+    retained tail already carries its own user messages word for word.
+    """
+    picked: list[str] = []
+    used = 0
+    carried: list[str] = []
+
+    def add(text: str) -> bool:
+        """Take ``text`` if it fits; take a truncated head when nothing has yet."""
+        nonlocal used
+        if used + len(text) <= budget:
+            picked.append(text)
+            used += len(text)
+            return True
+        if not picked and not carried:
+            # The newest message alone exceeds the budget. Carrying nothing
+            # would drop the user's current words entirely, so take the head.
+            picked.append(text[:budget])
+            used = budget
+        return False
+
+    for item in reversed(non_system):
+        if item.get("role") != "user":
+            continue
+        if item.get("env_context") or is_context_note_message(item):
+            continue
+        if item.get("compaction"):
+            # A checkpoint from an earlier round already carries the wording it
+            # kept; re-read it so a second compaction does not lose it.
+            block = str(item.get("content") or "")
+            at = block.rfind(_EARLIER_USER_MARK)
+            if at >= 0:
+                carried.extend(
+                    text.strip()
+                    for text in block[at + len(_EARLIER_USER_MARK) :].split("\n\n")
+                    if text.strip()
+                )
+            continue
+        text = str(item.get("content") or "").strip()
+        if not text:
+            continue
+        if not add(text) or used >= budget:
+            break
+    for text in carried:
+        if not add(text):
+            break
+    return picked
 
 
 class TailRetainingCompactionStrategy:
@@ -153,9 +238,41 @@ class TailRetainingCompactionStrategy:
             kept = chunk + kept
             used += chunk_chars
             index = start - 1
+        # Carry the user's own earlier wording across the checkpoint. The
+        # summary is lossy by design, and the one thing it should not be allowed
+        # to paraphrase away is what the user actually asked for. Newest first
+        # and bounded: see :func:`_earlier_user_messages`.
+        checkpoint_content = f"{SUMMARY_PREFIX}\n{summary}"
+        # Only within the space the summary actually freed, and only after reserving
+        # room for the runner's PreCompact checkpoint re-injection -- that one is
+        # bounded by the same reduction, so eating it all would truncate the
+        # hook's context to nothing. A history that does not shrink enough
+        # carries nothing, which is what main does.
+        before = sum(message_chars(item) for item in messages)
+        base_after = (
+            sum(message_chars(item) for item in system)
+            + len(checkpoint_content)
+            + sum(message_chars(item) for item in kept)
+        )
+        headroom = before - base_after - len(_EARLIER_USER_MARK) - _PRECOMPACT_RESERVE
+        # Only the replaced range is read: the tail keeps its own user messages
+        # verbatim, and letting them into the budget first would crowd out the
+        # older words this block exists for (or quote a truncated copy of a
+        # message the tail already holds in full).
+        replaced = non_system[: len(non_system) - len(kept)]
+        earlier = (
+            _earlier_user_messages(replaced, budget=min(EARLIER_USER_CHARS, headroom))
+            if headroom > 0
+            else []
+        )
+        kept_texts = {str(item.get("content") or "").strip() for item in kept}
+        earlier = [text for text in earlier if text not in kept_texts]
+        if earlier:
+            quoted = "\n\n".join(earlier)
+            checkpoint_content += _EARLIER_USER_MARK + quoted
         checkpoint = {
             "role": "user",
-            "content": f"{SUMMARY_PREFIX}\n{summary}",
+            "content": checkpoint_content,
             "compaction": {"reset": True, "retain": len(kept)},
         }
         return system + [checkpoint] + kept

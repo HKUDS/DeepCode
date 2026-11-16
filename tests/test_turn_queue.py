@@ -16,7 +16,7 @@ from core.domain import (
     TurnStatus,
 )
 from core.domain.common import utc_now
-from core.domain.message_provenance import ClientSurface
+from core.domain.message_provenance import ClientSurface, TurnInputSource
 from core.events import AgentMessage, Event, TaskComplete, TurnStarted
 from core.persistence import Database
 from core.persistence.execution_repository import ItemRepository, TurnRepository
@@ -38,6 +38,7 @@ class _QueuedAgent:
 
     async def run_stream(self, op):
         self.factory.prompts.append(op.text)
+        self.factory.notes.append(op.context_note)
         yield Event("1", TurnStarted())
         if len(self.factory.prompts) == 1:
             self.factory.first_started.set()
@@ -58,6 +59,7 @@ class _QueuedAgent:
 class _QueueFactory:
     def __init__(self, *, block_after_first: bool = False) -> None:
         self.prompts: list[str] = []
+        self.notes: list[str | None] = []
         self.block_after_first = block_after_first
         self.first_started = threading.Event()
         self.release_first = threading.Event()
@@ -137,6 +139,33 @@ def test_queued_turn_can_be_cancelled_without_stopping_current_work(tmp_path) ->
         assert factory.prompts == ["first"]
     finally:
         factory.release_first.set()
+        application.close()
+
+
+def test_a_goal_continuation_prompt_reaches_the_agent_marked(tmp_path) -> None:
+    """The Goal runtime wrote that prompt, so the agent's history must say so.
+
+    Compaction quotes the user's own earlier messages; an unmarked Goal prompt
+    would be quoted as something the user said.
+    """
+    application, factory, thread = _application(tmp_path)
+    factory.release_first.set()
+    try:
+        application.turns.start(thread.id, prompt="plain user turn")
+        _wait_for(
+            lambda: (
+                len(factory.prompts) == 1
+                and application.turns.active_for_thread(thread.id) is None
+            )
+        )
+        application.turns.start(
+            thread.id,
+            prompt="continue the Goal",
+            input_source=TurnInputSource.GOAL_CONTINUATION,
+        )
+        _wait_for(lambda: len(factory.prompts) == 2)
+        assert factory.notes == [None, TurnInputSource.GOAL_CONTINUATION.value]
+    finally:
         application.close()
 
 

@@ -293,6 +293,41 @@ def test_a_resumed_poisoned_turn_is_not_stored_again() -> None:
     assert [(item.role, item.content) for item in added] == [("assistant", "done")]
 
 
+def test_runtime_written_user_records_come_back_marked() -> None:
+    """A resumed history marks what the runtime wrote, as the live one does."""
+    from core.agent_runtime.helpers import CONTEXT_NOTE_KEY
+
+    stored = [
+        SessionMessage("user", "build the parser", metadata={"source": "start"}),
+        SessionMessage(
+            "user",
+            "Continue the Goal.",
+            metadata={"source": "goal_continuation", "client": "internal"},
+        ),
+        SessionMessage(
+            "user",
+            "you repeated yourself",
+            metadata={"delivery": "mid_turn", "source": "repeat_guard"},
+        ),
+        SessionMessage(
+            "user", "also add --strict", metadata={"source": "steer", "messageId": "m1"}
+        ),
+        SessionMessage(
+            "user",
+            "[The previous Turn was interrupted before it completed.]",
+            metadata={"source": "turn_interrupt", "client": "internal"},
+        ),
+    ]
+    rebuilt = visible_kernel_history(stored)
+    assert [entry.get(CONTEXT_NOTE_KEY) for entry in rebuilt] == [
+        None,
+        "goal_continuation",
+        "repeat_guard",
+        None,
+        "turn_interrupt",
+    ]
+
+
 def test_only_runtime_notes_count_as_context_notes() -> None:
     def user(**metadata: str) -> SessionMessage:
         return SessionMessage("user", "text", metadata=metadata)

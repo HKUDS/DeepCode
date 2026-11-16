@@ -34,6 +34,10 @@ from core.skills.models import SkillInvocation, SkillSelection
 class UserInput:
     text: str
     skills: tuple[SkillSelection, ...] = ()
+    # Set when the runtime, not a person, wrote ``text`` (a Goal continuation
+    # prompt). The history entry carries it as ``context_note`` so nothing
+    # downstream quotes the prompt as the user's own words.
+    context_note: str | None = None
     type: str = field(default="user_input", init=False)
 
 

@@ -12,8 +12,8 @@ from copy import deepcopy
 from typing import Any, Iterable, Mapping
 
 from core.agent_runtime.context import EnvironmentContext
-from core.agent_runtime.helpers import named_tool_calls
-from core.domain.message_provenance import TurnInputSource
+from core.agent_runtime.helpers import CONTEXT_NOTE_KEY, named_tool_calls
+from core.domain.message_provenance import TurnInputSource, goal_prompt
 from core.sessions.continuation import session_message_history_entry
 from core.sessions.models import SessionMessage
 
@@ -143,6 +143,12 @@ def session_message_to_kernel(message: SessionMessage) -> dict[str, Any] | None:
     if message.role in {"user", "assistant"} and not message.content and not tool_calls:
         return None
     entry = session_message_history_entry(message)
+    if message.role == "user":
+        note = _context_note_source(message)
+        if note:
+            # The live history marks what the runtime wrote; a resumed one must
+            # say the same, or a compaction would quote it as the user's words.
+            entry[CONTEXT_NOTE_KEY] = note
     if message.role == "assistant":
         if tool_calls:
             entry["tool_calls"] = deepcopy(tool_calls)
@@ -157,6 +163,16 @@ def session_message_to_kernel(message: SessionMessage) -> dict[str, Any] | None:
     if isinstance(compaction, dict) and compaction:
         entry["compaction"] = dict(compaction)
     return entry
+
+
+def _context_note_source(message: SessionMessage) -> str | None:
+    """Who wrote a user-role record, when it was not the user."""
+    metadata = message.metadata or {}
+    if is_context_note(message):
+        return str(metadata.get("source") or "note")
+    if goal_prompt(metadata) is not None:
+        return TurnInputSource.GOAL_CONTINUATION.value
+    return None
 
 
 def _latest_reset(records: list[SessionMessage]) -> tuple[int, int] | None:
