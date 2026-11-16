@@ -5,11 +5,25 @@ Released versions are named in the entry title; the version on PyPI is
 [deepcode-hku](https://pypi.org/project/deepcode-hku/). 中文版见
 [CHANGELOG_ZH.md](CHANGELOG_ZH.md).
 
-## 2026-11-06 · Keep distinct Paper2Code tool calls running
+## 2026-11-16 · Community fixes
 
-- **Different tool arguments are not a loop.** Paper2Code can read or write several
-  different files consecutively without stopping at the repeated-tool limit.
-  Repeated calls with the same tool and arguments still stop the workflow.
+- **GPT-5 and o-series models work with the default settings.** gpt-5,
+  gpt-5-mini, gpt-5-nano and the o1/o3/o4 models reject `temperature` even
+  when no reasoning effort is set; DeepCode no longer sends it to them.
+  gpt-5.1 and later keep it at their default effort. (#286)
+- **`file:` URLs are checked against protected paths.** A tool argument such
+  as `url="file:///home/you/.ssh/id_rsa"`, percent-encoded or not, is refused
+  in Ask and Read only like the plain path. (#292)
+- **Memory tidy-up keeps every topic link.** Two links whose file names start
+  the same way, such as `api.md` and `api.md.v2.md`, are both kept in
+  `MEMORY.md`. (#287)
+- **Paper2Code fixes.** Reading or writing several different files in a row is
+  no longer taken for a loop, only repeated calls with the same arguments
+  are (#299, #290); a `#` comment inside a fenced code block no longer splits
+  the paper into a new section (#288).
+- **Smaller fixes.** Responses requests keep an image's `detail` (#296); tests
+  pin sub-agent history isolation (#297) and the Goal-editing TUI test no
+  longer races the running Turn (#298).
 
 ## 2026-11-02 · Goals that are checked before they count as complete
 

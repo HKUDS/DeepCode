@@ -144,6 +144,10 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 
 ## What's new
 
+- **2026-11-16** — Community fixes: GPT-5 and o-series models work with the
+  default settings, `file:` URLs are checked against protected paths, memory
+  tidy-up keeps every topic link, and Paper2Code no longer mistakes reading
+  several files for a loop or splits sections at a comment in a code block.
 - **2026-11-02** — Goals you can trust to finish: the agent proposes a
   checklist, and once you confirm it DeepCode runs those commands itself
   before it accepts "complete"; an optional independent reviewer checks every
@@ -157,18 +161,11 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
   interface has no stray English, the sidebar becomes a drawer on a narrow
   window, and the Web and Desktop interface is calmer: one typeface, one-line
   controls and steps, and fewer boxes and labels.
-- **2026-10-29** — Optional microcompact that clears old tool output before
-  summarizing (`agents.defaults.microcompact`), an optional check before a
-  Goal completes (`goal.completionVerifier`), folder browsing in the Web
-  client, an opt-in risk check (`DEEPCODE_RISK_EVALUATOR=1`), and approval for
-  project hooks (`deepcode hooks status` / `approve`). Clearer approvals:
-  the TUI shows when it waits for you and what will change, "always allow"
-  covers one kind of command instead of the whole tool, and trusting a folder
-  asks first.
 
 <details>
 <summary><strong>Earlier updates</strong></summary>
 
+- **2026-10-29** — Lighter compaction, checked Goal completion, folder browsing on the Web, and clearer approvals
 - **2026-10-28** — Agent presets that remove tools, file tools that ask before writing hooks, and unpinned MCP packages flagged
 - **2026-10-21** — A quiet Windows service, a separate code font, and community fixes
 - **2026-10-14** — Sessions that keep their history, a tighter sandbox, and the Desktop and Web apps in Chinese
