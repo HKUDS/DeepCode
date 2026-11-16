@@ -41,6 +41,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from core.domain.execution_security import (
     ApprovalPolicy,
@@ -177,10 +178,41 @@ class PermissionRule:
         )
 
 
+# A ``file:`` URL holds no raw whitespace (a space is written ``%20``), which
+# tells it apart from text that merely starts with "file:".
+_FILE_URL = re.compile(r"file:\S*", re.IGNORECASE)
+
+
+def _strip_file_scheme(raw: str) -> str:
+    """Return the filesystem path a ``file:`` URL denotes; other strings pass through.
+
+    A tool argument carrying a ``file:`` URL (``url="file:///home/u/.ssh/id_rsa"``,
+    the shape browser- and fetch-style MCP tools accept) would otherwise
+    resolve as a cwd-relative literal and miss every credential pattern.
+    Decoding mirrors what the consuming tool does before it opens the file, so
+    ``%69d_rsa`` cannot smuggle ``id_rsa`` past the probe either. A non-local
+    netloc stays a UNC-style ``//host/path``.
+    """
+    url = raw.strip()
+    if _FILE_URL.fullmatch(url) is None:
+        return raw
+    try:
+        parts = urlparse(url)
+    except ValueError:
+        return raw
+    path = unquote(parts.path or "")
+    if parts.netloc and parts.netloc.lower() not in ("localhost", "127.0.0.1", "::1"):
+        path = f"//{parts.netloc}{path}"
+    if re.match(r"^/[A-Za-z]:", path):
+        # Windows drive form: file:///C:/x -> /C:/x -> C:/x.
+        path = path[1:]
+    return path or raw
+
+
 def _normalize_path(raw: str, cwd: str | None) -> str:
     try:
         base = Path(cwd) if cwd else Path.cwd()
-        p = Path(os.path.expanduser(raw))
+        p = Path(os.path.expanduser(_strip_file_scheme(raw)))
         resolved = p if p.is_absolute() else (base / p)
         return os.path.normpath(str(resolved))
     except (OSError, ValueError):
@@ -272,14 +304,23 @@ def public_files_in_sensitive_locations() -> tuple[str, ...]:
 
 
 def _path_values(arguments: Mapping[str, object]):
-    """Strings under path-like keys in ``arguments``, nested ones included."""
+    """Strings under path-like keys in ``arguments``, nested ones included.
+
+    A ``file:`` URL names a filesystem path by construction, so it counts
+    under *any* key (``url``, ``uri``, ``href`` …). Only a value that is a
+    whole URL counts, never text that mentions or starts with one.
+    """
     for name, value in arguments.items():
         name = str(name)
         items = value if isinstance(value, (list, tuple)) else [value]
         for item in items:
             if isinstance(item, Mapping):
                 yield from _path_values(item)
-            elif isinstance(item, str) and item.strip() and _PATH_KEY.search(name):
+            elif (
+                isinstance(item, str)
+                and item.strip()
+                and (_PATH_KEY.search(name) or _FILE_URL.fullmatch(item.strip()))
+            ):
                 yield item
 
 
