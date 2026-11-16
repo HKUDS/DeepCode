@@ -460,9 +460,10 @@ def shell_command_symlink_alias(
                 # ``..`` is resolved after the link before it, as the OS does.
                 real_parent = real_dirs[parent] = os.path.realpath(parent)
             reached = os.path.join(real_parent, name)
+            # A Windows directory junction is a link too, though not to islink().
             target = (
                 os.path.realpath(reached)
-                if os.path.islink(reached)
+                if os.path.islink(reached) or os.path.isjunction(reached)
                 else os.path.normpath(reached)
             )
         except (OSError, ValueError):

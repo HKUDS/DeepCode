@@ -679,6 +679,27 @@ def test_a_workspace_opened_through_a_link_raises_no_false_alias(tmp_path):
         assert decision is PermissionDecision.ALLOW, (command, reason)
 
 
+def test_a_windows_junction_named_as_the_word_is_followed(tmp_path, monkeypatch):
+    """A directory junction is a link that ``os.path.islink`` does not report."""
+    import os
+
+    store = tmp_path / "home" / ".aws"
+    store.mkdir(parents=True)
+    try:
+        os.symlink(store, tmp_path / "data")
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"cannot create symlink here: {exc}")
+    junction = str(tmp_path / "data")
+    real_islink = os.path.islink
+    monkeypatch.setattr(
+        os.path, "islink", lambda p: False if str(p) == junction else real_islink(p)
+    )
+    monkeypatch.setattr(os.path, "isjunction", lambda p: str(p) == junction)
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd=str(tmp_path))
+    decision, reason = engine.evaluate("bash", {"command": "tar czf out.tgz data"})
+    assert decision is PermissionDecision.ASK, reason
+
+
 def test_an_ask_rule_still_names_the_hidden_target(tmp_path):
     """A matching ask rule's own reason would hide where the link leads."""
     _victim, bait = _symlink_fixture(tmp_path)

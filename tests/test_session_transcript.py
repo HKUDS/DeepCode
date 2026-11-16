@@ -607,3 +607,25 @@ def test_a_shared_id_keeps_the_result_of_the_kept_call() -> None:
         ]
     )
     assert [m.get("content") for m in view if m["role"] == "tool"] == ["a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_a_cut_off_nameless_reply_is_told_and_retried_with_tools() -> None:
+    """Cut off by the output limit, with no text: still told, still has tools."""
+    from core.agent_runtime.runner import _NAMELESS_CALL_NOTE
+
+    provider = _NamelessCallProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[ToolCallRequest(id="c1", name="", arguments={})],
+                finish_reason="length",
+            ),
+            LLMResponse(content="done", finish_reason="stop"),
+        ]
+    )
+    session = AgentSession(provider, ToolRegistry(), model="fake-model")
+    await session.submit(UserInput(text="go"))
+    events = session.drain_events()
+    assert [event.msg.type for event in events][-1] == "task_complete"
+    assert provider.requests[1][-1]["content"] == _NAMELESS_CALL_NOTE

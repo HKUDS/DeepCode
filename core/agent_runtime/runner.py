@@ -785,11 +785,11 @@ class AgentRunner:
                     nameless_retries += 1
                 if (
                     not response.tool_calls
-                    and response.finish_reason != "length"
                     and nameless_retries <= _MAX_NAMELESS_RETRIES
                 ):
-                    # (A reply cut off by the output limit goes to length
-                    # recovery below: the cut is what left the call nameless.)
+                    # Also for a reply the output limit cut off: length
+                    # recovery needs text to continue from, and a tool-call
+                    # reply usually has none.
                     # Nothing left to run. Keep what the reply said, tell the
                     # model, and ask again instead of ending the Turn on a
                     # reply that meant to call a tool.
