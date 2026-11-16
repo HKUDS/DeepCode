@@ -4,6 +4,11 @@ DeepCode 的主要变化，最新的在前，每天一条。正式版本号写�
 PyPI 上的包名是 [deepcode-hku](https://pypi.org/project/deepcode-hku/)。
 English: [CHANGELOG.md](CHANGELOG.md).
 
+## 2026-11-06 · Paper2Code 不再把不同的工具调用当作循环
+
+- **参数不同的调用不算重复。** Paper2Code 连续读写多个不同文件时，不再因工具名相同
+  而触发重复次数限制。工具和参数均相同的连续调用仍会中止工作流。
+
 ## 2026-11-02 · Goal 先验收，再算完成
 
 - **DeepCode 自己运行的检查清单。** Goal 开始不久，智能体会提出检查清单：每项需求
