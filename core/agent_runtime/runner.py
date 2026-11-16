@@ -774,6 +774,9 @@ class AgentRunner:
                 nameless_retries = 0
             if nameless_dropped:
                 response.tool_calls = named
+                # Hooks read the calls from the context (tool events pair them
+                # with results): keep it in step with what will run.
+                context.tool_calls = list(named)
                 logger.warning(
                     "Dropped a tool call with no function name for {}",
                     spec.session_key or "default",
@@ -782,8 +785,11 @@ class AgentRunner:
                     nameless_retries += 1
                 if (
                     not response.tool_calls
+                    and response.finish_reason != "length"
                     and nameless_retries <= _MAX_NAMELESS_RETRIES
                 ):
+                    # (A reply cut off by the output limit goes to length
+                    # recovery below: the cut is what left the call nameless.)
                     # Nothing left to run. Keep what the reply said, tell the
                     # model, and ask again instead of ending the Turn on a
                     # reply that meant to call a tool.
@@ -1979,26 +1985,26 @@ class AgentRunner:
         """
         updated: list[dict[str, Any]] | None = None
         # Ids whose results to drop in the tool block after a changed turn,
-        # and ids that may keep one result only.
+        # and, for an id a kept and a dropped call share, which of its results
+        # (counted in call order) belongs to the kept call.
         drop_ids: set[str] = set()
-        single_ids: set[str] = set()
-        answered: set[str] = set()
+        keep_nth: dict[str, int] = {}
+        seen_results: dict[str, int] = {}
         for idx, msg in enumerate(messages):
             role = msg.get("role")
-            if role == "tool" and (drop_ids or single_ids):
+            if role == "tool" and (drop_ids or keep_nth):
                 call_id = str(msg.get("tool_call_id") or "")
-                if call_id in drop_ids:
+                drop = call_id in drop_ids
+                if call_id in keep_nth:
+                    nth = seen_results.get(call_id, 0)
+                    seen_results[call_id] = nth + 1
+                    drop = nth != keep_nth[call_id]
+                if drop:
                     if updated is None:
                         updated = [dict(m) for m in messages[:idx]]
                     continue
-                if call_id in single_ids:
-                    if call_id in answered:
-                        if updated is None:
-                            updated = [dict(m) for m in messages[:idx]]
-                        continue
-                    answered.add(call_id)
             elif role != "tool":
-                drop_ids, single_ids, answered = set(), set(), set()
+                drop_ids, keep_nth, seen_results = set(), {}, {}
             current = msg
             raw = msg.get("tool_calls")
             if role == "assistant" and isinstance(raw, (list, tuple)):
@@ -2015,7 +2021,18 @@ class AgentRunner:
                         if isinstance(call, dict) and id(call) not in kept_calls
                     } - {""}
                     drop_ids = dropped_ids - kept_ids
-                    single_ids = dropped_ids & kept_ids
+                    for shared in dropped_ids & kept_ids:
+                        same_id = [
+                            call
+                            for call in raw_calls
+                            if isinstance(call, dict)
+                            and str(call.get("id") or "") == shared
+                        ]
+                        keep_nth[shared] = next(
+                            nth
+                            for nth, call in enumerate(same_id)
+                            if id(call) in kept_calls
+                        )
                     if not kept and not msg.get("content"):
                         # Nothing survives this turn: no name to run, no text.
                         continue

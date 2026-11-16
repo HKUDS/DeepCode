@@ -532,3 +532,78 @@ def test_a_note_no_sink_recorded_still_comes_back_marked() -> None:
     stored = new_records_from_history(history, stored=())
     rebuilt = visible_kernel_history(stored)
     assert [entry.get(CONTEXT_NOTE_KEY) for entry in rebuilt] == [None, "repeat_guard"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_name", ["", None])
+async def test_a_mixed_reply_runs_the_named_call_and_pairs_its_events(bad_name) -> None:
+    """Tool events pair calls with results; a dropped call must not shift them."""
+    from core.agent_runtime.tools.base import Tool, tool_parameters
+    from core.events import ToolCompleted, ToolStarted
+
+    @tool_parameters({"type": "object", "properties": {"text": {"type": "string"}}})
+    class EchoTool(Tool):
+        @property
+        def name(self) -> str:
+            return "echo"
+
+        @property
+        def description(self) -> str:
+            return "Echo text."
+
+        async def execute(self, **kwargs: Any) -> Any:
+            return f"echo: {kwargs.get('text', '')}"
+
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+    provider = _NamelessCallProvider(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(id="bad", name=bad_name, arguments={}),
+                    ToolCallRequest(id="good", name="echo", arguments={"text": "hi"}),
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content="done", finish_reason="stop"),
+        ]
+    )
+    session = AgentSession(provider, registry, model="fake-model")
+    await session.submit(UserInput(text="go"))
+    events = session.drain_events()
+    started = [e.msg.call_id for e in events if isinstance(e.msg, ToolStarted)]
+    completed = [
+        (e.msg.call_id, e.msg.result_preview)
+        for e in events
+        if isinstance(e.msg, ToolCompleted)
+    ]
+    assert started == ["good"]
+    assert completed == [("good", "echo: hi")]
+    assert [event.msg.type for event in events][-1] == "task_complete"
+
+
+def test_a_shared_id_keeps_the_result_of_the_kept_call() -> None:
+    """When the nameless half comes first, its error is not the one kept."""
+    from core.agent_runtime.runner import AgentRunner
+
+    def call(name: str) -> dict[str, Any]:
+        return {
+            "id": "X",
+            "type": "function",
+            "function": {"name": name, "arguments": "{}"},
+        }
+
+    view = AgentRunner._drop_nameless_tool_calls(
+        [
+            {"role": "user", "content": "list"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [call(""), call("bash")],
+            },
+            {"role": "tool", "tool_call_id": "X", "content": "Error: unknown tool"},
+            {"role": "tool", "tool_call_id": "X", "content": "a.txt"},
+        ]
+    )
+    assert [m.get("content") for m in view if m["role"] == "tool"] == ["a.txt"]
