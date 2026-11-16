@@ -109,8 +109,29 @@ class FileProcessor:
         sections = []
         current_section = None
         current_content = []
+        fence = None
 
         for line in lines:
+            fence_match = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+            if fence is not None:
+                if (
+                    fence_match
+                    and fence_match.group(1)[0] == fence[0]
+                    and len(fence_match.group(1)) >= len(fence)
+                    and not fence_match.group(2).strip(" \t\r")
+                ):
+                    fence = None
+                if current_section is not None:
+                    current_content.append(line)
+                continue
+            if fence_match and not (
+                fence_match.group(1)[0] == "`" and "`" in fence_match.group(2)
+            ):
+                fence = fence_match.group(1)
+                if current_section is not None:
+                    current_content.append(line)
+                continue
+
             # Check if line is a header
             header_match = re.match(r"^(#{1,6})\s+(.+)$", line)
 
