@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -574,6 +576,41 @@ def test_copy_through_symlink_asks_and_names_the_target(tmp_path):
     assert decision is PermissionDecision.ASK, reason
     assert bait.name in reason
     assert os.path.basename(str(victim)) in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo x >{bait}",
+        "echo x>{bait}",
+        "echo x >>{bait}",
+        "cat <{bait}",
+        "cat<{bait}",
+        "make 2>{bait}",
+        "echo x | tee {bait}; ls",
+        "docker compose --env-file={bait} up",
+    ],
+)
+def test_a_redirect_or_option_value_through_a_symlink_is_named(tmp_path, command):
+    """A redirection target or an ``--opt=value`` operand is an operand too."""
+    import os
+
+    victim, bait = _symlink_fixture(tmp_path)
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd=str(tmp_path))
+    decision, reason = engine.evaluate(
+        "bash", {"command": command.format(bait=bait.name)}
+    )
+    assert decision is PermissionDecision.ASK, reason
+    assert os.path.basename(str(victim)) in reason
+
+
+def test_shell_operators_alone_are_not_operands(tmp_path):
+    """``2>&1`` and friends split into words that name no file."""
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd=str(tmp_path))
+    decision, reason = engine.evaluate(
+        "bash", {"command": "make 2>&1 | tee build.log && echo ok; (cd src)"}
+    )
+    assert decision is PermissionDecision.ALLOW, reason
 
 
 def test_a_symlink_alias_asks_even_when_an_allow_rule_matches(tmp_path):

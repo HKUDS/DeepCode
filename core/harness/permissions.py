@@ -334,6 +334,24 @@ def _is_shell_tool(tool_name: str) -> bool:
     )
 
 
+_SHELL_OPERATOR_CHARS = frozenset("();<>|&")
+
+
+def _shell_words(command: str) -> list[str]:
+    """Split a command into words, with shell operators as words of their own.
+
+    ``echo x >out`` and ``echo x>out`` both yield ``[..., ">", "out"]``, so a
+    redirection target is a word like any other operand. Unbalanced quotes
+    fall back to whitespace splitting.
+    """
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        return list(lexer)
+    except ValueError:
+        return command.split()
+
+
 def _shell_symlink_alias(
     command: str, cwd: str | None = None
 ) -> tuple[str, str] | None:
@@ -356,14 +374,20 @@ def _shell_symlink_alias(
     the sandbox, which keeps shell commands away from the home credential
     stores. A link whose own name is already sensitive is also left to the
     ordinary path check, so this helper never weakens it.
+
+    Redirections count as operands: ``echo x >video.mp4`` and ``cat
+    <video.mp4`` touch the link as surely as ``cp video.mp4 out/``, so shell
+    operators are split off their words. An option's ``=value``
+    (``--env-file=video.mp4``) is checked too.
     """
-    try:
-        tokens = shlex.split(command, posix=True)
-    except ValueError:  # unbalanced quotes -> fall back to whitespace splitting
-        tokens = command.split()
-    for index, token in enumerate(tokens):
-        if not token or token.startswith("-"):
+    for index, token in enumerate(_shell_words(command)):
+        if not token or set(token) <= _SHELL_OPERATOR_CHARS:
             continue
+        if token.startswith("-"):
+            # ``--env-file=video.mp4``: the value is an operand, the flag is not.
+            token = token.partition("=")[2]
+            if not token:
+                continue
         # Strip shell punctuation that wraps a path (``a.mp4;``, ``(x)``).
         cleaned = token.strip("'\"").rstrip(";,&|)")
         if not cleaned:
