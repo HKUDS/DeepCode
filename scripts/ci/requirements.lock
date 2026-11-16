@@ -282,7 +282,7 @@ pyjwt==2.15.1
     # via
     #   -c scripts/ci/../../desktop/sidecar-requirements.lock
     #   mcp
-pypdf==6.21.2
+pypdf==6.21.4
     # via
     #   -c scripts/ci/../../desktop/sidecar-requirements.lock
     #   deepcode-hku
