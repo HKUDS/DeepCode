@@ -243,6 +243,125 @@ def test_recompaction_keeps_carrying_the_user_wording():
     assert _earlier_user_messages([checkpoint]) == [ask]
 
 
+def test_earlier_user_messages_skip_what_the_runtime_wrote():
+    """Runner notes and Goal prompts ride user-role messages; nobody said them."""
+    from core.agent_runtime.compaction import _earlier_user_messages
+
+    non_system = [
+        {"role": "user", "content": "REAL: keep the public API unchanged"},
+        {"role": "assistant", "content": "a1"},
+        {
+            "role": "user",
+            "content": "Continue working toward the Goal.",
+            "context_note": "goal_continuation",
+        },
+        {
+            "role": "user",
+            "content": "You called bash with the same arguments 3 times.",
+            "context_note": "repeat_guard",
+        },
+        {
+            "role": "user",
+            "content": "[PreCompact checkpoint]\nhook context",
+            "context_note": "precompact_checkpoint",
+        },
+        # A Steer is the user's own words, typed mid-Turn: it is not marked.
+        {"role": "user", "content": "STEER: also add --strict"},
+    ]
+    assert _earlier_user_messages(non_system) == [
+        "STEER: also add --strict",
+        "REAL: keep the public API unchanged",
+    ]
+
+
+def _tool_round(index: int, size: int = 6_000) -> list[dict[str, Any]]:
+    call = {
+        "id": f"c{index}",
+        "type": "function",
+        "function": {"name": "bash", "arguments": "{}"},
+    }
+    return [
+        {"role": "assistant", "content": "", "tool_calls": [call]},
+        {
+            "role": "tool",
+            "tool_call_id": f"c{index}",
+            "name": "bash",
+            "content": "x" * size,
+        },
+    ]
+
+
+def test_checkpoint_does_not_requote_the_retained_tail():
+    """The tail keeps its user message verbatim; the budget goes to older words.
+
+    The newest user message always survives in the tail. Letting it into the
+    budget first crowded the older request out, and when it was longer than
+    the budget a truncated copy of it was quoted on top of the full one.
+    """
+    from core.agent_runtime.compaction import TailRetainingCompactionStrategy
+
+    ask = "REAL-REQUEST: build the parser, keep the public API unchanged."
+    latest = "LATEST " + "y" * (_EARLIER_USER_CHARS + 1_000)
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": ask},
+    ]
+    for index in range(8):
+        messages += _tool_round(index)
+    messages += [
+        {"role": "user", "content": latest + "\n"},
+        {"role": "assistant", "content": "working on it"},
+    ]
+    out = TailRetainingCompactionStrategy().build_history(
+        messages, "THE SUMMARY", context_window_tokens=65_536
+    )
+    content = out[1]["content"]
+    assert ask in content
+    assert "LATEST" not in content
+    assert out[-2]["content"] == latest + "\n"
+
+
+def test_runner_notes_are_marked_and_a_steer_is_not():
+    """What the runner writes into the history says so; a Steer is the user's."""
+    from types import SimpleNamespace
+
+    from core.agent_runtime.helpers import CONTEXT_NOTE_KEY
+
+    spec = SimpleNamespace(history_sink=None, context_note_sink=None)
+    messages: list[dict[str, Any]] = []
+    reminder = {"role": "user", "content": "you repeated yourself"}
+    AgentRunner._enter_noted(spec, messages, reminder, "repeat_guard")
+    AgentRunner._enter_noted(
+        spec,
+        messages,
+        {"role": "user", "content": "my words"},
+        "steer",
+        message_id="m1",
+    )
+    assert messages[0][CONTEXT_NOTE_KEY] == "repeat_guard"
+    assert CONTEXT_NOTE_KEY not in reminder  # the caller's dict is left alone
+    assert CONTEXT_NOTE_KEY not in messages[1]
+
+
+def test_a_goal_prompt_turn_is_marked_in_the_live_history():
+    """A Turn whose prompt the runtime wrote carries the mark into history."""
+
+    async def scenario() -> None:
+        session = AgentSession(
+            _TurnOrSummaryProvider(), ToolRegistry(), model="fake-model"
+        )
+        await session.submit(UserInput(text="REAL ask"))
+        session.drain_events()
+        await session.submit(
+            UserInput(text="Continue the Goal.", context_note="goal_continuation")
+        )
+        session.drain_events()
+        users = [m for m in session.history if m.get("role") == "user"]
+        assert [m.get("context_note") for m in users] == [None, "goal_continuation"]
+
+    asyncio.run(scenario())
+
+
 class _TurnOrSummaryProvider:
     """Real turns answer 'ok'; the summarization request gets a handoff."""
 

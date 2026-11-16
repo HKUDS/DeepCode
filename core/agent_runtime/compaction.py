@@ -11,10 +11,12 @@ from __future__ import annotations
 import json
 from typing import Any, Mapping, Protocol
 
-from core.agent_runtime.helpers import find_legal_message_start
+from core.agent_runtime.helpers import (
+    find_legal_message_start,
+    is_context_note_message,
+)
 
 COMPACT_TRIGGER_FRACTION = 0.9
-COMPACT_KEEP_USER_CHARS = 60_000
 # The estimator's own char/token ratio, reused so the window share and
 # the conversation share are measured in the same unit.
 _CHARS_PER_TOKEN = 4
@@ -121,10 +123,13 @@ def _earlier_user_messages(
     at the current work; a permanent "original task" label would pull the model
     back to old work instead.
 
-    Skipped: the environment slot, compaction checkpoints, and empty content.
-    Runtime notes carry no marker by the time this runs (the kernel history
-    projection drops user-role metadata), so they can only be excluded here by
-    their shape, not by :func:`core.sessions.transcript.is_context_note`.
+    Skipped: the environment slot, compaction checkpoints, empty content, and
+    every user-role message the runtime wrote rather than the user — runner
+    notes and Goal continuation prompts, marked ``context_note`` both in the
+    live history and when a session is rebuilt from disk.
+
+    ``non_system`` is the part of the history the checkpoint replaces: the
+    retained tail already carries its own user messages word for word.
     """
     picked: list[str] = []
     used = 0
@@ -147,7 +152,7 @@ def _earlier_user_messages(
     for item in reversed(non_system):
         if item.get("role") != "user":
             continue
-        if item.get("env_context"):
+        if item.get("env_context") or is_context_note_message(item):
             continue
         if item.get("compaction"):
             # A checkpoint from an earlier round already carries the wording it
@@ -236,11 +241,9 @@ class TailRetainingCompactionStrategy:
         # Carry the user's own earlier wording across the checkpoint. The
         # summary is lossy by design, and the one thing it should not be allowed
         # to paraphrase away is what the user actually asked for. Newest first
-        # and bounded: see :func:`_earlier_user_messages`. Nothing is added when
-        # the kept tail already carries these messages verbatim.
+        # and bounded: see :func:`_earlier_user_messages`.
         checkpoint_content = f"{SUMMARY_PREFIX}\n{summary}"
-        # Carry the user's own earlier wording across the checkpoint, but only
-        # within the space the summary actually freed, and only after reserving
+        # Only within the space the summary actually freed, and only after reserving
         # room for the runner's PreCompact checkpoint re-injection -- that one is
         # bounded by the same reduction, so eating it all would truncate the
         # hook's context to nothing. A history that does not shrink enough
@@ -252,12 +255,17 @@ class TailRetainingCompactionStrategy:
             + sum(message_chars(item) for item in kept)
         )
         headroom = before - base_after - len(_EARLIER_USER_MARK) - _PRECOMPACT_RESERVE
+        # Only the replaced range is read: the tail keeps its own user messages
+        # verbatim, and letting them into the budget first would crowd out the
+        # older words this block exists for (or quote a truncated copy of a
+        # message the tail already holds in full).
+        replaced = non_system[: len(non_system) - len(kept)]
         earlier = (
-            _earlier_user_messages(non_system, budget=min(EARLIER_USER_CHARS, headroom))
+            _earlier_user_messages(replaced, budget=min(EARLIER_USER_CHARS, headroom))
             if headroom > 0
             else []
         )
-        kept_texts = {str(item.get("content") or "") for item in kept}
+        kept_texts = {str(item.get("content") or "").strip() for item in kept}
         earlier = [text for text in earlier if text not in kept_texts]
         if earlier:
             quoted = "\n\n".join(earlier)

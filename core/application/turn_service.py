@@ -90,6 +90,7 @@ from core.domain.message_provenance import (
     ClientSurface,
     TurnInputDelivery,
     TurnInputSource,
+    goal_prompt,
 )
 from core.domain.project import TrustState
 from core.domain.runtime_coordination import ExecutionClass, ResourceClaim
@@ -1502,6 +1503,13 @@ class TurnService:
                     text=turn.prompt,
                     skills=tuple(
                         SkillSelection(skill_id=skill_id) for skill_id in turn.skill_ids
+                    ),
+                    # The Goal runtime wrote this prompt; clients already
+                    # decline to show it as the user's words (goal_prompt).
+                    context_note=(
+                        TurnInputSource.GOAL_CONTINUATION.value
+                        if goal_prompt(initial_input_metadata) is not None
+                        else None
                     ),
                 )
             ):

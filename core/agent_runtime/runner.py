@@ -33,6 +33,7 @@ from core.agent_runtime.compaction import (
     message_chars,
 )
 from core.agent_runtime.helpers import (
+    CONTEXT_NOTE_KEY,
     build_assistant_message,
     history_signature,
     estimate_message_tokens,
@@ -495,6 +496,10 @@ class AgentRunner:
             except Exception:
                 # Persistence trouble must not abort the run it documents.
                 logger.exception("context_note_sink failed (source={})", source)
+        if source != "steer":
+            # A Steer is the user's own words; everything else here the runner
+            # wrote, and the history says so (see ``CONTEXT_NOTE_KEY``).
+            message = {**message, CONTEXT_NOTE_KEY: source}
         messages.append(message)
 
     async def _drain_injections(

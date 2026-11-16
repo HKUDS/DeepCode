@@ -31,6 +31,7 @@ from loguru import logger
 
 from core.agent_runtime.compaction import message_chars
 from core.agent_runtime.context import EnvironmentContext
+from core.agent_runtime.helpers import user_message
 from core.agent_runtime.hook import AgentHook, AgentHookContext
 from core.agent_runtime.microcompact import MicrocompactPolicy
 from core.agent_runtime.runner import AgentRunner, AgentRunSpec
@@ -935,7 +936,9 @@ class AgentSession:
                 skill_context.on_warning = lambda message: self._emit(
                     ErrorEvent(message=message, warning=True)
                 )
-            terminal = await self._execute_turn(text, skill_context)
+            terminal = await self._execute_turn(
+                text, skill_context, context_note=user_input.context_note
+            )
         except asyncio.CancelledError:
             terminal = TaskComplete(final_text=None, stop_reason="interrupted")
         finally:
@@ -962,6 +965,8 @@ class AgentSession:
         self,
         text: str,
         skill_context: SkillTurnContext | None,
+        *,
+        context_note: str | None = None,
     ) -> TaskComplete:
         # External-command hooks (C3): SessionStart (once) + UserPromptSubmit
         # (every prompt). UserPromptSubmit may block the turn outright or inject
@@ -978,14 +983,14 @@ class AgentSession:
                 )
             if blocked is not None:
                 self._sync_environment_context()
-                self._history.append({"role": "user", "content": text})
+                self._history.append(user_message(text, context_note=context_note))
                 return TaskComplete(
                     final_text=blocked,
                     stop_reason="blocked_by_hook",
                 )
 
         self._sync_environment_context()
-        self._history.append({"role": "user", "content": text})
+        self._history.append(user_message(text, context_note=context_note))
 
         initial: list[dict[str, Any]] = []
         if self._system_prompt:
