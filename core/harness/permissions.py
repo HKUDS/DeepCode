@@ -178,21 +178,26 @@ class PermissionRule:
         )
 
 
+# A ``file:`` URL holds no raw whitespace (a space is written ``%20``), which
+# tells it apart from text that merely starts with "file:".
+_FILE_URL = re.compile(r"file:\S*", re.IGNORECASE)
+
+
 def _strip_file_scheme(raw: str) -> str:
     """Return the filesystem path a ``file:`` URL denotes; other strings pass through.
 
-    L3 path-boundary review (2026-10-30): the protected-path check matched on
-    plain paths only, so a tool argument carrying a ``file:`` URL
-    (``url="file:///home/u/.ssh/id_rsa"`` — the shape browser/fetch-style MCP
-    tools accept) resolved as a cwd-relative literal and missed every
-    credential pattern. Decoding mirrors what the consuming tool does before
-    it opens the file, so ``%69d_rsa`` cannot smuggle ``id_rsa`` past the
-    probe either. A non-local netloc stays a UNC-style ``//host/path``.
+    A tool argument carrying a ``file:`` URL (``url="file:///home/u/.ssh/id_rsa"``,
+    the shape browser- and fetch-style MCP tools accept) would otherwise
+    resolve as a cwd-relative literal and miss every credential pattern.
+    Decoding mirrors what the consuming tool does before it opens the file, so
+    ``%69d_rsa`` cannot smuggle ``id_rsa`` past the probe either. A non-local
+    netloc stays a UNC-style ``//host/path``.
     """
-    if not raw.lower().startswith("file:"):
+    url = raw.strip()
+    if _FILE_URL.fullmatch(url) is None:
         return raw
     try:
-        parts = urlparse(raw)
+        parts = urlparse(url)
     except ValueError:
         return raw
     path = unquote(parts.path or "")
@@ -302,10 +307,8 @@ def _path_values(arguments: Mapping[str, object]):
     """Strings under path-like keys in ``arguments``, nested ones included.
 
     A ``file:`` URL names a filesystem path by construction, so it counts
-    under *any* key (``url``, ``uri``, ``href`` …) — key-name matching alone
-    let ``url="file:///…/.ssh/id_rsa"`` sail past the boundary (2026-10-30
-    L3 review). Only the URL's own shape triggers that, never plain text that
-    merely mentions a path.
+    under *any* key (``url``, ``uri``, ``href`` …). Only a value that is a
+    whole URL counts, never text that mentions or starts with one.
     """
     for name, value in arguments.items():
         name = str(name)
@@ -316,9 +319,7 @@ def _path_values(arguments: Mapping[str, object]):
             elif (
                 isinstance(item, str)
                 and item.strip()
-                and (
-                    _PATH_KEY.search(name) or item.lstrip().lower().startswith("file:")
-                )
+                and (_PATH_KEY.search(name) or _FILE_URL.fullmatch(item.strip()))
             ):
                 yield item
 

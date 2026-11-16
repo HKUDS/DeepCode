@@ -275,7 +275,7 @@ def test_denylist_ignores_case():
     assert _decide(engine, "read", file_path="/home/u/proj/Server.PEM") is DENY
 
 
-# ---- file: URL arguments (2026-10-30 L3 path-boundary review) ---------------
+# ---- file: URL arguments -----------------------------------------------------
 
 
 def test_file_url_under_non_path_key_is_denied():
@@ -328,6 +328,20 @@ def test_text_mentioning_a_file_url_is_not_a_path():
             "write",
             file_path="notes.md",
             content="see file:///home/u/.ssh/id_rsa for details",
+        )
+        is ALLOW
+    )
+
+
+def test_text_starting_with_a_file_url_is_not_a_path():
+    # Content whose first word is a file: URL is still text, not a path.
+    engine = PermissionEngine(mode=PermissionMode.FULL_AUTO, cwd="/home/u/proj")
+    assert (
+        _decide(
+            engine,
+            "write",
+            file_path="links.md",
+            content="file:///etc/hosts is the hosts file; keys live in ~/.ssh/",
         )
         is ALLOW
     )
