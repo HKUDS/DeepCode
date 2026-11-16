@@ -111,7 +111,7 @@ def convert_user_message(content: Any) -> dict[str, Any]:
                         {
                             "type": "input_image",
                             "image_url": url,
-                            "detail": image.get("detail", "auto"),
+                            "detail": image.get("detail") or "auto",
                         }
                     )
         if converted:

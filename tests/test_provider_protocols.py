@@ -132,6 +132,13 @@ async def test_responses_preserves_image_detail(monkeypatch):
                         "type": "image_url",
                         "image_url": {"url": "https://example.org/default.png"},
                     },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "https://example.org/unset.png",
+                            "detail": None,
+                        },
+                    },
                 ],
             }
         ]
@@ -153,6 +160,11 @@ async def test_responses_preserves_image_detail(monkeypatch):
                 {
                     "type": "input_image",
                     "image_url": "https://example.org/default.png",
+                    "detail": "auto",
+                },
+                {
+                    "type": "input_image",
+                    "image_url": "https://example.org/unset.png",
                     "detail": "auto",
                 },
             ]
