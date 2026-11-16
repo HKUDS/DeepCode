@@ -63,10 +63,15 @@ _EARLIER_USER_MARK = f"\n\n{EARLIER_USER_LABEL}\n"
 # that compaction still shrinks the history — the convergence rule refuses a
 # "compaction" that does not.
 EARLIER_USER_CHARS = 4_000
-# Room left for the runner's PreCompact checkpoint re-injection, which is bounded
-# by the same reduction this block draws on. Without a reserve this block would
-# consume it and the hook's context would be truncated to nothing.
-_PRECOMPACT_RESERVE = 1_000
+# Below this much room a quote is a fragment that can say the opposite of the
+# whole ("Delete the old files" without "only after I confirm"): carry none.
+_EARLIER_USER_MIN_CHARS = 400
+# Ends a message shortened to fit, so a cut quote never reads as complete.
+_CUT_MARK = " [… rest cut]"
+_QUOTE_SEPARATOR = "\n\n"
+# Where a checkpoint keeps the quotes it carried, word for word, so the next
+# compaction re-reads them from data rather than from the checkpoint's text.
+USER_WORDS_KEY = "user_words"
 
 
 class CompactionStrategy(Protocol):
@@ -123,58 +128,64 @@ def _earlier_user_messages(
     at the current work; a permanent "original task" label would pull the model
     back to old work instead.
 
-    Skipped: the environment slot, compaction checkpoints, empty content, and
-    every user-role message the runtime wrote rather than the user — runner
-    notes and Goal continuation prompts, marked ``context_note`` both in the
-    live history and when a session is rebuilt from disk.
+    Skipped: the environment slot, empty content, and every user-role message
+    the runtime wrote rather than the user — runner notes and Goal continuation
+    prompts, marked ``context_note`` both in the live history and when a
+    session is rebuilt from disk. A checkpoint from an earlier round
+    contributes the quotes it carried (``USER_WORDS_KEY``), word for word.
 
     ``non_system`` is the part of the history the checkpoint replaces: the
     retained tail already carries its own user messages word for word.
+
+    The budget counts the separators between quotes. When the newest quote
+    does not fit, it is shortened and marked as cut; one that is not the
+    newest is left out whole rather than cut, and so is everything older.
+    With less than ``_EARLIER_USER_MIN_CHARS`` of room nothing is carried.
     """
-    picked: list[str] = []
-    used = 0
-    carried: list[str] = []
-
-    def add(text: str) -> bool:
-        """Take ``text`` if it fits; take a truncated head when nothing has yet."""
-        nonlocal used
-        if used + len(text) <= budget:
-            picked.append(text)
-            used += len(text)
-            return True
-        if not picked and not carried:
-            # The newest message alone exceeds the budget. Carrying nothing
-            # would drop the user's current words entirely, so take the head.
-            picked.append(text[:budget])
-            used = budget
-        return False
-
+    if budget < _EARLIER_USER_MIN_CHARS:
+        return []
+    candidates: list[str] = []
     for item in reversed(non_system):
         if item.get("role") != "user":
             continue
         if item.get("env_context") or is_context_note_message(item):
             continue
-        if item.get("compaction"):
-            # A checkpoint from an earlier round already carries the wording it
-            # kept; re-read it so a second compaction does not lose it.
-            block = str(item.get("content") or "")
-            at = block.rfind(_EARLIER_USER_MARK)
-            if at >= 0:
-                carried.extend(
-                    text.strip()
-                    for text in block[at + len(_EARLIER_USER_MARK) :].split("\n\n")
-                    if text.strip()
+        marker = item.get("compaction")
+        if marker:
+            carried = marker.get(USER_WORDS_KEY) if isinstance(marker, dict) else None
+            if isinstance(carried, list):
+                candidates.extend(
+                    text for text in carried if isinstance(text, str) and text.strip()
                 )
             continue
-        text = str(item.get("content") or "").strip()
-        if not text:
+        text = str(item.get("content") or "").strip("\r\n")
+        if text.strip():
+            candidates.append(text)
+
+    picked: list[str] = []
+    used = 0
+    for text in candidates:
+        if text in picked:
             continue
-        if not add(text) or used >= budget:
-            break
-    for text in carried:
-        if not add(text):
-            break
+        separator = len(_QUOTE_SEPARATOR) if picked else 0
+        room = budget - used - separator
+        if len(text) <= room:
+            picked.append(text)
+            used += separator + len(text)
+            continue
+        if not picked:
+            picked.append(_cut_to(text, room))
+        break
     return picked
+
+
+def _cut_to(text: str, room: int) -> str:
+    """``text`` shortened to ``room`` chars at a word boundary, marked as cut."""
+    head = text[: max(room - len(_CUT_MARK), 0)]
+    space = head.rfind(" ")
+    if space >= len(head) // 2:
+        head = head[:space]
+    return head.rstrip() + _CUT_MARK
 
 
 class TailRetainingCompactionStrategy:
@@ -213,8 +224,16 @@ class TailRetainingCompactionStrategy:
         summary: str,
         *,
         context_window_tokens: int | None = None,
+        reserve_chars: int = 0,
         **_: Any,
     ) -> list[dict[str, Any]]:
+        """``reserve_chars`` is room the caller needs from the reduction afterwards.
+
+        The runner re-injects a PreCompact hook's context after the checkpoint,
+        bounded by how much the compaction shrank the history: the quoted block
+        must leave it that room, so context the user configured to survive a
+        compaction is never squeezed out by quotes.
+        """
         system = [dict(item) for item in messages if item.get("role") == "system"]
         non_system = [dict(item) for item in messages if item.get("role") != "system"]
         budget = self._budget(non_system, context_window_tokens)
@@ -243,37 +262,37 @@ class TailRetainingCompactionStrategy:
         # to paraphrase away is what the user actually asked for. Newest first
         # and bounded: see :func:`_earlier_user_messages`.
         checkpoint_content = f"{SUMMARY_PREFIX}\n{summary}"
-        # Only within the space the summary actually freed, and only after reserving
-        # room for the runner's PreCompact checkpoint re-injection -- that one is
-        # bounded by the same reduction, so eating it all would truncate the
-        # hook's context to nothing. A history that does not shrink enough
-        # carries nothing, which is what main does.
+        # Only within the space the summary actually freed, less the room the
+        # caller reserves (``reserve_chars``) and the one character by which the
+        # runner's convergence rule needs the history to shrink. A history that
+        # does not shrink enough carries nothing, which is what main does.
         before = sum(message_chars(item) for item in messages)
         base_after = (
             sum(message_chars(item) for item in system)
             + len(checkpoint_content)
             + sum(message_chars(item) for item in kept)
         )
-        headroom = before - base_after - len(_EARLIER_USER_MARK) - _PRECOMPACT_RESERVE
+        headroom = (
+            before - base_after - len(_EARLIER_USER_MARK) - max(reserve_chars, 0) - 1
+        )
         # Only the replaced range is read: the tail keeps its own user messages
         # verbatim, and letting them into the budget first would crowd out the
         # older words this block exists for (or quote a truncated copy of a
         # message the tail already holds in full).
         replaced = non_system[: len(non_system) - len(kept)]
-        earlier = (
-            _earlier_user_messages(replaced, budget=min(EARLIER_USER_CHARS, headroom))
-            if headroom > 0
-            else []
+        earlier = _earlier_user_messages(
+            replaced, budget=min(EARLIER_USER_CHARS, headroom)
         )
         kept_texts = {str(item.get("content") or "").strip() for item in kept}
-        earlier = [text for text in earlier if text not in kept_texts]
+        earlier = [text for text in earlier if text.strip() not in kept_texts]
+        marker: dict[str, Any] = {"reset": True, "retain": len(kept)}
         if earlier:
-            quoted = "\n\n".join(earlier)
-            checkpoint_content += _EARLIER_USER_MARK + quoted
+            checkpoint_content += _EARLIER_USER_MARK + _QUOTE_SEPARATOR.join(earlier)
+            marker[USER_WORDS_KEY] = earlier
         checkpoint = {
             "role": "user",
             "content": checkpoint_content,
-            "compaction": {"reset": True, "retain": len(kept)},
+            "compaction": marker,
         }
         return system + [checkpoint] + kept
 

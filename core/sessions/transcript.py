@@ -18,6 +18,8 @@ from core.sessions.continuation import session_message_history_entry
 from core.sessions.models import SessionMessage
 
 COMPACTION_META = "compaction"
+# A user-role record the runtime wrote, when no note sink recorded it as one.
+CONTEXT_NOTE_META = "contextNote"
 TOOL_CALLS_META = "toolCalls"
 TOOL_CALL_ID_META = "toolCallId"
 TOOL_NAME_META = "name"
@@ -58,6 +60,10 @@ def kernel_message_to_record(message: Mapping[str, Any]) -> SessionMessage | Non
         summary = message.get("reasoning_summary")
         if isinstance(summary, str) and summary.strip():
             metadata["reasoningSummary"] = summary.strip()
+    if role == "user":
+        note = message.get(CONTEXT_NOTE_KEY)
+        if isinstance(note, str) and note:
+            metadata[CONTEXT_NOTE_META] = note
     if role == "tool":
         call_id = message.get("tool_call_id")
         if call_id:
@@ -168,6 +174,9 @@ def session_message_to_kernel(message: SessionMessage) -> dict[str, Any] | None:
 def _context_note_source(message: SessionMessage) -> str | None:
     """Who wrote a user-role record, when it was not the user."""
     metadata = message.metadata or {}
+    note = metadata.get(CONTEXT_NOTE_META)
+    if isinstance(note, str) and note:
+        return note
     if is_context_note(message):
         return str(metadata.get("source") or "note")
     if goal_prompt(metadata) is not None:
@@ -240,7 +249,9 @@ def new_records_from_history(
             retain = _retained_window(items[index + 1 :], unmatched, [*records, *added])
             record.metadata = {
                 **(record.metadata or {}),
-                COMPACTION_META: {"reset": True, "retain": retain},
+                # Keep what the strategy recorded (the quotes it carried);
+                # only the retained window is the file's to decide.
+                COMPACTION_META: {**marker, "reset": True, "retain": retain},
             }
         added.append(record)
     return added

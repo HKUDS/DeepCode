@@ -501,3 +501,34 @@ def test_the_request_view_drops_only_the_results_of_dropped_calls() -> None:
     view = AgentRunner._drop_nameless_tool_calls(split)
     assert [m["role"] for m in view] == ["user", "assistant", "tool"]
     assert view[1]["tool_calls"] == [call("call_X", "bash")]
+
+
+def test_carried_user_words_survive_save_and_resume() -> None:
+    """The quotes a checkpoint carried are saved with it and come back."""
+    history = [
+        {
+            "role": "user",
+            "content": "SUMMARY",
+            "compaction": {"reset": True, "retain": 1, "user_words": ["keep the API"]},
+        },
+        {"role": "user", "content": "latest"},
+    ]
+    stored = new_records_from_history(history, stored=())
+    rebuilt = visible_kernel_history(stored)
+    assert rebuilt[0]["compaction"]["user_words"] == ["keep the API"]
+
+
+def test_a_note_no_sink_recorded_still_comes_back_marked() -> None:
+    from core.agent_runtime.helpers import CONTEXT_NOTE_KEY
+
+    history = [
+        {"role": "user", "content": "go"},
+        {
+            "role": "user",
+            "content": "you repeated yourself",
+            CONTEXT_NOTE_KEY: "repeat_guard",
+        },
+    ]
+    stored = new_records_from_history(history, stored=())
+    rebuilt = visible_kernel_history(stored)
+    assert [entry.get(CONTEXT_NOTE_KEY) for entry in rebuilt] == [None, "repeat_guard"]

@@ -2242,6 +2242,9 @@ class AgentRunner:
             messages,
             summary,
             context_window_tokens=spec.context_window_tokens,
+            # The PreCompact hook's context is re-injected below, inside the
+            # reduction; what the strategy adds must leave it that room.
+            reserve_chars=len(_build_precompact_checkpoint(pre_contexts) or ""),
         )
         # dsh's convergence rule, applied to the AUTO path too: a summary that
         # does not shrink its source by volume is growth wearing a summary's

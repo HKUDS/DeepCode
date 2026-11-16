@@ -187,9 +187,9 @@ def test_earlier_user_messages_stop_at_the_budget():
     """A budget keeps the newest wording and refuses to grow with history."""
     from core.agent_runtime.compaction import _earlier_user_messages
 
-    non_system = [{"role": "user", "content": f"m{i} " + "x" * 40} for i in range(6)]
-    picked = _earlier_user_messages(non_system, budget=100)
-    assert len(picked) == 2, picked  # 45 chars each, 100 budget
+    non_system = [{"role": "user", "content": f"m{i} " + "x" * 187} for i in range(6)]
+    picked = _earlier_user_messages(non_system, budget=400)
+    assert len(picked) == 2, picked  # 190 chars each + a 2-char separator
     assert picked[0].startswith("m5")  # newest first
     assert picked[1].startswith("m4")
 
@@ -211,7 +211,7 @@ def test_checkpoint_carries_the_users_earlier_wording():
     )
     # Not called "the original task": that label pulls the model back to old work.
     assert "ORIGINAL TASK" not in out[1]["content"]
-    assert out[1]["compaction"] == {"reset": True, "retain": 2}
+    assert out[1]["compaction"] == {"reset": True, "retain": 2, "user_words": [ask]}
 
 
 def test_checkpoint_never_carries_more_than_the_earlier_user_budget():
@@ -238,9 +238,92 @@ def test_recompaction_keeps_carrying_the_user_wording():
     checkpoint = {
         "role": "user",
         "content": (f"{_SUMMARY_PREFIX}\nSUMMARY 1\n\n{_EARLIER_USER_LABEL}\n{ask}"),
-        "compaction": {"reset": True, "retain": 0},
+        "compaction": {"reset": True, "retain": 0, "user_words": [ask]},
     }
     assert _earlier_user_messages([checkpoint]) == [ask]
+
+
+def test_recompaction_carries_the_words_verbatim_from_data():
+    """Indented code survives a second round: quotes are data, not parsed text.
+
+    And a summary that echoes the heading is never read back as the user's.
+    """
+    from core.agent_runtime.compaction import _earlier_user_messages
+
+    code = "def f(x):\n    y = x + 1\n\n    return y"
+    checkpoint = {
+        "role": "user",
+        "content": (
+            f"{_SUMMARY_PREFIX}\n{_EARLIER_USER_LABEL}\nNext: the summarizer said this"
+        ),
+        "compaction": {"reset": True, "retain": 0, "user_words": [code]},
+    }
+    assert _earlier_user_messages([checkpoint]) == [code]
+    echoed = {**checkpoint, "compaction": {"reset": True, "retain": 0}}
+    assert _earlier_user_messages([echoed]) == []
+
+
+def test_a_cut_quote_says_so_and_a_tight_budget_carries_nothing():
+    """A fragment can reverse a request; a shortened quote is marked as cut."""
+    from core.agent_runtime.compaction import _earlier_user_messages
+
+    ask = "Delete the old migration files only after I confirm the backup worked."
+    assert _earlier_user_messages([{"role": "user", "content": ask}], budget=40) == []
+    long_ask = "Refactor the parser. " * 100
+    picked = _earlier_user_messages([{"role": "user", "content": long_ask}], budget=600)
+    assert len(picked) == 1
+    assert picked[0].endswith("[… rest cut]")
+    assert len(picked[0]) <= 600
+
+
+def test_carried_words_are_shortened_rather_than_lost():
+    """With little room, the carried request is cut and marked, not dropped."""
+    from core.agent_runtime.compaction import _earlier_user_messages
+
+    request = "Port the importer to the streaming API. " * 80
+    checkpoint = {
+        "role": "user",
+        "content": f"{_SUMMARY_PREFIX}\nS",
+        "compaction": {"reset": True, "retain": 0, "user_words": [request]},
+    }
+    picked = _earlier_user_messages([checkpoint], budget=2_000)
+    assert len(picked) == 1 and picked[0].endswith("[… rest cut]")
+
+
+def test_separators_count_against_the_budget():
+    from core.agent_runtime.compaction import _earlier_user_messages
+
+    non_system = [{"role": "user", "content": f"m{i:03d}"} for i in range(600)]
+    picked = _earlier_user_messages(non_system, budget=1_000)
+    assert len("\n\n".join(picked)) <= 1_000
+
+
+def test_the_block_leaves_the_room_the_caller_reserves():
+    """The PreCompact hook's re-injected context is not squeezed out by quotes."""
+    from core.agent_runtime.compaction import (
+        TailRetainingCompactionStrategy,
+        message_chars,
+    )
+
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "keep the public API " * 200},
+    ]
+    for index in range(3):
+        messages += _tool_round(index, size=2_000)
+    messages += [
+        {"role": "user", "content": "latest"},
+        {"role": "assistant", "content": "ok"},
+    ]
+    strategy = TailRetainingCompactionStrategy()
+    before = sum(message_chars(m) for m in messages)
+    for reserve in (0, 3_000, 6_000):
+        out = strategy.build_history(
+            messages, "S", context_window_tokens=65_536, reserve_chars=reserve
+        )
+        after = sum(message_chars(m) for m in out)
+        assert "user_words" in out[1]["compaction"]
+        assert before - after - 1 >= reserve
 
 
 def test_earlier_user_messages_skip_what_the_runtime_wrote():
