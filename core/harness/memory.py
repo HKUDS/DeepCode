@@ -764,27 +764,31 @@ def _line_key(line: str) -> str:
     return text.rstrip(" .,;:!—-")
 
 
-def _candidate_key(line: str) -> str:
+_CandidateKey = str | tuple[str, str]
+
+
+def _candidate_key(line: str) -> _CandidateKey:
     """Dedupe key: pointer identity for pointers, normalized text otherwise."""
     pointer = parse_memory_pointer(line)
     if pointer is not None:
         # Same title + target with a different hook is one topic, not two.
-        return f"{pointer.title.casefold()}|{pointer.target.casefold()}"
+        return (pointer.title.casefold(), pointer.target.casefold())
     return _line_key(line)
 
 
-def _drop_subsumed(order: Sequence[str]) -> list[str]:
+def _drop_subsumed(order: Sequence[_CandidateKey]) -> list[_CandidateKey]:
     """Keys whose normalized form is a strict prefix of a longer entry.
 
     Safe by construction: a strict prefix is literally contained in the longer
     line, so folding the stub into it cannot lose content.
     """
-    dropped: set[str] = set()
+    dropped: set[_CandidateKey] = set()
     for key in order:
-        if len(key) < _MIN_USEFUL_CHARS:
+        # Prefix subsumption applies to prose, never to distinct topic links.
+        if not isinstance(key, str) or len(key) < _MIN_USEFUL_CHARS:
             continue
         for other in order:
-            if other == key or other in dropped:
+            if not isinstance(other, str) or other == key or other in dropped:
                 continue
             if len(other) > len(key) and other.startswith(key):
                 dropped.add(key)
@@ -801,8 +805,8 @@ def consolidate(lines: Sequence[str]) -> list[str]:
     order is first-seen, and first-seen is decided solely by the input
     sequence: no set or dict iteration decides anything.
     """
-    unique: dict[str, str] = {}
-    order: list[str] = []
+    unique: dict[_CandidateKey, str] = {}
+    order: list[_CandidateKey] = []
     for raw in lines:
         text = " ".join(str(raw).split())
         key = _candidate_key(text)

@@ -30,6 +30,7 @@ from core.harness.memory import (
     MemoryPointer,
     consolidate,
     consolidate_memory_index,
+    consolidate_pointer_index,
     fetch_memory_topic,
     is_pointer_index,
     memory_dir,
@@ -254,6 +255,45 @@ def test_consolidate_dedupes_and_merges_prefixes():
         "- [A](a.md) — a longer hook",
         "keep this fact and more",
     ]
+
+
+@pytest.mark.parametrize(
+    "lines",
+    [
+        [
+            "- [API reference](api.md) — current endpoint contract",
+            "- [API reference](api.md.v2.md) — next version contract",
+        ],
+        [
+            "- [A|B](c.md) — first topic",
+            "- [A](B|c.md) — separate topic",
+        ],
+    ],
+)
+@pytest.mark.parametrize("reverse", [False, True])
+def test_consolidate_keeps_distinct_pointer_identities(lines, reverse):
+    if reverse:
+        lines = list(reversed(lines))
+    assert consolidate(lines) == lines
+
+
+def test_pointer_index_rewrite_keeps_distinct_topics(tmp_path):
+    first = "- [API reference](api.md) — current endpoint contract"
+    second = "- [API reference](api.md.v2.md) — next version contract"
+    index = _write(tmp_path, "MEMORY.md", f"{first}\n{second}\n{first}\n")
+    _write(tmp_path, "api.md", "Current endpoint: /v1/search\n")
+    _write(tmp_path, "api.md.v2.md", "Next endpoint: /v2/search\n")
+
+    assert consolidate_pointer_index(tmp_path)
+
+    assert index.read_text(encoding="utf-8") == f"{first}\n{second}\n"
+    assert (
+        fetch_memory_topic(tmp_path, "api.md").text == "Current endpoint: /v1/search\n"
+    )
+    assert (
+        fetch_memory_topic(tmp_path, "api.md.v2.md").text
+        == "Next endpoint: /v2/search\n"
+    )
 
 
 def test_prune_line_cap_at_the_boundary():
