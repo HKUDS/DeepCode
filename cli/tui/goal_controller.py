@@ -9,7 +9,12 @@ from typing import TYPE_CHECKING
 from core.application.errors import ApplicationError
 from core.config import ConfigError
 from core.domain.message_provenance import ClientSurface
-from core.domain.thread_goal import GoalOutcome, ThreadGoal, ThreadGoalStatus
+from core.domain.thread_goal import (
+    GoalCheck,
+    GoalOutcome,
+    ThreadGoal,
+    ThreadGoalStatus,
+)
 
 if TYPE_CHECKING:
     from cli.tui.app import TuiApp
@@ -20,6 +25,9 @@ _BARE_ACTIONS = frozenset(
     {"show", "status", "wait", "pause", "resume", "continue", "clear"}
 )
 _WAIT_POLL_SECONDS = 0.25
+# "/goal checks ..." manages the checklist only in these forms; any other
+# text after "checks" is an objective that starts with that word.
+_CHECKS_ACTIONS = frozenset({"", "show", "confirm", "dismiss", "clear"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +41,9 @@ class TuiGoalController:
 
     def __init__(self, owner: TuiApp) -> None:
         self.owner = owner
+        # The proposal last shown to the user, per Goal: confirming approves
+        # exactly that list, never one the agent replaced since.
+        self._shown_proposals: dict[str, tuple[GoalCheck, ...]] = {}
 
     async def execute(self, raw: str) -> GoalCommandResult:
         action, _separator, remainder = raw.strip().partition(" ")
@@ -44,6 +55,15 @@ class TuiGoalController:
             normalized = "set"
             remainder = raw.strip()
         try:
+            if normalized == "checks":
+                checks_action, _sep, checks_rest = remainder.strip().partition(" ")
+                checks_action = checks_action.casefold()
+                if checks_action == "add" and checks_rest.strip():
+                    return self._add_check(checks_rest.strip())
+                if checks_action in _CHECKS_ACTIONS and not checks_rest.strip():
+                    return self._checks(checks_action)
+                normalized = "set"
+                remainder = raw.strip()
             if not action or normalized in {"show", "status"}:
                 return self._status()
             if normalized == "wait":
@@ -74,8 +94,113 @@ class TuiGoalController:
 
     def _status(self) -> GoalCommandResult:
         application, thread_id = self._context()
-        goal, outcome = application.goals.read_with_outcome(thread_id)
-        return GoalCommandResult(self._format(goal, outcome))
+        goal, outcome, reviews = application.goals.read_state(thread_id, limit=1)
+        text = self._format(goal, outcome)
+        if goal is not None:
+            text += "\n" + self._show_checks(goal)
+        if reviews:
+            text += "\n" + self._format_review(reviews[-1])
+        return GoalCommandResult(text)
+
+    def _checks(self, action: str) -> GoalCommandResult:
+        application, thread_id = self._context()
+        current = self._required(application, thread_id)
+        if action in {"", "show"}:
+            return GoalCommandResult(self._show_checks(current))
+        if action == "confirm":
+            if not current.proposed_checks:
+                return GoalCommandResult("no proposed checks to confirm")
+            if self._shown_proposals.get(current.id) != current.proposed_checks:
+                return GoalCommandResult(
+                    self._show_checks(current)
+                    + "\nThis is the current proposal. Check it, then enter "
+                    "/goal checks confirm again to use it."
+                )
+            updated = application.goals.confirm_checks(
+                thread_id,
+                expected_goal_id=current.id,
+                checks=current.proposed_checks,
+            )
+            return GoalCommandResult(
+                self._format_checks(updated)
+                + "\nDeepCode runs these commands whenever the Goal is claimed complete."
+            )
+        if action == "dismiss":
+            updated = application.goals.dismiss_proposed_checks(
+                thread_id, expected_goal_id=current.id
+            )
+            return GoalCommandResult(self._show_checks(updated))
+        updated = application.goals.confirm_checks(
+            thread_id, expected_goal_id=current.id, checks=()
+        )
+        return GoalCommandResult(self._format_checks(updated))
+
+    def _add_check(self, command: str) -> GoalCommandResult:
+        from cli.goal_runner import check_requirement, parse_check_command
+
+        application, thread_id = self._context()
+        current = self._required(application, thread_id)
+        check = GoalCheck(
+            requirement=check_requirement("The command exits 0", command),
+            command=parse_check_command(command),
+        )
+        updated = application.goals.confirm_checks(
+            thread_id,
+            expected_goal_id=current.id,
+            checks=(*current.checks, check),
+        )
+        return GoalCommandResult(self._format_checks(updated))
+
+    def _show_checks(self, goal: ThreadGoal) -> str:
+        """The checklist as shown to the user, remembering the proposal seen."""
+
+        self._shown_proposals[goal.id] = goal.proposed_checks
+        return self._format_checks(goal)
+
+    @staticmethod
+    def _format_checks(goal: ThreadGoal) -> str:
+        def lines(checks: tuple[GoalCheck, ...]) -> list[str]:
+            return [
+                f"  - {check.requirement}"
+                + (f" — `{' '.join(check.command)}`" if check.command else "")
+                for check in checks
+            ]
+
+        parts = []
+        if goal.checks:
+            parts.append(
+                "Checks (DeepCode runs the commands before accepting completion):"
+            )
+            parts.extend(lines(goal.checks))
+        else:
+            parts.append("Checks: none confirmed")
+        if goal.proposed_checks:
+            parts.append(
+                "Proposed by the agent (/goal checks confirm to use them, "
+                "/goal checks dismiss to drop them):"
+            )
+            parts.extend(lines(goal.proposed_checks))
+        return "\n".join(parts)
+
+    @staticmethod
+    def _format_review(review: dict) -> str:
+        result = str(review.get("result") or "")
+        stage = {
+            "rule": "rule check",
+            "checks": "confirmed checks",
+            "reviewer": "independent review",
+        }.get(str(review.get("stage") or ""), str(review.get("stage") or ""))
+        lines = [f"Latest completion check: {result} ({stage})"]
+        summary = str(review.get("summary") or review.get("justification") or "")
+        if summary:
+            lines.append(f"  {summary.splitlines()[0]}")
+        for entry in review.get("requirements") or ():
+            lines.append(f"  [{entry.get('finding')}] {entry.get('requirement')}")
+        for run in review.get("checks") or ():
+            code = run.get("exitCode")
+            status = "passed" if code == 0 else (run.get("problem") or f"exit {code}")
+            lines.append(f"  [{status}] {' '.join(run.get('command') or ())}")
+        return "\n".join(lines)
 
     def _pause(self) -> GoalCommandResult:
         application, thread_id = self._context()
@@ -236,7 +361,8 @@ class TuiGoalController:
     def _usage() -> str:
         return (
             "usage: /goal <text> | set <text> | show | edit <text> | pause | "
-            "resume | continue | wait | reopen [text] | clear"
+            "resume | continue | wait | reopen [text] | clear | "
+            "checks [confirm | dismiss | clear | add <command>]"
         )
 
     @staticmethod

@@ -690,3 +690,79 @@ def test_frozen_build_runs_the_job_launcher_through_its_own_executable(
         "-c",
         "echo hi",
     ]
+
+
+# -- read-only workspace -------------------------------------------------------
+
+
+def test_read_only_policy_has_no_writable_root(tmp_path):
+    policy = SandboxPolicy.read_only_workspace(tmp_path)
+    assert policy.normalized_roots() == []
+    assert policy.read_only_roots == (os.path.abspath(str(tmp_path)),)
+    assert policy.unreadable  # credential stores stay hidden
+
+
+@pytest.mark.skipif(
+    platform.system() != "Darwin", reason="seatbelt policy is macOS-only"
+)
+def test_seatbelt_denies_writes_to_a_read_only_root_last(tmp_path):
+    profile = _seatbelt_profile(SandboxPolicy.read_only_workspace(tmp_path))
+    root = os.path.realpath(str(tmp_path))
+    deny = profile.index("; read-only roots")
+    # After the /tmp grants, so a workspace under the temp area stays read-only.
+    assert deny > profile.index('(allow file-write* (subpath "/private/var/folders"))')
+    assert f'(subpath "{root}")' in profile[deny:]
+
+
+def test_bwrap_binds_a_read_only_root_after_the_fresh_tmp(monkeypatch, tmp_path):
+    monkeypatch.setattr("core.harness.sandbox.sandbox_backend", lambda: "bwrap")
+    argv = wrap_shell_command("true", SandboxPolicy.read_only_workspace(tmp_path)).argv
+    root = os.path.realpath(str(tmp_path))
+    bind = argv.index(root) - 1
+    assert argv[bind] == "--ro-bind" and argv[bind + 2] == root
+    assert bind > argv.index("--tmpfs")
+    assert "--bind" not in argv[: argv.index("--die-with-parent")]
+
+
+def test_read_only_commands_refuse_to_run_unfenced(monkeypatch, tmp_path):
+    from core.harness.sandbox import build_exec_command
+
+    monkeypatch.setattr("core.harness.sandbox.sandbox_backend", lambda: "job")
+    with pytest.raises(OSError, match="read-only"):
+        build_exec_command(command="true", workspace=tmp_path, read_only=True)
+
+
+def test_read_only_commands_stay_sandboxed_when_sandboxing_is_off(
+    monkeypatch, tmp_path
+):
+    from core.harness.sandbox import build_exec_command
+
+    monkeypatch.setattr("core.harness.sandbox.sandbox_backend", lambda: "bwrap")
+    monkeypatch.setenv("DEEPCODE_SANDBOX", "0")
+    wrapped = build_exec_command(
+        command="true", workspace=tmp_path, enabled=False, read_only=True
+    )
+    assert wrapped.backend == "bwrap"
+
+
+@pytest.mark.skipif(not fences_writes(), reason="needs a write-fencing sandbox")
+def test_a_read_only_command_reads_but_cannot_write(tmp_path):
+    from core.harness.sandbox import build_exec_command
+
+    (tmp_path / "a.txt").write_text("hi")
+    for command, code in (
+        ("cat a.txt", 0),
+        ("echo x > b.txt", 1),
+        ("echo y >> a.txt", 1),
+        ('echo t > "$TMPDIR/scratch.txt"', 0),
+    ):
+        wrapped = build_exec_command(
+            command=command, workspace=tmp_path, read_only=True
+        )
+        env = {**os.environ, "TMPDIR": os.environ.get("TMPDIR", "/tmp")}
+        result = subprocess.run(
+            wrapped.argv, cwd=tmp_path, capture_output=True, text=True, env=env
+        )
+        assert (result.returncode != 0) == bool(code), (command, result.stderr)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["a.txt"]
+    assert (tmp_path / "a.txt").read_text() == "hi"

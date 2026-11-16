@@ -118,6 +118,15 @@
   font-style: normal;
 }
 
+.summaryText [data-review="passed"] {
+  color: var(--success);
+}
+
+.summaryText [data-review="rejected"],
+.summaryText [data-review="impossible"] {
+  color: var(--attention);
+}
+
 .summary progress {
   width: 100%;
   height: 3px;
@@ -169,10 +178,15 @@
   color: var(--text-primary);
 }
 
+/* An opened Goal can hold a long review: it scrolls inside the card, so the
+   card's own header and actions never leave the window. */
 .details {
   display: grid;
   grid-column: 1 / -1;
   gap: 7px;
+  max-height: min(60vh, 560px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 4px 12px 10px 41px;
   border-top: 1px solid var(--border-subtle);
 }

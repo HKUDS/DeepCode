@@ -211,6 +211,13 @@ def _compact_count(value: int) -> str:
     return f"{value / 1_000_000:.1f}M".replace(".0M", "M")
 
 
+# Stop reasons that read better in words; others are shown as they are.
+_STOP_REASON_TEXT = {
+    "token_budget": "the Goal's budget (tokens or time) is used up",
+    "no_progress": "the agent's recent tool calls kept bringing nothing new",
+}
+
+
 def _elapsed_label(seconds: float) -> str:
     """``1.4s`` · ``18s`` · ``2m 05s`` — one wall-clock reading."""
     if seconds < 10:
@@ -1191,9 +1198,8 @@ class EventRenderer:
     def _on_task_complete(self, msg) -> None:
         self._close_line()
         if msg.stop_reason != "completed":
-            self.console.print(
-                f"[{theme.META_STYLE}]· Turn ended: {escape(str(msg.stop_reason))}[/]"
-            )
+            reason = _STOP_REASON_TEXT.get(str(msg.stop_reason), str(msg.stop_reason))
+            self.console.print(f"[{theme.META_STYLE}]· Turn ended: {escape(reason)}[/]")
         if self.transcript_mode is not TranscriptMode.SUMMARY:
             footer = self._turn_footer()
             if footer:

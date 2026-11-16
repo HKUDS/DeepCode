@@ -73,12 +73,15 @@ class SandboxPolicy:
     routinely need to read system headers, site-packages, etc.) except for
     ``unreadable``: credential stores the command may neither read nor write.
     ``readable`` names files inside them (glob patterns) it may still read.
+    ``read_only_roots`` are directories the command may read but never write,
+    even where they sit inside a writable area such as ``/tmp``.
     """
 
     writable_roots: tuple[str, ...] = ()
     allow_network: bool = False
     unreadable: tuple[str, ...] = ()
     readable: tuple[str, ...] = ()
+    read_only_roots: tuple[str, ...] = ()
 
     @classmethod
     def for_workspace(
@@ -90,6 +93,22 @@ class SandboxPolicy:
             allow_network=allow_network,
             unreadable=sensitive_locations(),
             readable=public_files_in_sensitive_locations(),
+        )
+
+    @classmethod
+    def read_only_workspace(
+        cls, workspace: str | os.PathLike[str], *, allow_network: bool = False
+    ) -> SandboxPolicy:
+        """A command that may inspect ``workspace`` but not change it.
+
+        Only the ephemeral areas stay writable, so test runners can still keep
+        their caches and temporary files there.
+        """
+        return cls(
+            allow_network=allow_network,
+            unreadable=sensitive_locations(),
+            readable=public_files_in_sensitive_locations(),
+            read_only_roots=(os.path.abspath(str(workspace)),),
         )
 
     def normalized_roots(self) -> list[str]:
@@ -372,6 +391,13 @@ def _seatbelt_profile(policy: SandboxPolicy) -> str:
             f"  (subpath {_sbpl_string(path)})" for path in _as_resolved(controls)
         )
         parts[-1] += ")"
+    read_only = _as_resolved(os.path.abspath(r) for r in policy.read_only_roots if r)
+    if read_only:
+        parts.append("")
+        parts.append("; read-only roots: readable, never writable")
+        parts.append("(deny file-write*")
+        parts.extend(f"  (subpath {_sbpl_string(path)})" for path in read_only)
+        parts[-1] += ")"
     if policy.unreadable:
         parts.append("")
         parts.append("; credential stores: not writable, and not readable")
@@ -513,6 +539,11 @@ def wrap_argv_command(
                     argv += ["--ro-bind", path, path]
                 elif name == _CONTROL_FILE:
                     watched.append(path)
+        # After the fresh /tmp, so a read-only root inside it is still there.
+        for root in policy.read_only_roots:
+            path = os.path.realpath(root)
+            if os.path.exists(path):
+                argv += ["--ro-bind", path, path]
         # Mounted over after the binds so they win even inside a writable
         # root. bwrap can only mount over what exists; a store that does not
         # exist has nothing to hide. A symlinked store (dotfile managers) is
@@ -630,6 +661,7 @@ def build_exec_command(
     allow_network: bool = True,
     shell: str | None = None,
     enabled: bool | None = None,
+    read_only: bool = False,
 ) -> WrappedCommand:
     """Build the (possibly sandboxed) command a tool executor should run.
 
@@ -642,9 +674,23 @@ def build_exec_command(
     downloads, so the executor keeps the filesystem write-fence (the high-
     value, low-breakage protection) while leaving the network open. Callers
     that want strict isolation pass ``allow_network=False``.
+
+    ``read_only=True`` makes ``workspace`` readable but not writable. It is
+    always sandboxed, whatever ``enabled`` says, and raises :class:`OSError`
+    where no backend can fence writes (see :func:`fences_writes`).
     """
     if (command is None) == (argv is None):
         raise ValueError("provide exactly one of command= or argv=")
+
+    if read_only:
+        if not fences_writes():
+            raise OSError("no sandbox here can keep the workspace read-only")
+        policy = SandboxPolicy.read_only_workspace(
+            workspace, allow_network=allow_network
+        )
+        if command is not None:
+            return wrap_shell_command(command, policy, shell=shell)
+        return wrap_argv_command(list(argv or []), policy)
 
     # ``enabled`` is the immutable per-execution value used by product access
     # presets.  ``None`` intentionally retains the legacy env/default behavior

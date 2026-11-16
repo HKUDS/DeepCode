@@ -19,6 +19,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Awaitable, Callable
 import os
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -313,6 +314,80 @@ def _legacy_execution_profile(
     )
 
 
+def _reviewer_execution_profile(profile: ExecutionProfile) -> ExecutionProfile:
+    """The worker's model, but thinking: a review is careful comparison.
+
+    When the user turned reasoning off for speed, the reviewer still uses the
+    model's own default (thinking where the model has it); any explicit level
+    is kept.
+    """
+    from dataclasses import replace
+
+    from core.providers.reasoning import infer_reasoning_capabilities
+
+    if profile.reasoning_effort != "none":
+        return profile
+    if (
+        infer_reasoning_capabilities(
+            profile.model_id, provider_name=profile.provider_name
+        )
+        is None
+    ):
+        return profile
+    return replace(profile, reasoning_effort=None)
+
+
+def _completion_verifier(
+    mode: str,
+    *,
+    workspace: str,
+    execution_profile: ExecutionProfile,
+    security_profile: ExecutionSecurityProfile | None,
+    runtime: DeepCodeRuntime,
+) -> Any:
+    """The Goal completion gate for ``goal.completion_verifier``.
+
+    Every mode runs the Goal's confirmed checks; ``rule`` adds the rule check,
+    and ``reviewer`` both and then a reviewer built like this session: same
+    workspace, model and runtime, but read-only and under its own rules.
+    """
+    from core.agent_runtime.goal_verifier import CompletionGate
+
+    # Checks get the agent's own command sandbox: the agent may have written
+    # the code they run.
+    sandbox_enabled = (
+        security_profile.command_sandbox if security_profile is not None else None
+    )
+    if mode != "reviewer":
+        return CompletionGate(
+            rule=mode == "rule", workspace=workspace, sandbox_enabled=sandbox_enabled
+        )
+    from core.harness.agents.goal_reviewer import (
+        AgentReviewVerifier,
+        reviewer_security_profile,
+        session_review_runner,
+    )
+
+    return CompletionGate(
+        rule=True,
+        workspace=workspace,
+        sandbox_enabled=sandbox_enabled,
+        review=AgentReviewVerifier(
+            session_review_runner(
+                workspace=workspace,
+                build_session=build_agent_session,
+                session_kwargs={
+                    "execution_profile": _reviewer_execution_profile(execution_profile),
+                    "execution_security_profile": reviewer_security_profile(
+                        security_profile
+                    ),
+                    "runtime": runtime,
+                },
+            )
+        ),
+    )
+
+
 def build_agent_session(
     *,
     workspace: str,
@@ -354,6 +429,10 @@ def build_agent_session(
     # Optional narrowing filter over exposed tool names, composed with the
     # Goal runtime's own filter (both only ever narrow; see AgentRunSpec).
     tool_filter: Any | None = None,
+    # Look, never touch: only read / grep / glob and a bash that cannot write
+    # the workspace or reach the network (see default_coding_tools), no MCP
+    # servers, no code mode, no hooks.
+    read_only_workspace: bool = False,
 ) -> tuple[AgentSession, str, Any]:
     """Build an :class:`AgentSession` over ``workspace``.
 
@@ -490,12 +569,17 @@ def build_agent_session(
 
     from core.harness.hooks import HooksEngine
 
-    hooks_engine, hook_warnings = HooksEngine.discover(
-        workspace,
-        session_id=uuid.uuid4().hex,
-        model=resolved_model,
-        permission_mode=getattr(engine.mode, "value", str(engine.mode)),
-        project_hook_approval=project_hook_approval,
+    # Hooks run outside the command sandbox, so a read-only session runs none.
+    hooks_engine, hook_warnings = (
+        (None, [])
+        if read_only_workspace
+        else HooksEngine.discover(
+            workspace,
+            session_id=uuid.uuid4().hex,
+            model=resolved_model,
+            permission_mode=getattr(engine.mode, "value", str(engine.mode)),
+            project_hook_approval=project_hook_approval,
+        )
     )
     for warning in hook_warnings:
         logger.warning("hooks config: {}", warning)
@@ -507,17 +591,19 @@ def build_agent_session(
         agent_control=control,
         goal_runtime=goal_runtime,
         execution_security_profile=resolved_security_profile,
+        read_only_workspace=read_only_workspace,
     )
     for extra_tool in extra_tools:
         tool_registry.register(extra_tool)
-    _wire_code_mode(
-        tool_registry,
-        workspace,
-        engine,
-        hooks_engine,
-        resolved_security_profile,
-        approval_callback,
-    )
+    if not read_only_workspace:
+        _wire_code_mode(
+            tool_registry,
+            workspace,
+            engine,
+            hooks_engine,
+            resolved_security_profile,
+            approval_callback,
+        )
     _wire_tool_permissions(tool_registry, engine)
 
     from core.mcp import (
@@ -525,12 +611,17 @@ def build_agent_session(
         McpSessionRuntime,
         create_mcp_oauth_provider,
     )
+    from core.mcp.models import McpRuntimePlan
     from core.mcp.tools import McpToolAdapter
 
-    mcp_plan = McpConfigResolver().resolve(
-        workspace,
-        project_trusted=project_trusted,
-        plugin_servers=plugin_mcp_servers,
+    mcp_plan = (
+        McpRuntimePlan(workspace=Path(workspace), servers=(), revision="read-only")
+        if read_only_workspace
+        else McpConfigResolver().resolve(
+            workspace,
+            project_trusted=project_trusted,
+            plugin_servers=plugin_mcp_servers,
+        )
     )
 
     def _mcp_credential(connection_id: str) -> str | None:
@@ -609,23 +700,32 @@ def build_agent_session(
         closure_callback=(
             goal_runtime.closure_prompt if goal_runtime is not None else None
         ),
+        token_allowance=(
+            goal_runtime.remaining_tokens if goal_runtime is not None else None
+        ),
         mcp_runtime=mcp_runtime,
         provider_cleanup=provider_cleanup,
     )
     if goal_runtime is not None:
         # The Goal router outlives agent rebuilds, so every build sets the
-        # completion gate from the current config: ``off`` disarms it.
+        # completion gate from the current config. Even ``off`` keeps a gate:
+        # the Goal's confirmed checks run in every mode.
         goal_cfg = getattr(active_runtime.config, "goal", None)
-        if goal_cfg is not None and goal_cfg.completion_verifier == "rule":
-            from core.agent_runtime.goal_verifier import RuleBasedVerifier
-
-            goal_runtime.configure_completion_verifier(
-                RuleBasedVerifier(),
-                max_rejections=goal_cfg.max_rejections,
-                settle=session.settle_events,
-            )
-        else:
-            goal_runtime.configure_completion_verifier(None)
+        mode = goal_cfg.completion_verifier if goal_cfg is not None else "off"
+        goal_runtime.configure_running_work(
+            control.active_count if control is not None else None
+        )
+        goal_runtime.configure_completion_verifier(
+            _completion_verifier(
+                mode,
+                workspace=workspace,
+                execution_profile=resolved_execution,
+                security_profile=resolved_security_profile,
+                runtime=active_runtime,
+            ),
+            max_rejections=goal_cfg.max_rejections if goal_cfg is not None else 3,
+            settle=session.settle_events,
+        )
     if control is not None:
         # `session.history` is a @property (a list), so it must be wrapped in a
         # callable — passing its value would make fork_turns call a list.

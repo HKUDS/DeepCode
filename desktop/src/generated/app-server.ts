@@ -155,6 +155,8 @@ export interface MethodParams {
   "thread/goal/resume": GoalContinuationParams;
   "thread/goal/continue": GoalContinuationParams;
   "thread/goal/clear": GoalIdentityParams;
+  "thread/goal/checks/confirm": GoalChecksConfirmParams;
+  "thread/goal/checks/dismiss": GoalIdentityParams;
   "turn/start": TurnStartParams;
   "turn/enqueue": TurnStartParams;
   "turn/steer": TurnSteerParams;
@@ -486,6 +488,10 @@ export interface GoalSetParams {
   objective?: string;
   tokenBudget?: number | null;
   /**
+   * Active time the Goal may use, in seconds; null for no limit. Left out when editing, the current limit stays.
+   */
+  timeBudgetSeconds?: number | null;
+  /**
    * @maxItems 8
    */
   skills?:
@@ -500,6 +506,89 @@ export interface GoalSetParams {
     | [string, string, string, string, string, string, string, string];
   expectedGoalId?: string | null;
   start?: boolean;
+  /**
+   * Confirmed checks for a new Goal; only when creating one.
+   *
+   * @maxItems 12
+   */
+  checks?:
+    | []
+    | [GoalCheckInput]
+    | [GoalCheckInput, GoalCheckInput]
+    | [GoalCheckInput, GoalCheckInput, GoalCheckInput]
+    | [GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput]
+    | [GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput]
+    | [GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput]
+    | [GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput]
+    | [
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput
+      ]
+    | [
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput
+      ]
+    | [
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput
+      ]
+    | [
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput
+      ]
+    | [
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput
+      ];
+}
+export interface GoalCheckInput {
+  requirement: string;
+  /**
+   * An argument list DeepCode runs in the workspace without a shell when the Goal is claimed complete; empty when the requirement is left to the reviewer.
+   *
+   * @maxItems 64
+   */
+  command?: string[];
 }
 export interface GoalIdentityParams {
   threadId: string;
@@ -511,6 +600,82 @@ export interface GoalContinuationParams {
   connectionId?: string;
   model?: string;
   reasoningEffort?: string;
+}
+export interface GoalChecksConfirmParams {
+  threadId: string;
+  expectedGoalId: string;
+  /**
+   * @maxItems 12
+   */
+  checks:
+    | []
+    | [GoalCheckInput]
+    | [GoalCheckInput, GoalCheckInput]
+    | [GoalCheckInput, GoalCheckInput, GoalCheckInput]
+    | [GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput]
+    | [GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput]
+    | [GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput]
+    | [GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput, GoalCheckInput]
+    | [
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput
+      ]
+    | [
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput
+      ]
+    | [
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput
+      ]
+    | [
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput
+      ]
+    | [
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput,
+        GoalCheckInput
+      ];
 }
 export interface TurnStartParams {
   threadId: string;
@@ -834,6 +999,8 @@ export interface MethodResults {
   "thread/goal/resume": GoalResult;
   "thread/goal/continue": GoalContinueResult;
   "thread/goal/clear": GoalResult;
+  "thread/goal/checks/confirm": GoalResult;
+  "thread/goal/checks/dismiss": GoalResult;
   "turn/start": TurnSnapshotResult;
   "turn/enqueue": TurnSnapshotResult;
   "turn/steer": TurnSteerResult;
@@ -1107,6 +1274,13 @@ export interface SettingsSnapshot {
   configRevision: string;
   agents: JsonObject;
   security: JsonObject;
+  /**
+   * Goal completion checking: goal.completionVerifier and goal.maxRejections.
+   */
+  goal?: {
+    completionVerifier: "off" | "rule" | "reviewer";
+    maxRejections: number;
+  };
   permissionModeExplicit: boolean;
   userAccessPreset: ExecutionAccessPreset | null;
   projectAccessPreset: ExecutionAccessPreset | null;
@@ -1534,6 +1708,209 @@ export interface GoalResult {
    * Whether the terminal Goal deciding Turn has finished and its usage is durably accounted.
    */
   executionSettled?: boolean;
+  /**
+   * The Goal's latest completion reviews, oldest first.
+   *
+   * @maxItems 20
+   */
+  reviews?:
+    | []
+    | [GoalReview]
+    | [GoalReview, GoalReview]
+    | [GoalReview, GoalReview, GoalReview]
+    | [GoalReview, GoalReview, GoalReview, GoalReview]
+    | [GoalReview, GoalReview, GoalReview, GoalReview, GoalReview]
+    | [GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview]
+    | [GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview]
+    | [GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview]
+    | [GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ];
 }
 export interface Goal {
   id: string;
@@ -1541,6 +1918,10 @@ export interface Goal {
   objective: string;
   status: GoalStatus;
   tokenBudget: number | null;
+  /**
+   * Active time the Goal may use; null for no limit.
+   */
+  timeBudgetSeconds?: number | null;
   tokensUsed: number;
   timeUsedSeconds: number;
   /**
@@ -1556,8 +1937,105 @@ export interface Goal {
     | [string, string, string, string, string, string]
     | [string, string, string, string, string, string, string]
     | [string, string, string, string, string, string, string, string];
+  /**
+   * The checklist the user confirmed.
+   *
+   * @maxItems 12
+   */
+  checks:
+    | []
+    | [GoalCheck]
+    | [GoalCheck, GoalCheck]
+    | [GoalCheck, GoalCheck, GoalCheck]
+    | [GoalCheck, GoalCheck, GoalCheck, GoalCheck]
+    | [GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck]
+    | [GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck]
+    | [GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck]
+    | [GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck]
+    | [GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck]
+    | [GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck]
+    | [
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck
+      ]
+    | [
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck
+      ];
+  /**
+   * A checklist the agent proposed; never run until the user confirms it.
+   *
+   * @maxItems 12
+   */
+  proposedChecks:
+    | []
+    | [GoalCheck]
+    | [GoalCheck, GoalCheck]
+    | [GoalCheck, GoalCheck, GoalCheck]
+    | [GoalCheck, GoalCheck, GoalCheck, GoalCheck]
+    | [GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck]
+    | [GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck]
+    | [GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck]
+    | [GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck]
+    | [GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck]
+    | [GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck, GoalCheck]
+    | [
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck
+      ]
+    | [
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck,
+        GoalCheck
+      ];
   createdAt: string;
   updatedAt: string;
+}
+export interface GoalCheck {
+  requirement: string;
+  /**
+   * An argument list DeepCode runs in the workspace without a shell when the Goal is claimed complete; empty when the requirement is left to the reviewer.
+   *
+   * @maxItems 64
+   */
+  command: string[];
 }
 export interface GoalOutcome {
   status: "complete" | "blocked";
@@ -1653,11 +2131,246 @@ export interface GoalEvidenceRef {
   status: ItemStatus;
   summary: string;
 }
+/**
+ * One check of a completion claim, kept in the Goal's history.
+ */
+export interface GoalReview {
+  goalId: string;
+  turnId: string;
+  recordedAt: string;
+  /**
+   * The step that reached the result.
+   */
+  stage: "rule" | "checks" | "reviewer" | "error" | "other";
+  result: "passed" | "rejected" | "impossible" | "unavailable";
+  justification: string;
+  summary: string;
+  requirements: GoalReviewRequirement[];
+  checks: GoalReviewCheck[];
+  checked: string[];
+  tokens: number;
+}
+export interface GoalReviewRequirement {
+  requirement: string;
+  finding: "proved" | "contradicted" | "incomplete" | "weak" | "missing";
+  evidence: string;
+}
+export interface GoalReviewCheck {
+  requirement: string;
+  command: string[];
+  exitCode: number | null;
+  problem: string;
+  seconds: number;
+  output: string;
+}
 export interface GoalContinueResult {
   goal: Goal;
   disposition: "started" | "alreadyRunning";
   turnId: string;
   outcome: GoalOutcome | null;
+  /**
+   * The Goal's latest completion reviews, oldest first.
+   *
+   * @maxItems 20
+   */
+  reviews?:
+    | []
+    | [GoalReview]
+    | [GoalReview, GoalReview]
+    | [GoalReview, GoalReview, GoalReview]
+    | [GoalReview, GoalReview, GoalReview, GoalReview]
+    | [GoalReview, GoalReview, GoalReview, GoalReview, GoalReview]
+    | [GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview]
+    | [GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview]
+    | [GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview]
+    | [GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview, GoalReview]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ]
+    | [
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview,
+        GoalReview
+      ];
 }
 export interface TurnSnapshotResult {
   turn: Turn;

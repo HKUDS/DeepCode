@@ -13,6 +13,7 @@ from typing import Any, TypeVar
 
 from core.domain.thread_goal import (
     GOAL_OUTCOME_REASON_MAX_CHARS,
+    GoalCheck,
     GoalDecisionSource,
     GoalOutcome,
     ThreadGoal,
@@ -26,6 +27,10 @@ from core.sessions.legacy_goal_decoder import (
 from core.sessions.store import SessionStore
 
 GOAL_LEDGER_FILENAME = "goal.jsonl"
+# Completion reviews: a separate file, so the Goal ledger keeps the format
+# earlier versions read.
+GOAL_REVIEWS_FILENAME = "goal_reviews.jsonl"
+GOAL_REVIEW_SCHEMA_VERSION = 1
 THREAD_GOAL_SCHEMA_VERSION = 2
 THREAD_GOAL_SNAPSHOT = "thread_goal.snapshot"
 THREAD_GOAL_CLEARED = "thread_goal.cleared"
@@ -220,6 +225,55 @@ class ThreadGoalStore:
             )
         )
 
+    def append_review(self, thread_id: str, review: dict[str, Any]) -> None:
+        """Keep one completion review of a Goal (see GoalExtension.record_review)."""
+
+        if not isinstance(review.get("goalId"), str):
+            raise ValueError("a Goal review needs its goalId")
+        entry = {"schemaVersion": GOAL_REVIEW_SCHEMA_VERSION, **review}
+        with self.sessions.session_guard(thread_id) as directory:
+            if directory is None:
+                raise ThreadGoalSessionNotFoundError(f"session not found: {thread_id}")
+            self._append_line(directory / GOAL_REVIEWS_FILENAME, entry)
+
+    def read_reviews(
+        self,
+        thread_id: str,
+        *,
+        goal_id: str,
+        limit: int = 20,
+    ) -> tuple[dict[str, Any], ...]:
+        """The latest reviews of one Goal, oldest first.
+
+        A record that cannot be read is skipped: reviews are a history for
+        the user, never needed to work out the Goal's state.
+        """
+
+        with self.sessions.session_guard(thread_id) as directory:
+            if directory is None:
+                raise ThreadGoalSessionNotFoundError(f"session not found: {thread_id}")
+            path = directory / GOAL_REVIEWS_FILENAME
+            if not path.exists():
+                return ()
+            raw = path.read_bytes()
+        reviews: list[dict[str, Any]] = []
+        for line in raw.split(b"\n"):
+            if not line.strip():
+                continue
+            try:
+                value = json.loads(line.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if (
+                isinstance(value, dict)
+                and value.get("schemaVersion") == GOAL_REVIEW_SCHEMA_VERSION
+                and value.get("goalId") == goal_id
+                and _review_shape_ok(value)
+            ):
+                # Only the fields clients know: a later version may add more.
+                reviews.append({key: value[key] for key in _REVIEW_FIELDS})
+        return tuple(reviews[-limit:]) if limit > 0 else ()
+
     def read_guarded(self, thread_id: str, directory: Path) -> ThreadGoal | None:
         expected = self.sessions.root / self.sessions._validated_session_id(thread_id)
         if directory != expected:
@@ -279,6 +333,7 @@ class ThreadGoalStore:
             if (
                 current.objective != goal.objective
                 or current.token_budget != goal.token_budget
+                or current.time_budget_seconds != goal.time_budget_seconds
                 or current.skill_ids != goal.skill_ids
             ):
                 raise ThreadGoalConflictError(
@@ -641,6 +696,27 @@ class ThreadGoalStore:
             "tokensUsed": goal.tokens_used,
             "timeUsedSeconds": goal.time_used_seconds,
             "skillIds": list(goal.skill_ids),
+            # Left out when unset or empty: such ledgers stay as before.
+            **(
+                {"timeBudgetSeconds": goal.time_budget_seconds}
+                if goal.time_budget_seconds is not None
+                else {}
+            ),
+            **({"checksDismissed": True} if goal.checks_dismissed else {}),
+            **(
+                {"checks": [_check_to_dict(check) for check in goal.checks]}
+                if goal.checks
+                else {}
+            ),
+            **(
+                {
+                    "proposedChecks": [
+                        _check_to_dict(check) for check in goal.proposed_checks
+                    ]
+                }
+                if goal.proposed_checks
+                else {}
+            ),
             "createdAt": goal.created_at.isoformat(),
             "updatedAt": goal.updated_at.isoformat(),
         }
@@ -656,6 +732,12 @@ class ThreadGoalStore:
             tokens_used=int(raw.get("tokensUsed", 0)),
             time_used_seconds=int(raw.get("timeUsedSeconds", 0)),
             skill_ids=tuple(raw.get("skillIds") or ()),
+            time_budget_seconds=raw.get("timeBudgetSeconds"),
+            checks_dismissed=raw.get("checksDismissed") is True,
+            checks=tuple(_check_from_dict(entry) for entry in raw.get("checks") or ()),
+            proposed_checks=tuple(
+                _check_from_dict(entry) for entry in raw.get("proposedChecks") or ()
+            ),
             created_at=datetime.fromisoformat(raw["createdAt"]),
             updated_at=datetime.fromisoformat(raw["updatedAt"]),
         )
@@ -717,7 +799,10 @@ class ThreadGoalStore:
 
     @classmethod
     def _append_entry(cls, directory: Path, entry: dict[str, Any]) -> None:
-        path = cls._ledger_path(directory)
+        cls._append_line(cls._ledger_path(directory), entry)
+
+    @classmethod
+    def _append_line(cls, path: Path, entry: dict[str, Any]) -> None:
         cls._discard_uncommitted_tail(path)
         encoded = (
             json.dumps(entry, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -754,7 +839,78 @@ class ThreadGoalStore:
             os.fsync(handle.fileno())
 
 
+# What a kept review must hold for clients to show it.
+_REVIEW_FIELDS: dict[str, type | tuple[type, ...]] = {
+    "goalId": str,
+    "turnId": str,
+    "recordedAt": str,
+    "stage": str,
+    "result": str,
+    "justification": str,
+    "summary": str,
+    "requirements": list,
+    "checks": list,
+    "checked": list,
+    "tokens": int,
+}
+
+
+_REVIEW_STAGES = frozenset({"rule", "checks", "reviewer", "error", "other"})
+_REVIEW_RESULTS = frozenset({"passed", "rejected", "impossible", "unavailable"})
+_REVIEW_FINDINGS = frozenset(
+    {"proved", "contradicted", "incomplete", "weak", "missing"}
+)
+
+
+def _review_shape_ok(review: dict[str, Any]) -> bool:
+    """Whether a kept review has the shape clients rely on (the protocol's)."""
+
+    if not all(
+        isinstance(review.get(key), kind) for key, kind in _REVIEW_FIELDS.items()
+    ):
+        return False
+    if review["stage"] not in _REVIEW_STAGES or review["result"] not in _REVIEW_RESULTS:
+        return False
+    if not all(isinstance(entry, str) for entry in review["checked"]):
+        return False
+    for entry in review["requirements"]:
+        if not (
+            isinstance(entry, dict)
+            and isinstance(entry.get("requirement"), str)
+            and entry.get("finding") in _REVIEW_FINDINGS
+            and isinstance(entry.get("evidence"), str)
+        ):
+            return False
+    for run in review["checks"]:
+        if not (
+            isinstance(run, dict)
+            and isinstance(run.get("requirement"), str)
+            and isinstance(run.get("command"), list)
+            and all(isinstance(part, str) for part in run["command"])
+            and (run.get("exitCode") is None or isinstance(run.get("exitCode"), int))
+            and isinstance(run.get("problem"), str)
+            and isinstance(run.get("seconds"), (int, float))
+            and isinstance(run.get("output"), str)
+        ):
+            return False
+    return True
+
+
+def _check_to_dict(check: GoalCheck) -> dict[str, Any]:
+    return {"requirement": check.requirement, "command": list(check.command)}
+
+
+def _check_from_dict(raw: Any) -> GoalCheck:
+    if not isinstance(raw, dict):
+        raise ValueError("a Goal check must be an object")
+    command = raw.get("command", [])
+    if not isinstance(command, list):
+        raise ValueError("a Goal check command must be a list")
+    return GoalCheck(requirement=str(raw["requirement"]), command=tuple(command))
+
+
 __all__ = [
+    "GOAL_REVIEWS_FILENAME",
     "THREAD_GOAL_CLEARED",
     "THREAD_GOAL_SCHEMA_VERSION",
     "THREAD_GOAL_SNAPSHOT",

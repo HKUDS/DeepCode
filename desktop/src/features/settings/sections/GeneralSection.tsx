@@ -12,6 +12,7 @@ import { ComposerBehaviorCard } from "./ComposerBehaviorCard";
 import { LanguageCard } from "./LanguageCard";
 import { DefaultPresetCard } from "./DefaultPresetCard";
 import { DiagnosticsCard } from "./DiagnosticsCard";
+import { GoalCheckingCard } from "./GoalCheckingCard";
 import { PermissionCard } from "./PermissionCard";
 import { ServiceCard } from "./ServiceCard";
 import { UpdatesCard } from "./UpdatesCard";
@@ -24,6 +25,12 @@ export function GeneralSection(props: SettingsSectionProps) {
     <div className={styles.settingsGrid}>
       <DefaultPresetCard {...props} />
       <PermissionCard
+        settings={settings}
+        busy={busy}
+        scope={scope}
+        onUpdate={onUpdate}
+      />
+      <GoalCheckingCard
         settings={settings}
         busy={busy}
         scope={scope}

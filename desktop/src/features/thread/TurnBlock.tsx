@@ -412,6 +412,11 @@ function turnErrorText(turn: Turn, t: TFunction): string | null {
       return t("turn.failed.busy", "The Session was busy with another Turn.");
     case "invalid_skill":
       return t("turn.failed.invalidSkill", "A selected skill could not be loaded.");
+    case "no_progress":
+      return t(
+        "turn.failed.noProgress",
+        "The agent stopped: its recent tool calls kept bringing nothing new.",
+      );
     default:
       return turn.errorMessage;
   }

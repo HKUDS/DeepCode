@@ -375,6 +375,68 @@ async def test_provider_error_surfaces_incomplete_status(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_loop_detector_allows_reads_of_distinct_files(tmp_path, monkeypatch):
+    workflow = _make_workflow(monkeypatch)
+    provider = ImplScriptedProvider(
+        [
+            LLMResponse(
+                content="Reading existing modules",
+                tool_calls=[
+                    _tool_call(f"r{i}", "read_file", {"file_path": f"src/mod{i}.py"})
+                    for i in range(5)
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(
+                content="Implementing the planned files",
+                tool_calls=[
+                    _tool_call(
+                        f"w{i}", "write_file", {"file_path": path, "content": "pass"}
+                    )
+                    for i, path in enumerate(PLANNED_FILES)
+                ],
+                finish_reason="tool_calls",
+            ),
+        ]
+    )
+
+    await _run(workflow, provider, tmp_path)
+
+    assert workflow._last_run_state["status"] == "completed"
+    assert workflow._last_run_state["files_completed"] == len(PLANNED_FILES)
+    assert provider.loop_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_loop_detector_allows_writes_of_distinct_files(tmp_path, monkeypatch):
+    workflow = _make_workflow(monkeypatch)
+    paths = [f"src/mod{i}.py" for i in range(6)]
+    monkeypatch.setattr(
+        ConciseMemoryAgent, "_extract_all_files", lambda self: list(paths)
+    )
+    provider = ImplScriptedProvider(
+        [
+            LLMResponse(
+                content=f"Implementing {path}",
+                tool_calls=[
+                    _tool_call(
+                        f"w{i}", "write_file", {"file_path": path, "content": "pass"}
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+            for i, path in enumerate(paths)
+        ]
+    )
+
+    await _run(workflow, provider, tmp_path)
+
+    assert workflow._last_run_state["status"] == "completed"
+    assert workflow._last_run_state["files_completed"] == len(paths)
+    assert provider.loop_calls == len(paths)
+
+
+@pytest.mark.asyncio
 async def test_loop_detector_blocks_repeated_tool_batch(tmp_path, monkeypatch):
     workflow = _make_workflow(monkeypatch)
     repeated_calls = [

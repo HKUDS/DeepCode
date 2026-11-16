@@ -545,11 +545,12 @@ function ModelField({
                   "Using the last available model list",
                 )
               : connectionId
-                ? t(
-                    "settings.modelField.available",
-                    "{{total}} models available · exact IDs are also accepted",
-                    { total: models.length },
-                  )
+                ? t("settings.modelField.available", {
+                    count: models.length,
+                    total: models.length,
+                    defaultValue_one: "{{count}} model available · exact IDs are also accepted",
+                    defaultValue_other: "{{count}} models available · exact IDs are also accepted",
+                  })
                 : t(
                     "settings.modelField.chooseConnection",
                     "Choose a connection to load its models",

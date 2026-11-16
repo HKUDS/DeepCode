@@ -245,6 +245,15 @@ class Tool(ABC):
         return None
 
     @property
+    def waits(self) -> bool:
+        """Whether the tool waits on work running elsewhere (sub-agents).
+
+        Its result repeating is expected while that work goes on, so it does
+        not count toward the runner's no-progress stop.
+        """
+        return False
+
+    @property
     def concurrency_safe(self) -> bool:
         return self.read_only and not self.exclusive
 

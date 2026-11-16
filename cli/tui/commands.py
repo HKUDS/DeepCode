@@ -913,7 +913,7 @@ REGISTRY: dict[str, Command] = {
         ),
         Command(
             "goal",
-            "/goal <text> | set <text> | show | edit <text> | pause | resume | continue | wait | reopen [text] | clear",
+            "/goal <text> | set <text> | show | edit <text> | pause | resume | continue | wait | reopen [text] | clear | checks [confirm | dismiss | clear | add <command>]",
             "run or manage this Session's durable, steerable Goal",
             _cmd_goal,
         ),

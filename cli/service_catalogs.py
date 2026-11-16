@@ -8,7 +8,7 @@ from core.application.goal_extension import GoalContinueResult
 from core.application.mcp_service import McpInventory, McpPresetInventory
 from core.application.plugin_service import PluginDiscovery
 from core.application.skill_service import SkillDiscovery, SkillInfo
-from core.domain.thread_goal import GoalOutcome, ThreadGoal
+from core.domain.thread_goal import KEEP_TIME_BUDGET, GoalOutcome, ThreadGoal
 from core.mcp.oauth import McpOAuthFlowInfo
 from core.mcp.probe import McpProbeResult
 from core.providers.reasoning import ModelReasoningCapabilities
@@ -207,6 +207,44 @@ class ServiceGoals:
             {"threadId": thread_id, "expectedGoalId": expected_goal_id},
         )
 
+    def read_reviews(self, thread_id, goal=None, *, limit=5):
+        """The Goal's latest completion reviews (wire views), oldest first."""
+
+        return self.read_state(thread_id, limit=limit)[2]
+
+    def read_state(self, thread_id, *, limit=5):
+        """Goal, outcome and latest reviews from one read, so they agree."""
+
+        value = self.rpc.call("thread/goal/get", {"threadId": thread_id})
+        goal, outcome = value["goal"], value["outcome"]
+        reviews = value.get("reviews") or []
+        return (
+            from_view(ThreadGoal, goal) if goal else None,
+            from_view(GoalOutcome, outcome) if outcome else None,
+            tuple(reviews[-limit:]) if limit > 0 else (),
+        )
+
+    def confirm_checks(self, thread_id, *, expected_goal_id, checks):
+        value = self.rpc.call(
+            "thread/goal/checks/confirm",
+            {
+                "threadId": thread_id,
+                "expectedGoalId": expected_goal_id,
+                "checks": [
+                    {"requirement": check.requirement, "command": list(check.command)}
+                    for check in checks
+                ],
+            },
+        )
+        return from_view(ThreadGoal, value["goal"])
+
+    def dismiss_proposed_checks(self, thread_id, *, expected_goal_id):
+        value = self.rpc.call(
+            "thread/goal/checks/dismiss",
+            {"threadId": thread_id, "expectedGoalId": expected_goal_id},
+        )
+        return from_view(ThreadGoal, value["goal"])
+
     def create(
         self,
         thread_id,
@@ -216,6 +254,8 @@ class ServiceGoals:
         start=True,
         client_surface=None,
         token_budget=None,
+        checks=(),
+        time_budget_seconds=None,
     ):
         value = self.rpc.call(
             "thread/goal/set",
@@ -225,6 +265,25 @@ class ServiceGoals:
                 "tokenBudget": token_budget,
                 "skills": list(skill_ids),
                 "start": start,
+                **(
+                    {"timeBudgetSeconds": time_budget_seconds}
+                    if time_budget_seconds is not None
+                    else {}
+                ),
+                # Only when given: an older service refuses the parameter.
+                **(
+                    {
+                        "checks": [
+                            {
+                                "requirement": check.requirement,
+                                "command": list(check.command),
+                            }
+                            for check in checks
+                        ]
+                    }
+                    if checks
+                    else {}
+                ),
             },
         )
         return from_view(ThreadGoal, value["goal"])
@@ -239,6 +298,7 @@ class ServiceGoals:
         skill_ids,
         continue_work,
         client_surface=None,
+        time_budget_seconds=KEEP_TIME_BUDGET,
     ):
         value = self.rpc.call(
             "thread/goal/set",
@@ -249,6 +309,12 @@ class ServiceGoals:
                 "tokenBudget": token_budget,
                 "skills": list(skill_ids),
                 "start": continue_work,
+                # Left out, the service keeps the current time limit.
+                **(
+                    {}
+                    if time_budget_seconds is KEEP_TIME_BUDGET
+                    else {"timeBudgetSeconds": time_budget_seconds}
+                ),
             },
         )
         return from_view(ThreadGoal, value["goal"])

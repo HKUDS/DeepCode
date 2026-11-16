@@ -1,0 +1,207 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  :root {
+    --canvas: #f7f8f7;
+    --shell: #eef1ef;
+    --raised: #ffffff;
+    --inset: #e8ece9;
+    --text: #202321;
+    --text2: #474b48;
+    --text3: #626964;
+    --border: #dfe4e1;
+    --border2: #cfd6d2;
+    --signal: #4d5bd5;
+    --signal-soft: rgba(77, 91, 213, 0.1);
+    --success: #3a725e;
+    --success-soft: #e7f1ed;
+    --attention: #935b2f;
+    --attention-soft: #f8eee6;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    width: 1600px; height: 800px; background: var(--canvas); color: var(--text);
+    font-family: system-ui, "Helvetica Neue", "PingFang SC", Arial, sans-serif;
+    position: relative; overflow: hidden;
+  }
+  .mono { font-family: Monaco, Menlo, monospace; font-size: 0.95em; }
+  h1 { position: absolute; left: 64px; top: 48px; font-size: 30px; font-weight: 650; letter-spacing: -0.01em; }
+  .lede { position: absolute; left: 64px; top: 92px; font-size: 17px; color: var(--text2); }
+  .label { font-size: 13px; color: var(--text3); font-weight: 600; letter-spacing: 0.01em; }
+  .col-label { position: absolute; top: 152px; }
+
+  .client {
+    position: absolute; left: 64px; width: 264px; height: 96px; padding: 18px 20px;
+    background: var(--raised); border: 1px solid var(--border); border-radius: 14px;
+  }
+  .client b { display: block; font-size: 18px; font-weight: 600; }
+  .client span { display: block; margin-top: 8px; font-size: 14px; color: var(--signal); }
+
+  .service {
+    position: absolute; left: 404px; top: 176px; width: 772px; height: auto; padding-bottom: 28px;
+    background: var(--shell); border: 1px solid var(--border2); border-radius: 22px; padding: 24px 28px;
+  }
+  .service .title { font-size: 19px; font-weight: 650; }
+  .service .sub { margin-top: 4px; font-size: 14px; color: var(--text3); }
+  .chips { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { padding: 8px 13px; border-radius: 999px; background: var(--raised); border: 1px solid var(--border); font-size: 14px; color: var(--text2); }
+  .harness {
+    margin-top: 22px; background: var(--raised); border: 1px solid var(--border); border-radius: 18px; padding: 20px 22px 22px;
+  }
+  .harness .title { font-size: 17px; }
+  .grid { margin-top: 14px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .cell { background: var(--canvas); border: 1px solid var(--border); border-radius: 12px; padding: 14px 15px; min-height: 124px; }
+  .cell b { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; }
+  .cell p { margin-top: 7px; font-size: 13.5px; line-height: 1.5; color: var(--text2); }
+  .cell.goal { background: var(--signal-soft); border-color: rgba(77, 91, 213, 0.32); }
+  .cell.goal b { color: #3b48b0; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--signal); flex: none; }
+  .dot.green { background: var(--success); }
+  .dot.amber { background: var(--attention); }
+  .dot.grey { background: #8a928d; }
+
+  .side {
+    position: absolute; left: 1250px; width: 286px; background: var(--raised);
+    border: 1px solid var(--border); border-radius: 16px; padding: 18px 20px;
+  }
+  .side b { font-size: 17px; font-weight: 600; }
+  .side p { margin-top: 8px; font-size: 13.5px; line-height: 1.5; color: var(--text2); }
+  .tree { margin-top: 12px; font-size: 14px; line-height: 1.85; color: var(--text2); }
+  .tree .ok { color: var(--success); }
+
+  .footer {
+    position: absolute; left: 404px; top: 754px; width: 772px; text-align: center;
+    font-size: 14px; color: var(--text3);
+  }
+  svg { position: absolute; left: 0; top: 0; }
+</style>
+</head>
+<body>
+<svg width="1600" height="800" viewBox="0 0 1600 800">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4d5bd5" />
+    </marker>
+    <marker id="arrowgrey" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a928d" />
+    </marker>
+  </defs>
+  <!-- clients into the service: one bus -->
+  <path d="M 328 226 H 360" stroke="#4d5bd5" stroke-width="2" fill="none" />
+  <path d="M 328 338 H 360" stroke="#4d5bd5" stroke-width="2" fill="none" />
+  <path d="M 328 450 H 360" stroke="#4d5bd5" stroke-width="2" fill="none" />
+  <path d="M 328 562 H 360" stroke="#4d5bd5" stroke-width="2" fill="none" />
+  <path d="M 360 226 V 562" stroke="#4d5bd5" stroke-width="2" fill="none" />
+  <path d="M 360 394 H 396" stroke="#4d5bd5" stroke-width="2" fill="none" marker-end="url(#arrow)" />
+  <!-- service to project and model -->
+  <path d="M 1176 300 H 1242" stroke="#4d5bd5" stroke-width="2" fill="none" marker-end="url(#arrow)" />
+  <path d="M 1176 624 H 1242" stroke="#8a928d" stroke-width="2" stroke-dasharray="6 6" fill="none" marker-end="url(#arrowgrey)" marker-start="url(#arrowgrey)" />
+</svg>
+
+<h1 data-i18n="title"></h1>
+<p class="lede" data-i18n="lede"></p>
+
+<div class="label col-label" style="left:64px" data-i18n="clientsLabel"></div>
+<div class="client" style="top:178px"><b data-i18n="tui"></b><span class="mono">deepcode</span></div>
+<div class="client" style="top:290px"><b data-i18n="desktop"></b><span class="mono">deepcode desktop</span></div>
+<div class="client" style="top:402px"><b data-i18n="web"></b><span class="mono">deepcode web</span></div>
+<div class="client" style="top:514px"><b data-i18n="scripts"></b><span class="mono">deepcode exec · loop</span></div>
+<p style="position:absolute;left:64px;top:632px;width:264px;font-size:14px;line-height:1.5;color:var(--text3)" data-i18n="clientsNote"></p>
+
+<div class="service">
+  <div class="title" data-i18n="service"></div>
+  <div class="sub" data-i18n="serviceSub"></div>
+  <div class="chips">
+    <span class="chip" data-i18n="c1"></span>
+    <span class="chip" data-i18n="c2"></span>
+    <span class="chip" data-i18n="c3"></span>
+    <span class="chip" data-i18n="c4"></span>
+    <span class="chip" data-i18n="c5"></span>
+  </div>
+  <div class="harness">
+    <div class="title" style="font-weight:650" data-i18n="harness"></div>
+    <div class="grid">
+      <div class="cell"><b><i class="dot"></i><span data-i18n="h1"></span></b><p data-i18n="h1p"></p></div>
+      <div class="cell"><b><i class="dot"></i><span data-i18n="h2"></span></b><p data-i18n="h2p"></p></div>
+      <div class="cell"><b><i class="dot amber"></i><span data-i18n="h3"></span></b><p data-i18n="h3p"></p></div>
+      <div class="cell"><b><i class="dot grey"></i><span data-i18n="h4"></span></b><p data-i18n="h4p"></p></div>
+      <div class="cell"><b><i class="dot grey"></i><span data-i18n="h5"></span></b><p data-i18n="h5p"></p></div>
+      <div class="cell goal"><b><i class="dot green"></i><span data-i18n="h6"></span></b><p data-i18n="h6p"></p></div>
+    </div>
+  </div>
+</div>
+
+<div class="label col-label" style="left:1250px" data-i18n="projectLabel"></div>
+<div class="side" style="top:178px">
+  <b data-i18n="project"></b>
+  <div class="tree mono">
+    <div>src/</div>
+    <div>tests/</div>
+    <div>AGENTS.md</div>
+    <div>.git</div>
+  </div>
+  <p data-i18n="projectP"></p>
+</div>
+<div class="side" style="top:556px">
+  <b data-i18n="model"></b>
+  <p data-i18n="modelP"></p>
+</div>
+
+<div class="footer" data-i18n="footer"></div>
+
+<script>
+const text = {
+  en: {
+    title: "How DeepCode fits together",
+    lede: "Every client talks to one service on your computer. The agent works only where and how you allow.",
+    clientsLabel: "Where you work",
+    tui: "Terminal UI", desktop: "Desktop app", web: "Web client", scripts: "Scripts and CI",
+    clientsNote: "Start in one, continue in another: they share Projects, Sessions, models, Skills and permissions.",
+    service: "DeepCode service",
+    serviceSub: "Runs in the background on 127.0.0.1, so work continues after you close a client.",
+    c1: "Projects you trust", c2: "Sessions and history", c3: "Goals", c4: "Approvals", c5: "Automations",
+    harness: "Agent harness",
+    h1: "Models", h1p: "14 built-in providers, any OpenAI- or Anthropic-compatible endpoint, or a local model.",
+    h2: "Tools", h2p: "Read, search, edit and patch files, run commands and tests, fetch pages.",
+    h3: "Guardrails", h3p: "Ask, Read only or Full access; an OS sandbox for commands; project hooks run only once you approve them.",
+    h4: "Context", h4p: "AGENTS.md, project memory, Skills and MCP servers.",
+    h5: "Sub-agents", h5p: "Parallel helpers, each optionally in its own Git worktree.",
+    h6: "Goal checks", h6p: "A checklist DeepCode runs itself and an independent reviewer, before a Goal counts as complete.",
+    projectLabel: "Where the work happens",
+    project: "Your project",
+    projectP: "Every edit shows as a diff to review; nothing outside the folder changes under Ask.",
+    model: "The model you chose",
+    modelP: "Receives the instructions, the conversation and tool results. A local model keeps all of it on your machine.",
+    footer: "No account and no analytics. Settings, Sessions and API keys stay in ~/.deepcode on your computer.",
+  },
+  zh: {
+    title: "DeepCode 的整体结构",
+    lede: "所有客户端都连到你电脑上的同一个服务；智能体只在你允许的地方、按你允许的方式工作。",
+    clientsLabel: "在哪里使用",
+    tui: "终端界面", desktop: "桌面应用", web: "网页客户端", scripts: "脚本与 CI",
+    clientsNote: "在一个客户端开始，换一个继续：项目、会话、模型、Skill 和权限都是共享的。",
+    service: "DeepCode 服务",
+    serviceSub: "在后台运行，只监听 127.0.0.1；关掉客户端后，工作照常继续。",
+    c1: "已信任的项目", c2: "会话与历史", c3: "Goal", c4: "审批", c5: "Automation",
+    harness: "智能体运行环境",
+    h1: "模型", h1p: "14 个内置服务商、任何兼容 OpenAI 或 Anthropic 的接口，或本地模型。",
+    h2: "工具", h2p: "读、搜、改文件和打补丁，运行命令和测试，抓取网页。",
+    h3: "护栏", h3p: "询问 / 只读 / 完全访问；命令在系统沙箱里运行；项目 hook 经你批准才运行。",
+    h4: "上下文", h4p: "AGENTS.md、项目记忆、Skill 和 MCP 服务器。",
+    h5: "子智能体", h5p: "并行的帮手，可以各自在独立的 Git worktree 里工作。",
+    h6: "Goal 验收", h6p: "DeepCode 自己运行的检查清单加独立审查，通过后 Goal 才算完成。",
+    projectLabel: "工作发生的地方",
+    project: "你的项目",
+    projectP: "每处改动都以 diff 呈现供你审阅；在询问模式下，文件夹之外不会被改动。",
+    model: "你选择的模型",
+    modelP: "收到系统指令、对话和工具结果；用本地模型时，这些都不离开你的电脑。",
+    footer: "没有账号，也没有统计上报；设置、会话和 API 密钥都保存在你电脑上的 ~/.deepcode。",
+  },
+};
+const lang = new URLSearchParams(location.search).get("lang") || "en";
+for (const el of document.querySelectorAll("[data-i18n]")) el.textContent = text[lang][el.dataset.i18n];
+</script>
+</body>
+</html>

@@ -87,12 +87,13 @@ durable Goal without keeping an interface open:
 deepcode loop "Implement the requested feature and verify it"
 ```
 
-An optional evidence command tells the Agent what it must run and inspect
-before deciding whether the Goal is complete:
+An optional test command tells the Agent what it must run before deciding
+whether the Goal is complete, and DeepCode runs it itself, with the agent's
+command rights, before it accepts the claim. `--check` adds more such commands:
 
 ```console
 deepcode loop "Implement the requested feature" \
-  --test-cmd "python -m pytest -q"
+  --test-cmd "python -m pytest -q" --check "ruff check ."
 ```
 
 Resume the same Goal and canonical Session after the process exits:
@@ -102,7 +103,8 @@ deepcode loop --resume <session-id>
 ```
 
 Connection, model, and Thinking overrides affect only the next Turn started by
-the command. `--token-budget` is optional; omit it for an unbudgeted Goal.
+the command. `--token-budget` and `--time-budget MINUTES` are optional; omit
+them for an unbudgeted Goal.
 
 ### Automation management
 
@@ -373,11 +375,12 @@ Desktop 和交互式 CLI 是创建、调整 Goal 的主要入口。`deepcode loo
 deepcode loop "实现指定功能并完成验证"
 ```
 
-可选的证据命令会要求 Agent 在判断完成之前运行并检查该命令：
+可选的测试命令会要求 Agent 在判断完成之前运行它；DeepCode 接受完成声明之前
+也会以 Agent 自己的命令权限运行一次。`--check` 可以再加更多这样的命令：
 
 ```console
 deepcode loop "实现指定功能" \
-  --test-cmd "python -m pytest -q"
+  --test-cmd "python -m pytest -q" --check "ruff check ."
 ```
 
 进程退出后继续同一个 Goal 与规范 Session：
@@ -387,7 +390,7 @@ deepcode loop --resume <session-id>
 ```
 
 连接、模型和 Thinking 覆盖只影响该命令启动的下一个 Turn。
-`--token-budget` 是可选项；不传入就是无预算 Goal。
+`--token-budget` 和 `--time-budget 分钟数` 都是可选项；都不传入就是无预算 Goal。
 
 ### Automation 管理
 

@@ -829,9 +829,10 @@ def test_run_detail_comes_from_the_goal_state_it_was_judged_by(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    factory = _GoalAwareFactory(_TurnStep("blocked"))
+    # A Goal can be reported blocked from its third Turn on.
+    factory = _GoalAwareFactory(_TurnStep(None), _TurnStep(None), _TurnStep("blocked"))
     application, automation = _application(tmp_path, factory)
-    reason = "Agent requested blocked in scripted Turn 0."
+    reason = "Agent requested blocked in scripted Turn 2."
     try:
         execution = application.automations.run_now(
             automation.id,
@@ -887,7 +888,10 @@ def test_run_detail_comes_from_the_goal_state_it_was_judged_by(
 
 
 def test_agent_blocked_run_resumes_same_goal_and_same_run(tmp_path: Path) -> None:
+    # A Goal can be reported blocked from its third Turn on.
     factory = _GoalAwareFactory(
+        _TurnStep(None),
+        _TurnStep(None),
         _TurnStep("blocked"),
         _TurnStep("complete"),
     )
@@ -913,7 +917,7 @@ def test_agent_blocked_run_resumes_same_goal_and_same_run(tmp_path: Path) -> Non
         assert _fact_counts(application, automation.id, automation.thread_id) == (
             1,
             1,
-            1,
+            3,
         )
 
         application.goals.resume(
@@ -932,14 +936,11 @@ def test_agent_blocked_run_resumes_same_goal_and_same_run(tmp_path: Path) -> Non
         assert _fact_counts(application, automation.id, automation.thread_id) == (
             1,
             1,
-            2,
+            4,
         )
         turns = _turns(application, automation.thread_id)
-        assert [turn.goal_id for turn in turns] == [
-            blocked.goal_id,
-            blocked.goal_id,
-        ]
-        assert factory.decisions == [(0, "blocked"), (1, "complete")]
+        assert [turn.goal_id for turn in turns] == [blocked.goal_id] * 4
+        assert factory.decisions == [(2, "blocked"), (3, "complete")]
     finally:
         application.close()
 

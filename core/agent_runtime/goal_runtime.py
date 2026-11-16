@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import threading
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
@@ -15,21 +18,50 @@ if TYPE_CHECKING:
     )
 
 
-GOAL_TOOL_NAMES = frozenset({"get_goal", "update_goal"})
+logger = logging.getLogger(__name__)
+
+GOAL_TOOL_NAMES = frozenset({"get_goal", "update_goal", "propose_goal_checks"})
 # The Goal ledger's reason limit (GOAL_OUTCOME_REASON_MAX_CHARS); a longer
 # auto-block reason would fail the very update that ends the retries.
 _AUTO_BLOCK_REASON_MAX_CHARS = 2_000
+# Rejected claims per Goal before it stops even while each one followed new
+# changes: every claim may start a review that costs real tokens.
+MAX_TOTAL_REJECTIONS = 10
+# The model may report a Goal blocked only from this Turn on (dsh's rule; Codex
+# asks for it in its prompt): an obstacle often gives way to another approach
+# on a later Turn. A user who declined an approval in the Turn is the
+# exception: asking them again would be worse. The runtime's own stops are not
+# limited by it.
+MIN_TURNS_BEFORE_BLOCKED = 3
+# Completion claims in a row held back for running sub-agents before the next
+# one is judged anyway: a sub-agent that hangs must not make completion
+# impossible.
+MAX_HELD_CLAIMS = 3
+
+
+@dataclass(slots=True)
+class _Rejections:
+    """Rejected claims of one Goal: in a row without new changes, and in all."""
+
+    stalled: int = 0
+    total: int = 0
+    marker: str | None = None
+
+
 _GOAL_CLOSURE_PROMPT = """\
 Before ending this Goal-associated Turn, call get_goal and compare the latest
 objective with the current workspace and evidence.
 
-- If the complete Goal is satisfied, call update_goal(status="complete") and
-  give a concise reason grounded in evidence from this Turn.
-- If a persistent external blocker leaves no safe action, call
-  update_goal(status="blocked") and explain it.
+- If every requirement of the Goal is proved by current evidence (the code,
+  commands you ran, tests you checked cover it), call
+  update_goal(status="complete") with a concise reason naming that evidence.
+- If the same external blocker has stopped all progress across at least three
+  turns and no safe action remains, call update_goal(status="blocked") and
+  explain it.
 - Otherwise continue concrete work toward the Goal.
 
-Do not mark the Goal complete merely because one intermediate check passed."""
+Do not mark the Goal complete merely because one intermediate check passed or
+because no remaining work is obvious."""
 
 
 class GoalRuntimeError(RuntimeError):
@@ -54,7 +86,43 @@ class GoalRuntimeHandler(Protocol):
         *,
         status: str,
         reason: str | None,
-    ) -> dict[str, Any]: ...
+        expected_objective: str | None = None,
+    ) -> dict[str, Any]:
+        """Record the decision.
+
+        ``expected_objective``: the objective a verifier judged. When the Goal
+        no longer has it (the user edited it meanwhile), refuse instead of
+        recording a verdict about another objective.
+        """
+        ...
+
+    def record_verification_tokens(
+        self,
+        context: GoalRuntimeContext,
+        tokens: int,
+    ) -> None:
+        """Charge the tokens a completion review spent to the Goal."""
+        ...
+
+    def record_review(
+        self, context: GoalRuntimeContext, review: dict[str, Any]
+    ) -> None:
+        """Keep one completion review in the Goal's history (best effort)."""
+        ...
+
+    def propose_checks(
+        self, context: GoalRuntimeContext, checks: tuple[Any, ...]
+    ) -> dict[str, Any]:
+        """Keep the agent's checklist (``GoalCheck`` values) for the user to confirm."""
+        ...
+
+    def goal_turn_count(self, context: GoalRuntimeContext) -> int:
+        """How many Turns have worked on the Goal, this one included."""
+        ...
+
+    def user_declined_in_turn(self, context: GoalRuntimeContext) -> bool:
+        """Whether the user declined an approval this Turn asked for."""
+        ...
 
     def completion_request(
         self,
@@ -77,9 +145,13 @@ class GoalRuntimeRouter:
     :meth:`configure_completion_verifier`), a ``complete`` request is judged
     exactly once, asynchronously, before any durable update. A rejection is
     returned to the model as data — with the verifier's justification — and
-    the goal is not updated. After ``max_rejections`` rejected claims the
-    router moves the goal to ``blocked`` itself, so a model that keeps
-    re-claiming completion cannot burn Turns forever.
+    the goal is not updated. After ``max_rejections`` rejected claims in a
+    row with no new changes in between, after ``MAX_TOTAL_REJECTIONS`` in
+    all, or at once when the verifier finds the Goal impossible, the router
+    moves the goal to ``blocked`` itself, so a model that keeps re-claiming
+    completion cannot burn Turns forever. A verifier that cannot reach a
+    verdict (:class:`VerificationUnavailable`) also stops the Goal as blocked,
+    with that reason, but counts no rejection: the work may well be fine.
     """
 
     def __init__(self) -> None:
@@ -87,13 +159,19 @@ class GoalRuntimeRouter:
         self._handler: GoalRuntimeHandler | None = None
         self._context: GoalRuntimeContext | None = None
         self._terminal_requested = False
+        # When the active Turn started, for the Goal's time budget.
+        self._activated_at = 0.0
         self._verifier: GoalCompletionVerifier | None = None
         self._settle: Callable[[], Awaitable[None]] | None = None
         self._max_rejections = 3
+        # How many sub-agents of the active session are still running, and
+        # claims held back for them in a row, per Goal.
+        self._running_work: Callable[[], int] | None = None
+        self._held_claims: dict[str, int] = {}
         # Rejected completion claims per goal, so a model cannot burn Turns
         # retrying the same claim; cleared on success, auto-block, and every
         # (re)configuration. Process memory only: a restart starts over.
-        self._rejections: dict[str, int] = {}
+        self._rejections: dict[str, _Rejections] = {}
 
     def configure(self, handler: GoalRuntimeHandler) -> None:
         with self._lock:
@@ -122,12 +200,24 @@ class GoalRuntimeRouter:
             self._max_rejections = max_rejections
             self._rejections.clear()
 
+    def configure_running_work(self, count: Callable[[], int] | None) -> None:
+        """Tell the router how many sub-agents are still at work.
+
+        A completion claim made while one runs is not recorded: its result
+        may still change the work, and a review now would judge it unfinished.
+        """
+
+        with self._lock:
+            self._running_work = count
+
     def activate(self, context: GoalRuntimeContext) -> None:
         with self._lock:
             if self._context is not None and self._context.turn_id != context.turn_id:
                 raise GoalRuntimeError(
                     f"Goal runtime is already active for Turn {self._context.turn_id}"
                 )
+            if self._context is None:
+                self._activated_at = time.monotonic()
             self._context = context
             self._terminal_requested = False
 
@@ -142,6 +232,10 @@ class GoalRuntimeRouter:
         handler, context = self._snapshot()
         return handler.read_goal(context)
 
+    def propose_checks(self, checks: tuple[Any, ...]) -> dict[str, Any]:
+        handler, context = self._snapshot()
+        return handler.propose_checks(context, checks)
+
     async def request(
         self,
         *,
@@ -154,51 +248,257 @@ class GoalRuntimeRouter:
         with self._lock:
             verifier = self._verifier
             settle = self._settle
+            running_work = self._running_work
 
+        if status == "complete" and running_work is not None:
+            try:
+                running = running_work()
+            except Exception:  # noqa: BLE001 - never blocks a claim by itself
+                logger.warning("Could not count running sub-agents", exc_info=True)
+                running = 0
+            with self._lock:
+                held = self._held_claims.get(context.goal_id, 0)
+                if running > 0 and held < MAX_HELD_CLAIMS:
+                    self._held_claims[context.goal_id] = held + 1
+                else:
+                    self._held_claims.pop(context.goal_id, None)
+            if running > 0 and held < MAX_HELD_CLAIMS:
+                return {
+                    "updated": False,
+                    "goalId": context.goal_id,
+                    "note": (
+                        f"Not recorded: {running} sub-agent(s) you started are "
+                        "still running. Wait for them (wait_agent), check what "
+                        "they did, then claim completion again. Stop one that "
+                        "is stuck with interrupt_agent."
+                    ),
+                }
+
+        verdict = None
         if status == "complete" and verifier is not None:
-            from core.agent_runtime.goal_verifier import GoalVerdict
+            from core.agent_runtime.goal_verifier import (
+                GoalVerdict,
+                VerificationUnavailable,
+                review_record,
+            )
 
+            judged_objective = None
+            progress_marker = ""
             try:
                 if settle is not None:
                     await settle()
-                verdict = await verifier(
-                    handler.completion_request(context, reason=reason)
+                claim = handler.completion_request(context, reason=reason)
+                judged_objective = claim.objective
+                progress_marker = claim.progress_marker
+                verdict = await verifier(claim)
+            except asyncio.CancelledError as exc:
+                # Stopped mid-review: what it spent so far is still spent.
+                self._charge(handler, context, getattr(exc, "tokens", 0))
+                raise
+            except VerificationUnavailable as exc:
+                self._charge(handler, context, exc.tokens)
+                self._keep(
+                    handler,
+                    context,
+                    review_record(
+                        goal_id=context.goal_id,
+                        turn_id=context.turn_id,
+                        result="unavailable",
+                        problem=str(exc),
+                        check_runs=exc.check_runs,
+                        tokens=exc.tokens,
+                    ),
+                )
+                return self._stop_unverified(
+                    handler, context, str(exc), judged_objective
                 )
             except Exception as exc:  # noqa: BLE001 - fail closed, report to the model
                 verdict = GoalVerdict(
                     confirmed=False,
                     justification=f"Completion verification failed: {exc}",
+                    tokens=getattr(exc, "tokens", 0),
+                    stage="error",
+                )
+            if verdict.stage != "none":
+                self._keep(
+                    handler,
+                    context,
+                    review_record(
+                        goal_id=context.goal_id,
+                        turn_id=context.turn_id,
+                        result=(
+                            "passed"
+                            if verdict.confirmed
+                            else "impossible"
+                            if verdict.impossible
+                            else "rejected"
+                        ),
+                        verdict=verdict,
+                    ),
                 )
             if not verdict.confirmed:
-                return self._reject_completion(handler, context, verdict)
-
-        result = handler.update_goal(
-            context,
-            status=status,
-            reason=reason,
-        )
+                # Charged first, so the rejection can say when the review
+                # used up the budget.
+                self._charge(handler, context, verdict.tokens)
+                return self._reject_completion(
+                    handler, context, verdict, judged_objective, progress_marker
+                )
+            try:
+                result = handler.update_goal(
+                    context,
+                    status=status,
+                    reason=reason,
+                    expected_objective=judged_objective,
+                )
+            finally:
+                # After the decision: charging first could end the budget
+                # and refuse a completion the review just confirmed.
+                self._charge(handler, context, verdict.tokens)
+        else:
+            if status == "blocked":
+                early = self._too_early_to_block(handler, context)
+                if early is not None:
+                    return early
+            result = handler.update_goal(
+                context,
+                status=status,
+                reason=reason,
+            )
         with self._lock:
             if self._context != context:
                 raise GoalRuntimeError("Goal Turn changed while recording the decision")
             self._terminal_requested = True
             self._rejections.pop(context.goal_id, None)
+        if verdict is not None and verdict.stage != "none":
+            result = {
+                **result,
+                "verdict": {
+                    "confirmed": True,
+                    "justification": verdict.justification,
+                },
+            }
         return result
+
+    @staticmethod
+    def _keep(
+        handler: GoalRuntimeHandler,
+        context: GoalRuntimeContext,
+        review: dict[str, Any],
+    ) -> None:
+        """Keep a review in the Goal's history; never hides the decision."""
+
+        try:
+            handler.record_review(context, review)
+        except Exception:  # noqa: BLE001 - history must not change the outcome
+            logger.exception("a completion review was not kept")
+
+    @staticmethod
+    def _charge(
+        handler: GoalRuntimeHandler,
+        context: GoalRuntimeContext,
+        tokens: int,
+    ) -> None:
+        """Charge a review's tokens; best effort, never hides the decision."""
+
+        if tokens <= 0:
+            return
+        try:
+            handler.record_verification_tokens(context, tokens)
+        except Exception:  # noqa: BLE001 - accounting must not change the outcome
+            logger.exception("completion review tokens were not charged")
+
+    def _goal_still_open(
+        self,
+        handler: GoalRuntimeHandler,
+        context: GoalRuntimeContext,
+    ) -> bool:
+        try:
+            return bool(handler.read_goal(context).get("canUpdate", True))
+        except Exception:  # noqa: BLE001 - the answer itself must still arrive
+            logger.exception("Goal state could not be read after a verdict")
+            return True
+
+    def _stop_unverified(
+        self,
+        handler: GoalRuntimeHandler,
+        context: GoalRuntimeContext,
+        problem: str,
+        judged_objective: str | None,
+    ) -> dict[str, Any]:
+        """Stop the Goal when its claim could not be verified at all.
+
+        Blocked with the reason, so the user sees why and can resume it; no
+        rejection is counted against the agent.
+        """
+
+        if not self._goal_still_open(handler, context):
+            # The review used up the token budget, or the Goal was paused or
+            # replaced meanwhile: nothing is left to stop.
+            return {
+                "goalId": context.goal_id,
+                "updated": False,
+                "verdict": {
+                    "confirmed": False,
+                    "justification": (
+                        f"The completion claim could not be verified ({problem}). "
+                        "This Goal is no longer active."
+                    ),
+                },
+            }
+        reason = (
+            f"The completion claim could not be verified ({problem}). "
+            "Resume the Goal to try again."
+        )[:_AUTO_BLOCK_REASON_MAX_CHARS]
+        result = handler.update_goal(
+            context,
+            status="blocked",
+            reason=reason,
+            expected_objective=judged_objective,
+        )
+        with self._lock:
+            if self._context != context:
+                raise GoalRuntimeError("Goal Turn changed while recording the decision")
+            self._terminal_requested = True
+        return {
+            **result,
+            "updated": True,
+            "unverified": True,
+            "verdict": {"confirmed": False, "justification": reason},
+        }
 
     def _reject_completion(
         self,
         handler: GoalRuntimeHandler,
         context: GoalRuntimeContext,
         verdict: GoalVerdict,
+        judged_objective: str | None = None,
+        progress_marker: str = "",
     ) -> dict[str, Any]:
-        """Return a rejection to the model; auto-block after N rejections."""
+        """Return a rejection to the model; auto-block when it goes nowhere."""
 
         with self._lock:
             if self._context != context:
                 raise GoalRuntimeError("Goal Turn changed while recording the decision")
-            count = self._rejections.get(context.goal_id, 0) + 1
-            self._rejections[context.goal_id] = count
+            counted = self._rejections.setdefault(context.goal_id, _Rejections())
+            # A file change the last rejection had not seen: the agent is
+            # getting on. No change in the claim's Turn is no progress.
+            progressed = (
+                counted.total > 0
+                and bool(progress_marker)
+                and progress_marker != counted.marker
+            )
+            counted.stalled = 1 if progressed else counted.stalled + 1
+            counted.total += 1
+            if progress_marker:
+                counted.marker = progress_marker
+            count = counted.stalled
+            total = counted.total
             max_rejections = self._max_rejections
-            exhausted = count >= max_rejections
+            exhausted = (
+                verdict.impossible
+                or count >= max_rejections
+                or total >= MAX_TOTAL_REJECTIONS
+            )
 
         rejection: dict[str, Any] = {
             "goalId": context.goal_id,
@@ -209,7 +509,18 @@ class GoalRuntimeRouter:
             },
             "rejections": count,
             "maxRejections": max_rejections,
+            "totalRejections": total,
         }
+        if not self._goal_still_open(handler, context):
+            # The review used up the token budget, or the Goal was paused or
+            # replaced: no later claim in this Turn can be recorded, and
+            # nothing is left to block.
+            rejection["verdict"]["justification"] += (
+                "\nThis Goal is no longer active (for example, its token "
+                "budget is used up), so it cannot be claimed complete in this "
+                "Turn."
+            )
+            return rejection
         if not exhausted:
             return rejection
 
@@ -220,9 +531,22 @@ class GoalRuntimeRouter:
             context,
             status="blocked",
             reason=(
-                f"Blocked by the completion verifier after {count} rejected "
-                f"completion claims. Last rejection: {verdict.justification}"
+                verdict.justification
+                if verdict.impossible
+                else (
+                    f"Blocked by the completion verifier after {count} rejected "
+                    "completion claims with no new changes in between. "
+                    f"Last rejection: {verdict.justification}"
+                )
+                if count >= max_rejections
+                else (
+                    f"Blocked by the completion verifier after {total} rejected "
+                    f"completion claims. Last rejection: {verdict.justification}"
+                )
             )[:_AUTO_BLOCK_REASON_MAX_CHARS],
+            # A verdict about an objective the user has since edited must
+            # not block the edited Goal either.
+            expected_objective=judged_objective,
         )
         with self._lock:
             if self._context != context:
@@ -235,6 +559,7 @@ class GoalRuntimeRouter:
             "verdict": rejection["verdict"],
             "rejections": count,
             "maxRejections": max_rejections,
+            "totalRejections": total,
             "autoBlocked": True,
         }
 
@@ -251,6 +576,83 @@ class GoalRuntimeRouter:
             # response pass, but no further side-effecting tools.
             return ()
         return names
+
+    @staticmethod
+    def _too_early_to_block(
+        handler: GoalRuntimeHandler,
+        context: GoalRuntimeContext,
+    ) -> dict[str, Any] | None:
+        """Refuse a blocked report before the Goal's third Turn."""
+
+        try:
+            turns = handler.goal_turn_count(context)
+            if turns >= MIN_TURNS_BEFORE_BLOCKED or handler.user_declined_in_turn(
+                context
+            ):
+                return None
+        except Exception:
+            logger.warning("Could not check an early blocked report", exc_info=True)
+            return None
+        return {
+            "updated": False,
+            "goalId": context.goal_id,
+            "note": (
+                f"Not recorded: this is Turn {turns} of the Goal, and a Goal "
+                f"can be reported blocked only from Turn "
+                f"{MIN_TURNS_BEFORE_BLOCKED} on. Keep working on what you can; "
+                "an obstacle often gives way to another approach. Never work "
+                "around something the user declined. If the obstacle still "
+                "stops you on a later Turn, report blocked then, naming it and "
+                "what you tried."
+            ),
+        }
+
+    def remaining_tokens(self) -> int | None:
+        """Tokens the active Goal Turn may still spend, or None for no limit.
+
+        The Goal adds a Turn's usage only when the Turn settles, so without
+        this a single runaway Turn could spend far past the budget. Review
+        tokens are charged as they are spent, so they count here at once.
+        0 also once the Goal's time budget is used, this Turn's time so far
+        included.
+        """
+
+        with self._lock:
+            handler = self._handler
+            context = self._context
+            activated_at = self._activated_at
+        if handler is None or context is None:
+            return None
+        try:
+            view = handler.read_goal(context)
+        except Exception:
+            logger.warning("Could not read the Goal for its budget", exc_info=True)
+            return None
+        goal = view.get("goal")
+        # By identity, not status: the budget running out mid-Turn (review
+        # tokens, a lowered budget) moves the Goal to budget_limited, and that
+        # is exactly when the limit must hold.
+        if not isinstance(goal, dict) or goal.get("id") != context.goal_id:
+            return None
+        if goal.get("status") == "complete":
+            # Done: the Turn only has its closing answer left.
+            return None
+        # The Goal counts a Turn's time when the Turn settles; this one's so
+        # far is added here, in whole seconds as settling counts it, so a
+        # Turn stopped here always settles the Goal as out of time.
+        time_budget = goal.get("timeBudgetSeconds")
+        time_used = goal.get("timeUsedSeconds")
+        if (
+            isinstance(time_budget, int)
+            and isinstance(time_used, int)
+            and time_used + int(time.monotonic() - activated_at) >= time_budget
+        ):
+            return 0
+        budget = goal.get("tokenBudget")
+        used = goal.get("tokensUsed")
+        if not isinstance(budget, int) or not isinstance(used, int):
+            return None
+        return max(0, budget - used)
 
     def closure_prompt(self, stop_hook_active: bool = False) -> str | None:
         """Request one model-owned Goal decision before a clean Turn exit."""

@@ -43,8 +43,8 @@ kept in `~/.deepcode/credentials.json`, not in `deepcode_config.json`.
 | `agents.defaults.reasoningEffort` | a level the model supports | Default reasoning effort. |
 | `agents.defaults.defaultPreset` | preset id | Agent preset for new Sessions. |
 | `agents.defaults.microcompact` | `true` / `false` (`false`) | When a long Session nears its context limit, replace stale tool results with a short placeholder (keeping paths to saved output) before asking the model for a summary. |
-| `goal.completionVerifier` | `"off"` / `"rule"` (`"off"`) | With `"rule"`, a claim that a Goal is complete is turned back while the latest check failed or no work was done. |
-| `goal.maxRejections` | integer ≥ 1 (`3`) | After this many rejected completion claims, the Goal is marked blocked. |
+| `goal.completionVerifier` | `"off"` / `"rule"` / `"reviewer"` (`"off"`) | With `"rule"`, a claim that a Goal is complete is turned back while the latest check failed or no work was done. `"reviewer"` adds an independent review: a second agent reads the changes and re-runs the checks before the Goal is recorded complete. A Goal's confirmed checks run in every mode. Also in Desktop under **Settings → General → Goal completion checks**. See [Goals](goals-and-headless.md#check-completion-claims). |
+| `goal.maxRejections` | integer ≥ 1 (`3`) | After this many rejected completion claims in a row with no file changes in between, the Goal is marked blocked (and after 10 rejected claims in all). |
 | `providers.egress` | object | Limits which hosts receive model requests; see below. |
 | `mcpServers` | object | MCP servers for the agent. See the [MCP guide](../integrations/MCP.md). |
 | `skills.disabled` | list of Skill ids | Skills that are not offered to the agent. |

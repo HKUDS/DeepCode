@@ -629,17 +629,35 @@ class _RecordedTurns(_Turns):
         self.snapshots[turn.id] = _Snapshot(turn, (user_message,))
         return self.snapshots[turn.id]
 
-    def complete_active(self) -> Turn:
+    def complete_active(
+        self,
+        work: tuple[tuple[ItemKind, ItemStatus], ...] = (
+            (ItemKind.TOOL_CALL, ItemStatus.COMPLETED),
+        ),
+    ) -> Turn:
+        """Complete the active Turn after ``work`` (by default one good read)."""
         assert self.active is not None
         turn = replace(
             self.active,
             status=TurnStatus.COMPLETED,
             completed_at=utc_now(),
         )
+        steps = tuple(
+            Item(
+                thread_id=turn.thread_id,
+                turn_id=turn.id,
+                ordinal=2 + n,
+                kind=kind,
+                status=status,
+                summary="step",
+                payload={"name": "edit" if kind is ItemKind.FILE_CHANGE else "bash"},
+            )
+            for n, (kind, status) in enumerate(work)
+        )
         completion = Item(
             thread_id=turn.thread_id,
             turn_id=turn.id,
-            ordinal=2,
+            ordinal=2 + len(steps),
             kind=ItemKind.COMPLETION,
             status=ItemStatus.COMPLETED,
             summary="settled",
@@ -647,7 +665,7 @@ class _RecordedTurns(_Turns):
         )
         self.snapshots[turn.id] = _Snapshot(
             turn,
-            (*self.snapshots[turn.id].items, completion),
+            (*self.snapshots[turn.id].items, *steps, completion),
         )
         self.active = None
         return turn
@@ -696,6 +714,76 @@ def test_goal_without_budget_stops_after_20_unattended_continuations(
     assert len(turns.started) == 23
     resumed = goals.read(session_id)
     assert resumed is not None and resumed.status is ThreadGoalStatus.ACTIVE
+
+
+NO_WORK: tuple = ()
+FAILED_RUN = (
+    (ItemKind.COMMAND_EXECUTION, ItemStatus.FAILED),
+    (ItemKind.TOOL_CALL, ItemStatus.DECLINED),
+)
+# A failing test run beside a command that worked (perhaps an edit through
+# bash, which records no file change): possibly progress.
+FAILED_RUN_BESIDE_SUCCESS = (
+    (ItemKind.COMMAND_EXECUTION, ItemStatus.FAILED),
+    (ItemKind.COMMAND_EXECUTION, ItemStatus.COMPLETED),
+)
+
+
+@pytest.mark.parametrize(
+    ("work", "reason"),
+    [
+        ((NO_WORK,) * 3, "did no work"),
+        ((FAILED_RUN,) * 3, "had no step that succeeded"),
+        ((NO_WORK, FAILED_RUN, NO_WORK), "had no step that succeeded"),
+    ],
+)
+@pytest.mark.parametrize("budget", [None, 1_000_000])
+def test_three_stuck_automatic_turns_block_the_goal(
+    tmp_path, work, reason, budget
+) -> None:
+    goals, turns, session_id = _recorded_extension(tmp_path)
+    goals.create(
+        session_id,
+        objective="Ship",
+        token_budget=budget,
+        client_surface=ClientSurface.DESKTOP,
+    )
+
+    # The first Turn is the user's; it never counts toward an automatic run.
+    goals.on_turn_settled(turns.complete_active(NO_WORK))
+    for steps in work:
+        goals.on_turn_settled(turns.complete_active(steps))
+
+    assert len(turns.started) == 4
+    current = goals.read(session_id)
+    assert current is not None and current.status is ThreadGoalStatus.BLOCKED
+    outcome = goals.read_outcome(session_id)
+    assert outcome is not None
+    assert outcome.source is GoalDecisionSource.RUNTIME
+    assert reason in outcome.reason
+
+
+@pytest.mark.parametrize(
+    "mixed",
+    [
+        # Something worked in each: the Goal may be getting somewhere.
+        (FAILED_RUN_BESIDE_SUCCESS,) * 3,
+        # Something worked in one of them.
+        (FAILED_RUN, FAILED_RUN_BESIDE_SUCCESS, FAILED_RUN),
+        (NO_WORK, NO_WORK, FAILED_RUN_BESIDE_SUCCESS),
+    ],
+)
+def test_turns_that_are_not_all_stuck_keep_the_goal_going(tmp_path, mixed) -> None:
+    goals, turns, session_id = _recorded_extension(tmp_path)
+    goals.create(session_id, objective="Ship", client_surface=ClientSurface.DESKTOP)
+
+    goals.on_turn_settled(turns.complete_active())
+    for work in mixed:
+        goals.on_turn_settled(turns.complete_active(work))
+
+    assert len(turns.started) == 5
+    current = goals.read(session_id)
+    assert current is not None and current.status is ThreadGoalStatus.ACTIVE
 
 
 def test_goal_with_token_budget_keeps_continuing_until_the_budget(tmp_path) -> None:
@@ -907,10 +995,12 @@ def test_recovery_replays_a_terminal_turn_missing_from_the_goal_ledger(
     assert not turns.started
 
 
-def test_recovery_continues_after_ledger_commit_before_turn_submission(
+def test_restart_pauses_an_active_goal_instead_of_continuing(
     tmp_path,
     monkeypatch,
 ) -> None:
+    """The service stopped between Turns. Nobody may be watching now, so the
+    Goal waits for the user instead of spending tokens on its own."""
     goals, turns, session_id = _extension(tmp_path)
     created = goals.create(session_id, objective="Ship", start=False)
     completed, completion = _terminal_turn(
@@ -929,7 +1019,9 @@ def test_recovery_continues_after_ledger_commit_before_turn_submission(
         turns,
     )
     assert restarted.recover_incomplete() == 0
-    assert len(turns.started) == 1
+    assert not turns.started
+    paused = restarted.read(session_id)
+    assert paused is not None and paused.status is ThreadGoalStatus.PAUSED
 
 
 def test_stale_goal_tool_cannot_update_a_replacement_goal(tmp_path) -> None:
@@ -967,3 +1059,74 @@ def test_stale_goal_tool_cannot_update_a_replacement_goal(tmp_path) -> None:
     assert current is not None
     assert current.id == replacement.id
     assert current.status is ThreadGoalStatus.ACTIVE
+
+
+def test_restart_leaves_a_goal_with_a_queued_turn_active(tmp_path) -> None:
+    """The user queued a message before the restart: that is their decision
+    to go on, and the queued Turn must not run against a paused Goal."""
+    goals, turns, session_id = _extension(tmp_path)
+    created = goals.create(session_id, objective="Ship", start=False)
+    queued = Turn(
+        thread_id=session_id,
+        ordinal=1,
+        prompt="keep going",
+        goal_id=created.id,
+        status=TurnStatus.QUEUED,
+    )
+    turns.snapshots[queued.id] = _Snapshot(queued)
+
+    restarted = GoalExtension(
+        ThreadGoalStore(SessionStore(tmp_path / "sessions", use_index=False)),
+        turns,
+    )
+    restarted.recover_incomplete()
+
+    current = restarted.read(session_id)
+    assert current is not None and current.status is ThreadGoalStatus.ACTIVE
+    assert not turns.started
+
+    # The queued Turn approved itself, not more: once it settles, the Goal
+    # pauses instead of continuing on its own.
+    done = replace(queued, status=TurnStatus.COMPLETED, completed_at=utc_now())
+    completion = Item(
+        thread_id=session_id,
+        turn_id=done.id,
+        ordinal=1,
+        kind=ItemKind.COMPLETION,
+        status=ItemStatus.COMPLETED,
+        summary="settled",
+        payload={"usage": {"total_tokens": 7}},
+    )
+    turns.snapshots[done.id] = _Snapshot(done, (completion,))
+    restarted.on_turn_settled(done)
+
+    paused = restarted.read(session_id)
+    assert paused is not None and paused.status is ThreadGoalStatus.PAUSED
+    assert not turns.started
+
+
+def test_a_goal_turn_count_leaves_out_turns_still_queued(tmp_path) -> None:
+    goals, turns, session_id = _extension(tmp_path)
+    created = goals.create(session_id, objective="Ship", start=False)
+    running = Turn(
+        thread_id=session_id,
+        ordinal=1,
+        prompt="work",
+        goal_id=created.id,
+        status=TurnStatus.RUNNING,
+    )
+    turns.snapshots[running.id] = _Snapshot(running)
+    for ordinal in (2, 3):
+        queued = Turn(
+            thread_id=session_id,
+            ordinal=ordinal,
+            prompt="later",
+            goal_id=created.id,
+            status=TurnStatus.QUEUED,
+        )
+        turns.snapshots[queued.id] = _Snapshot(queued)
+
+    context = GoalRuntimeContext(
+        thread_id=session_id, goal_id=created.id, turn_id=running.id
+    )
+    assert goals.goal_turn_count(context) == 1

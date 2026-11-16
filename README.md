@@ -137,13 +137,20 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 - [📄 License](#license)
 
 <p align="center">
-  <img src="assets/readme/deepcode-overview.png" alt="A verified task completed with DeepCode" width="1080" />
+  <img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/overview.png" alt="How DeepCode fits together: the TUI, Desktop, Web and scripts talk to one local service, whose agent harness works in your project with the model you chose" width="1080" />
 </p>
 
 ---
 
 ## What's new
 
+- **2026-11-02** — Goals you can trust to finish: the agent proposes a
+  checklist, and once you confirm it DeepCode runs those commands itself
+  before it accepts "complete"; an optional independent reviewer checks every
+  requirement, switched on in Settings, and each check is shown on the Goal
+  card. A Goal can have a time limit, stops when it is stuck or keeps
+  repeating itself, wraps up when its budget runs out, and pauses when
+  DeepCode restarts.
 - **2026-10-31** — Long tasks read better on the Web (folded steps, a Goal
   outcome, faster long Sessions), declined tools say so, the terminal UI
   wraps Chinese text and resumes a running Turn cleanly, the Chinese
@@ -158,13 +165,11 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
   the TUI shows when it waits for you and what will change, "always allow"
   covers one kind of command instead of the whole tool, and trusting a folder
   asks first.
-- **2026-10-28** — Agent presets can remove tools with `disallowed-tools`,
-  file tools ask before writing hook files, and `deepcode mcp list` flags MCP
-  packages without a fixed version.
 
 <details>
 <summary><strong>Earlier updates</strong></summary>
 
+- **2026-10-28** — Agent presets that remove tools, file tools that ask before writing hooks, and unpinned MCP packages flagged
 - **2026-10-21** — A quiet Windows service, a separate code font, and community fixes
 - **2026-10-14** — Sessions that keep their history, a tighter sandbox, and the Desktop and Web apps in Chinese
 - **2026-10-13** — Smoother streaming, a self-managing background service, and safer Web sign-in
@@ -229,17 +234,17 @@ finish:
 
 DeepCode stands out in three ways:
 
-- **Turn complex knowledge into a working system.** DeepCode is not limited to
-  Issues and code snippets. Paper2Code can start from papers, documents,
-  reference repositories, and experiment goals, then carry the work through
-  understanding, implementation, and verification.
+- **Done means checked.** When the agent says a Goal is complete, DeepCode
+  runs the checklist you confirmed itself, and an optional independent
+  reviewer proves each requirement with evidence. A claim that falls short
+  goes back to the agent with what is missing.
 - **Keep long tasks moving while staying in control.** A Goal is not a one-shot
   prompt. Add requirements, revise the Goal, pause, stop, or continue while the
-  task is running without losing completed work.
-- **Take code changes through verification and review.** DeepCode goes beyond
-  generating a patch. It runs the commands and tests the task requires,
-  inspects build results and file changes, and links the Goal outcome to
-  relevant execution records for review.
+  task is running without losing completed work. It also stops on its own when
+  it is stuck, out of budget or out of time.
+- **Every change can be reviewed.** Edits show as diffs, sensitive actions wait
+  for your approval, and each Goal keeps its tool calls and checks, so you can
+  see why the outcome can be trusted.
 
 DeepCode is not designed to make an Agent look busier. It is designed to help
 you finish real software engineering work more reliably.
@@ -250,8 +255,8 @@ you finish real software engineering work more reliably.
 
 - **Work that outlasts one answer.** Give the agent a Goal and it keeps
   working across turns, checking its results, until it reports the Goal
-  complete or blocked. You can add requirements, edit the Goal, pause or stop
-  it while it runs.
+  complete or blocked, and a completion claim is checked before it counts.
+  You can add requirements, edit the Goal, pause or stop it while it runs.
 - **Keeps running when you close the client.** Turns run in a local
   background service, not in the window you started them from. Close the TUI,
   reopen the session in the browser, and answer the pending approval there.
@@ -264,11 +269,12 @@ you finish real software engineering work more reliably.
   Anthropic-compatible endpoint, or a local model.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/web-ui.png" alt="The DeepCode Web client: a session that fixed a failing test, with the agent's tool calls in the conversation and the resulting diff in the Review panel" width="100%" />
+  <img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/web-ui.png" alt="The DeepCode Web client after a real Goal: the agent fixed the code and tests, and the Goal card shows the completion check that passed, with each requirement and its evidence" width="100%" />
 </p>
 
-<p align="center"><sub>The Web client after a real task: the agent ran the tests, edited
-one file, re-ran the tests, and the change is open for review.</sub></p>
+<p align="center"><sub>The Web client after a real Goal: the agent fixed two bugs and
+added tests, DeepCode ran the confirmed checks, and an independent review proved every
+requirement before the Goal counted as complete.</sub></p>
 
 ## Quick start
 
@@ -295,10 +301,10 @@ deepcode provider test my-openrouter --model MODEL_ID
 ```
 
 Replace `MODEL_ID` with a model from the list. In Desktop or Web you can do the
-same under **Settings → AI providers**.
+same under **Settings → Models**.
 
 <div align="center">
-  <img src="assets/setting_model.png" alt="Choose a provider and model in DeepCode settings" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.2); margin: 15px 0;"/>
+  <img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/settings-models.png" alt="Model connections in DeepCode settings" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.2); margin: 15px 0;"/>
 </div>
 
 **3. Run it in a project.**
@@ -384,15 +390,17 @@ Problems: [Troubleshooting](docs/guide/troubleshooting.md).
 ## Core features
 
 <p align="center">
-  <img src="assets/readme/verification-loop.png" alt="DeepCode Agent Harness and verification loop" width="1080" />
+  <img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/goal-loop.png" alt="How a Goal reaches complete: Turns of work, a completion claim, then a rule check, the checks you confirmed and an independent review, with the claim turned back while anything is missing" width="1080" />
 </p>
 
 - **Repository work.** Reads, searches and edits files, applies patches, runs
   commands and tests, and shows each change as a diff.
   [Getting started](docs/guide/getting-started.md)
 - **Goals.** `/goal <objective>` in the TUI or the Goal panel in Desktop and
-  Web. The Goal continues across turns and survives restarts; an optional
-  check turns back a completion claim while the latest check failed.
+  Web. The Goal continues across turns and is kept across restarts. Its
+  completion is checked: DeepCode runs the checklist you confirmed, and an
+  independent reviewer can prove each requirement (Settings → General). A
+  token budget or time limit bounds it.
   [Goals and automation](docs/guide/goals-and-headless.md)
 - **Sessions and context.** Every session is saved with its tool calls,
   approvals and Goal state. `/resume`, `/compact` and per-session context caps

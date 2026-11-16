@@ -6,6 +6,8 @@ import type {
   ConfigScope,
   Event,
   ExecutionAccessPreset,
+  GoalCheck,
+  GoalChecksConfirmParams,
   GoalSetParams,
   JsonObject,
   Project,
@@ -70,6 +72,8 @@ function titleFromPrompt(prompt: string): string {
 export interface GoalDefinitionInput {
   objective: string;
   tokenBudget: number | null;
+  /** Active time the Goal may use; left out to keep the current limit. */
+  timeBudgetSeconds?: number | null;
   skillIds: string[];
   resume?: boolean;
 }
@@ -109,6 +113,9 @@ export interface WorkspaceController {
   resumeGoal(): Promise<void>;
   continueGoal(): Promise<void>;
   clearGoal(): Promise<void>;
+  /** Use these checks for the Goal; an empty list removes them. */
+  confirmGoalChecks(checks: GoalCheck[]): Promise<void>;
+  dismissGoalChecks(): Promise<void>;
   sendTurn(
     prompt: string,
     skillIds?: string[],
@@ -193,6 +200,7 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
         type: "goal",
         goal: result.goal,
         outcome: result.outcome,
+        reviews: result.reviews ?? [],
       });
     },
     [runtime],
@@ -701,6 +709,9 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
           threadId: selectedThread.id,
           objective: input.objective,
           tokenBudget: input.tokenBudget,
+          ...(input.timeBudgetSeconds !== undefined
+            ? { timeBudgetSeconds: input.timeBudgetSeconds }
+            : {}),
           skills: input.skillIds as GoalSetParams["skills"],
           ...(current ? { expectedGoalId: current.id } : {}),
           start: true,
@@ -715,6 +726,7 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
           type: "goal",
           goal: result.goal,
           outcome: result.outcome,
+          reviews: result.reviews,
         });
         return true;
       });
@@ -735,6 +747,7 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
           type: "goal",
           goal: result.goal,
           outcome: result.outcome,
+          reviews: result.reviews,
         });
       }),
     [runtime, selectedThread, state.goal, withBusy],
@@ -752,6 +765,7 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
           type: "goal",
           goal: result.goal,
           outcome: result.outcome,
+          reviews: result.reviews,
         });
       }),
     [runtime, selectedThread, state.goal, withBusy],
@@ -769,6 +783,7 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
           type: "goal",
           goal: result.goal,
           outcome: result.outcome,
+          reviews: result.reviews,
         });
       }),
     [runtime, selectedThread, state.goal, withBusy],
@@ -786,6 +801,47 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
           type: "goal",
           goal: result.goal,
           outcome: result.outcome,
+          reviews: result.reviews,
+        });
+      }),
+    [runtime, selectedThread, state.goal, withBusy],
+  );
+
+  const confirmGoalChecks = useCallback(
+    (checks: GoalCheck[]) =>
+      withBusy(async () => {
+        if (!selectedThread || !state.goal) return;
+        const result = await runtime.request("thread/goal/checks/confirm", {
+          threadId: selectedThread.id,
+          expectedGoalId: state.goal.id,
+          checks: checks.map((check) => ({
+            requirement: check.requirement,
+            command: [...check.command],
+          })) as GoalChecksConfirmParams["checks"],
+        });
+        dispatch({
+          type: "goal",
+          goal: result.goal,
+          outcome: result.outcome,
+          reviews: result.reviews,
+        });
+      }),
+    [runtime, selectedThread, state.goal, withBusy],
+  );
+
+  const dismissGoalChecks = useCallback(
+    () =>
+      withBusy(async () => {
+        if (!selectedThread || !state.goal) return;
+        const result = await runtime.request("thread/goal/checks/dismiss", {
+          threadId: selectedThread.id,
+          expectedGoalId: state.goal.id,
+        });
+        dispatch({
+          type: "goal",
+          goal: result.goal,
+          outcome: result.outcome,
+          reviews: result.reviews,
         });
       }),
     [runtime, selectedThread, state.goal, withBusy],
@@ -1036,6 +1092,8 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
       resumeGoal,
       continueGoal,
       clearGoal,
+      confirmGoalChecks,
+      dismissGoalChecks,
       sendTurn,
       queueTurn,
       retryTurn,
@@ -1069,6 +1127,8 @@ export function useWorkspaceController(runtime: ClientRuntime): WorkspaceControl
       registerThread,
       refreshSettings,
       clearGoal,
+      confirmGoalChecks,
+      dismissGoalChecks,
       pauseGoal,
       resumeGoal,
       continueGoal,

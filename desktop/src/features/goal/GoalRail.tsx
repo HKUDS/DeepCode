@@ -16,18 +16,31 @@ import { Dialog } from "../../components/Dialog";
 import { confirmAction } from "../../platform/confirmAction";
 import type {
   Goal,
+  GoalCheck,
   GoalOutcome,
+  GoalReview,
   SkillInfo,
   Turn,
 } from "../../generated/app-server";
 import type { GoalDefinitionInput } from "../../app/useWorkspaceController";
-import { deriveGoalPresentation, goalStatusLabel } from "./goalPresentation";
+import {
+  deriveGoalPresentation,
+  goalStatusLabel,
+  reviewResultLabel,
+} from "./goalPresentation";
 import { GoalOutcomeView } from "./GoalOutcomeView";
+import {
+  GoalCheckProposal,
+  GoalConfirmedChecks,
+  GoalReviewView,
+} from "./GoalChecksView";
 import styles from "./GoalRail.module.css";
 
 interface GoalRailProps {
   goal: Goal | null;
   outcome: GoalOutcome | null;
+  /** Completion checks of this Goal, oldest first. */
+  reviews?: readonly GoalReview[];
   turns: readonly Turn[];
   enabled: boolean;
   busy: boolean;
@@ -37,6 +50,8 @@ interface GoalRailProps {
   onResume(): Promise<void>;
   onContinue(): Promise<void>;
   onClear(): Promise<void>;
+  onConfirmChecks?(checks: GoalCheck[]): Promise<void>;
+  onDismissChecks?(): Promise<void>;
   onSelectEvidence(itemId: string): void;
 }
 
@@ -45,6 +60,7 @@ const MAX_GOAL_SKILLS = 8;
 export function GoalRail({
   goal,
   outcome,
+  reviews = [],
   turns,
   enabled,
   busy,
@@ -54,6 +70,8 @@ export function GoalRail({
   onResume,
   onContinue,
   onClear,
+  onConfirmChecks,
+  onDismissChecks,
   onSelectEvidence,
 }: GoalRailProps) {
   const [editorOpen, setEditorOpen] = useState(false);
@@ -65,6 +83,7 @@ export function GoalRail({
   const [expanded, setExpanded] = useState(false);
   const [objective, setObjective] = useState("");
   const [tokenBudget, setTokenBudget] = useState("");
+  const [timeLimitMinutes, setTimeLimitMinutes] = useState("");
   const [skillIds, setSkillIds] = useState<string[]>([]);
   const { t } = useTranslation();
   const selectableSkills = useMemo(
@@ -83,10 +102,18 @@ export function GoalRail({
     [goal, outcome?.decidedByTurnId, turns],
   );
 
+  const latestReview = reviews.length ? reviews[reviews.length - 1] : null;
+  // A service from before checklists sends Goals without them.
+  const proposedChecks = goal?.proposedChecks ?? [];
+  const confirmedChecks = goal?.checks ?? [];
+
   const openEditor = (resume = false) => {
     setResumeAfterSave(resume);
     setObjective(goal?.objective ?? "");
     setTokenBudget(goal?.tokenBudget ? String(goal.tokenBudget) : "");
+    setTimeLimitMinutes(
+      goal?.timeBudgetSeconds ? String(Math.ceil(goal.timeBudgetSeconds / 60)) : "",
+    );
     setSkillIds(goal ? [...goal.skillIds] : []);
     setEditorOpen(true);
   };
@@ -100,9 +127,25 @@ export function GoalRail({
     if (parsedBudget !== null && (!Number.isSafeInteger(parsedBudget) || parsedBudget < 1)) {
       return;
     }
+    const parsedMinutes = timeLimitMinutes.trim()
+      ? Number.parseInt(timeLimitMinutes.trim(), 10)
+      : null;
+    if (
+      parsedMinutes !== null &&
+      (!Number.isSafeInteger(parsedMinutes) || parsedMinutes < 1)
+    ) {
+      return;
+    }
+    const timeBudgetSeconds = parsedMinutes === null ? null : parsedMinutes * 60;
+    const shownMinutes = goal?.timeBudgetSeconds
+      ? Math.ceil(goal.timeBudgetSeconds / 60)
+      : null;
     const saved = await onSet({
       objective: cleanObjective,
       tokenBudget: parsedBudget,
+      // Sent only when changed: a limit the user left alone stays exact, and
+      // a service from before time limits is never sent the field.
+      ...(parsedMinutes !== shownMinutes ? { timeBudgetSeconds } : {}),
       skillIds,
       resume: resumeAfterSave,
     });
@@ -158,6 +201,14 @@ export function GoalRail({
                   <>
                     <i>·</i>
                     {compactNumber(goal.tokensUsed)} {t("goal.tokens", "tokens")}
+                  </>
+                ) : null}
+                {latestReview ? (
+                  <>
+                    <i>·</i>
+                    <span data-review={latestReview.result}>
+                      {reviewResultLabel(latestReview, t)}
+                    </span>
                   </>
                 ) : null}
               </small>
@@ -234,6 +285,14 @@ export function GoalRail({
               </>
             )}
           </div>
+          {proposedChecks.length && onConfirmChecks && onDismissChecks ? (
+            <GoalCheckProposal
+              checks={proposedChecks}
+              busy={busy}
+              onConfirm={() => void onConfirmChecks([...proposedChecks])}
+              onDismiss={() => void onDismissChecks()}
+            />
+          ) : null}
           {expanded ? (
             <div className={styles.details}>
               <p>
@@ -246,11 +305,39 @@ export function GoalRail({
                 {goal.tokenBudget
                   ? ` · ${t("goal.tokenBudgetLabel", "{{budget}} token budget", { budget: compactNumber(goal.tokenBudget) })}`
                   : ` · ${t("goal.noTokenBudget", "no token budget")}`}
+                {goal.timeBudgetSeconds
+                  ? ` · ${t("goal.timeLimitLabel", "{{duration}} time limit", { duration: formatDuration(goal.timeBudgetSeconds) })}`
+                  : ""}
               </p>
               {outcome ? (
                 <section className={styles.outcome} aria-label={t("goal.outcome", "Goal outcome")}>
                   <GoalOutcomeView outcome={outcome} onSelectEvidence={onSelectEvidence} />
                 </section>
+              ) : null}
+              <GoalReviewView reviews={reviews} />
+              {confirmedChecks.length && onConfirmChecks ? (
+                <GoalConfirmedChecks
+                  checks={confirmedChecks}
+                  busy={busy}
+                  onRemove={() => {
+                    void (async () => {
+                      if (
+                        await confirmAction(
+                          t(
+                            "goal.checks.removeConfirm",
+                            "Remove this Goal's checks? DeepCode stops running them when the Goal is claimed complete.",
+                          ),
+                          {
+                            confirmLabel: t("goal.checks.remove", "Remove checks"),
+                            cancelLabel: t("goal.cancel", "Cancel"),
+                          },
+                        )
+                      ) {
+                        await onConfirmChecks([]);
+                      }
+                    })();
+                  }}
+                />
               ) : null}
               {goal.skillIds.length ? (
                 <ul>
@@ -341,6 +428,20 @@ export function GoalRail({
               step={1}
               value={tokenBudget}
               onChange={(event) => setTokenBudget(event.target.value)}
+              placeholder={t("goal.noLimit", "No limit")}
+            />
+          </label>
+          <label>
+            <span>
+              {t("goal.timeLimit", "Time limit, minutes")}{" "}
+              <small>{t("goal.tokenBudgetOptional", "optional")}</small>
+            </span>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={timeLimitMinutes}
+              onChange={(event) => setTimeLimitMinutes(event.target.value)}
               placeholder={t("goal.noLimit", "No limit")}
             />
           </label>

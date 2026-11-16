@@ -13,6 +13,8 @@ function goal(status: Goal["status"]): Goal {
     tokensUsed: 0,
     timeUsedSeconds: 0,
     skillIds: [],
+    checks: [],
+    proposedChecks: [],
     createdAt: "2026-07-28T00:00:00Z",
     updatedAt: "2026-07-28T00:00:00Z",
   };

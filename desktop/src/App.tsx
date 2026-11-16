@@ -472,6 +472,7 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
                   settings={state.settings}
                   goal={state.goal}
                   goalOutcome={state.goalOutcome}
+                  goalReviews={state.goalReviews}
                   goalTurns={
                     state.goal
                       ? state.turns.filter(
@@ -501,6 +502,8 @@ export function App({ runtime }: { runtime: ClientRuntime }) {
                   onResumeGoal={controller.resumeGoal}
                   onContinueGoal={controller.continueGoal}
                   onClearGoal={controller.clearGoal}
+                  onConfirmGoalChecks={controller.confirmGoalChecks}
+                  onDismissGoalChecks={controller.dismissGoalChecks}
                   onSelectGoalEvidence={(itemId) => {
                     controller.selectItem(itemId);
                     ui.openInspector("details");
