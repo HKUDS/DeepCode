@@ -129,3 +129,18 @@ def test_history_stays_bounded_without_a_repeated_tool(max_repeats, history_boun
         "write_file",
         "read_file",
     ]
+
+
+def test_long_repeat_limit_compares_arguments_across_the_whole_window():
+    detector = LoopDetector(max_repeats=12)
+
+    # Enough earlier calls that the history has already been trimmed.
+    for index in range(5):
+        detector.check_tool_call("read_file", {"file_path": f"src/{index}.py"})
+    detector.check_tool_call("write_file", {"file_path": "a.py"})
+    for _ in range(11):
+        status = detector.check_tool_call("write_file", {"file_path": "b.py"})
+        assert not status["should_stop"]
+
+    status = detector.check_tool_call("write_file", {"file_path": "b.py"})
+    assert status["status"] == "loop_detected"
