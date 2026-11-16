@@ -144,10 +144,11 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 
 ## What's new
 
-- **2026-11-16** — Community fixes: GPT-5 and o-series models work with the
-  default settings, `file:` URLs are checked against protected paths, memory
-  tidy-up keeps every topic link, and Paper2Code no longer mistakes reading
-  several files for a loop or splits sections at a comment in a code block.
+- **2026-11-16** — DeepCode v2.4.0 is out, with community fixes: GPT-5 and
+  o-series models work with the default settings, `file:` URLs are checked
+  against protected paths, memory tidy-up keeps every topic link, and
+  Paper2Code no longer mistakes reading several files for a loop or splits
+  sections at a comment in a code block.
 - **2026-11-02** — Goals you can trust to finish: the agent proposes a
   checklist, and once you confirm it DeepCode runs those commands itself
   before it accepts "complete"; an optional independent reviewer checks every

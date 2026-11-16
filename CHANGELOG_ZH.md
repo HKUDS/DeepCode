@@ -4,7 +4,7 @@ DeepCode 的主要变化，最新的在前，每天一条。正式版本号写�
 PyPI 上的包名是 [deepcode-hku](https://pypi.org/project/deepcode-hku/)。
 English: [CHANGELOG.md](CHANGELOG.md).
 
-## 2026-11-16 · 社区修复
+## 2026-11-16 · DeepCode v2.4.0：社区修复
 
 - **GPT-5 与 o 系列模型在默认设置下可用。** gpt-5、gpt-5-mini、gpt-5-nano 和
   o1/o3/o4 即使没有设置推理强度也不接受 `temperature`，DeepCode 不再给它们发送
@@ -18,7 +18,8 @@ English: [CHANGELOG.md](CHANGELOG.md).
   调用才算 (#299, #290)；代码块里以 `#` 开头的注释不再把论文切出一个新章节
   (#288)。
 - **其他小修复。** Responses 请求保留图片的 `detail` (#296)；新增子智能体历史隔离
-  的测试 (#297)；编辑 Goal 的 TUI 测试不再和运行中的 Turn 抢时序 (#298)。
+  的测试 (#297)；编辑 Goal 的 TUI 测试不再和运行中的 Turn 抢时序 (#298)；Desktop 附带的
+  pypdf 升到 6.21.4，修补 7 个已公布的漏洞。
 
 ## 2026-11-02 · Goal 先验收，再算完成
 

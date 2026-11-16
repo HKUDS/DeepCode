@@ -5,7 +5,7 @@ Released versions are named in the entry title; the version on PyPI is
 [deepcode-hku](https://pypi.org/project/deepcode-hku/). 中文版见
 [CHANGELOG_ZH.md](CHANGELOG_ZH.md).
 
-## 2026-11-16 · Community fixes
+## 2026-11-16 · DeepCode v2.4.0: community fixes
 
 - **GPT-5 and o-series models work with the default settings.** gpt-5,
   gpt-5-mini, gpt-5-nano and the o1/o3/o4 models reject `temperature` even
@@ -23,7 +23,8 @@ Released versions are named in the entry title; the version on PyPI is
   the paper into a new section (#288).
 - **Smaller fixes.** Responses requests keep an image's `detail` (#296); tests
   pin sub-agent history isolation (#297) and the Goal-editing TUI test no
-  longer races the running Turn (#298).
+  longer races the running Turn (#298); the Python packages bundled with
+  Desktop move to pypdf 6.21.4, which patches seven published advisories.
 
 ## 2026-11-02 · Goals that are checked before they count as complete
 
