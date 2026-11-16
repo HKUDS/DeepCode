@@ -7,7 +7,6 @@ Public surface:
   (:mod:`core.agent_runtime.hook`)
 - :class:`Tool`, :class:`ToolRegistry`, ``connect_mcp_servers``
   (:mod:`core.agent_runtime.tools`)
-- :func:`run_parallel_llm` (:mod:`core.agent_runtime.parallel`)
 """
 
 from core.agent_runtime.hook import AgentHook, AgentHookContext, CompositeHook
