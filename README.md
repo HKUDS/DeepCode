@@ -144,6 +144,10 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 
 ## What's new
 
+- **2026-11-17** — Long sessions keep your own words through compaction, a
+  malformed tool call no longer stalls a session, commands that reach a
+  protected file through a link are caught, and new README figures show what
+  DeepCode adds.
 - **2026-11-16** — DeepCode v2.4.0 is out, with community fixes: GPT-5 and
   o-series models work with the default settings, `file:` URLs are checked
   against protected paths, memory tidy-up keeps every topic link, and
@@ -156,16 +160,11 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
   card. A Goal can have a time limit, stops when it is stuck or keeps
   repeating itself, wraps up when its budget runs out, and pauses when
   DeepCode restarts.
-- **2026-10-31** — Long tasks read better on the Web (folded steps, a Goal
-  outcome, faster long Sessions), declined tools say so, the terminal UI
-  wraps Chinese text and resumes a running Turn cleanly, the Chinese
-  interface has no stray English, the sidebar becomes a drawer on a narrow
-  window, and the Web and Desktop interface is calmer: one typeface, one-line
-  controls and steps, and fewer boxes and labels.
 
 <details>
 <summary><strong>Earlier updates</strong></summary>
 
+- **2026-10-31** — Long tasks read better on the Web, a calmer Web and Desktop interface, and a terminal UI that wraps Chinese text
 - **2026-10-29** — Lighter compaction, checked Goal completion, folder browsing on the Web, and clearer approvals
 - **2026-10-28** — Agent presets that remove tools, file tools that ask before writing hooks, and unpinned MCP packages flagged
 - **2026-10-21** — A quiet Windows service, a separate code font, and community fixes
@@ -230,19 +229,22 @@ finish:
 | **Deep Verification** | Check results with tests, builds, diagnostics, Diffs, and task Artifacts rather than treating a plausible answer as done. |
 | **Deep Continuity**   | Preserve conversations, decisions, tool records, and evidence across time, directories, clients, and model changes.    |
 
-DeepCode stands out in three ways:
+DeepCode stands out in three ways, numbered as in the figure above:
 
-- **Done means checked.** When the agent says a Goal is complete, DeepCode
+- **① Verified completion.** When the agent says a Goal is complete, DeepCode
   runs the checklist you confirmed itself, and an optional independent
   reviewer proves each requirement with evidence. A claim that falls short
   goes back to the agent with what is missing.
-- **Keep long tasks moving while staying in control.** A Goal is not a one-shot
-  prompt. Add requirements, revise the Goal, pause, stop, or continue while the
-  task is running without losing completed work. It also stops on its own when
-  it is stuck, out of budget or out of time.
-- **Every change can be reviewed.** Edits show as diffs, sensitive actions wait
-  for your approval, and each Goal keeps its tool calls and checks, so you can
-  see why the outcome can be trusted.
+- **② Stays on track.** Compaction keeps your own words, not only a summary of
+  them. A Goal stops on its own when it is stuck, repeats itself, or runs out
+  of budget or time, and you can add requirements, revise it, pause or stop it
+  while it runs without losing completed work.
+- **③ Persistent Goals.** Goals, sessions, checklists and approvals are kept
+  by a local background service, so the work survives a restart or a closed
+  window and continues in any client.
+
+Next, DeepCode will learn from its verified runs and turn what worked into
+memory and Skills. This self-evolution is planned and not yet in a release.
 
 DeepCode is not designed to make an Agent look busier. It is designed to help
 you finish real software engineering work more reliably.
@@ -251,19 +253,17 @@ you finish real software engineering work more reliably.
 
 ## Why DeepCode
 
-- **Work that outlasts one answer.** Give the agent a Goal and it keeps
-  working across turns, checking its results, until it reports the Goal
-  complete or blocked, and a completion claim is checked before it counts.
-  You can add requirements, edit the Goal, pause or stop it while it runs.
-- **Keeps running when you close the client.** Turns run in a local
-  background service, not in the window you started them from. Close the TUI,
-  reopen the session in the browser, and answer the pending approval there.
-- **One session, four clients.** The TUI, Desktop, Web and `deepcode exec`
-  read and write the same projects, sessions, models, Skills and permissions.
+- **One session, four clients.** Turns run in a local background service,
+  not in the window you started them from. The TUI, Desktop, Web and
+  `deepcode exec` share the same projects, sessions, models, Skills and
+  permissions: close the TUI, reopen the session in the browser, and answer
+  the pending approval there.
 - **You decide what it may do.** A folder must be trusted before the agent
   works in it. Each session runs under Ask, Read only or Full access, shell
   commands run in an OS sandbox under Ask, and repository hooks need your
-  approval. Use any of 14 built-in providers, your own OpenAI- or
+  approval. Every edit shows as a diff, and each Goal keeps its tool calls and
+  checks.
+- **Any model.** Use any of 14 built-in providers, your own OpenAI- or
   Anthropic-compatible endpoint, or a local model.
 
 <p align="center">

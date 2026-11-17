@@ -5,6 +5,23 @@ Released versions are named in the entry title; the version on PyPI is
 [deepcode-hku](https://pypi.org/project/deepcode-hku/). 中文版见
 [CHANGELOG_ZH.md](CHANGELOG_ZH.md).
 
+## 2026-11-17 · Long sessions keep your words, and community fixes
+
+- **Compaction keeps your own words.** When a long session is compacted, your
+  earlier requests are carried over word for word, not only as a summary,
+  and they survive a second compaction. (#303)
+- **A malformed tool call no longer stalls a session.** A tool call without a
+  name is dropped before it runs and the model is told, so the session
+  recovers instead of repeating itself. (#293)
+- **Links to protected files are caught.** A shell command that reaches a
+  protected file through a symbolic link, a linked folder or a Windows
+  junction is treated like a command on that file, and the prompt names the
+  real target. (#307)
+- **New README figures.** The framework figure highlights what DeepCode adds,
+  and both READMEs use the same figures.
+- **Smaller changes.** A test pins the `agent_runtime` layering rule (#289);
+  Desktop moves to Tauri 2.12 with patched rustls, webpki and zip.
+
 ## 2026-11-16 · DeepCode v2.4.0: community fixes
 
 - **GPT-5 and o-series models work with the default settings.** gpt-5,
