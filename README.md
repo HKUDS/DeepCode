@@ -137,7 +137,7 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 - [📄 License](#license)
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/overview.png" alt="How DeepCode fits together: the TUI, Desktop, Web and scripts talk to one local service, whose agent harness works in your project with the model you chose" width="1080" />
+  <img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/overview.png" alt="The DeepCode framework: the TUI, Desktop, Web and scripts talk to one local service. Highlighted is what DeepCode adds: completion verified by checks DeepCode runs and an optional independent reviewer, context that keeps your words with automatic stops, and Goals kept across restarts. Self-evolution is planned." width="1080" />
 </p>
 
 ---

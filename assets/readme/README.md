@@ -2,8 +2,8 @@
 
 | File | Used by | Content |
 | --- | --- | --- |
-| `overview.png`, `overview.zh.png` | `README.md`, `README_ZH.md` | How DeepCode fits together: clients, the local service, the agent harness, your project and the model |
-| `goal-loop.png`, `goal-loop.zh.png` | `README.md`, `README_ZH.md` | How a Goal reaches complete: Turns of work, the completion check and the stops |
+| `overview.png` | `README.md`, `README_ZH.md` | The DeepCode framework, with what DeepCode adds highlighted: verified completion, staying on track, persistent Goals, and self-evolution (planned) |
+| `goal-loop.png` | `README.md`, `README_ZH.md` | How a Goal reaches complete: the checklist, Turns of work, the stops and the completion check |
 | `web-ui.png`, `web-ui.zh.png` | `README.md`, `README_ZH.md` | The Web client after a real Goal, with the Goal card open on its completion check |
 | `settings-models.png`, `settings-models.zh.png` | `README.md`, `README_ZH.md` | Settings → Models: model connections and the agent model |
 | `framework2.png` | `docs/paper2code.md` | The Paper2Code architecture: blueprint generation, iterative coding, verification and repair |
@@ -14,11 +14,20 @@ on PyPI. A new image therefore appears only after it reaches `main`.
 
 ## Diagrams
 
-`overview` and `goal-loop` are drawn as HTML in `src/` with the app's colour
-tokens; `?lang=en` or `?lang=zh` picks the text. Render them at 1600 px wide
-with a device scale factor of 1.5 (overview 800 px high, goal-loop 790 px),
-for example with Playwright's `page.screenshot`. Keep what they say true to the
-product: change the text when the behaviour it describes changes.
+`overview` and `goal-loop` are abstract framework figures in the style of
+`framework2.png`, drawn as SVG by `src/overview.py` and `src/goal.py` with the
+shared kit in `src/kit.py`. Both READMEs use the same English images.
+
+```bash
+python3 assets/readme/src/overview.py overview.html
+python3 assets/readme/src/goal.py goal-loop.html
+```
+
+Screenshot each page with a device scale factor of 2: `overview` at 1400×608
+and `goal-loop` at 1400×442, for example with Playwright's `page.screenshot`.
+Keep them abstract: block names, arrows and the key formulas, not
+configuration details. In `overview`, highlight only what DeepCode adds and
+mark anything not shipped yet as planned. Change them when the structure they show changes.
 
 ## Screenshots
 

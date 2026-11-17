@@ -136,7 +136,7 @@ DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共
 - [📄 许可证](#license)
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/overview.zh.png" alt="DeepCode 的整体结构：TUI、桌面、网页和脚本连到同一个本地服务，服务里的智能体运行环境用你选择的模型在你的项目里工作" width="1080" />
+  <img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/overview.png" alt="DeepCode 框架：TUI、桌面、网页和脚本连到同一个本地服务。高亮的是 DeepCode 新增的部分：由 DeepCode 亲自运行检查、可选独立审查来验证完成；保留你原话的上下文和自动停止；跨重启保留的 Goal。自进化在规划中。" width="1080" />
 </p>
 
 ---
@@ -355,7 +355,7 @@ Windows 工具链和排错见 [Desktop 指南](desktop/README.md)。
 ## 核心功能
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/goal-loop.zh.png" alt="一个 Goal 如何走到完成：多个回合的工作、完成声明，然后是规则检查、你确认的检查和独立审查；只要还缺东西，声明就被打回" width="1080" />
+  <img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/goal-loop.png" alt="一个 Goal 如何走到完成：多个回合的工作、完成声明，然后是规则检查、你确认的检查和独立审查；只要还缺东西，声明就被打回" width="1080" />
 </p>
 
 - **在仓库里干活。** 读取、搜索、编辑文件，应用补丁，运行命令和测试，每处改动
