@@ -96,6 +96,22 @@
       }
     },
     {
+      "id": "keenable",
+      "displayName": "Keenable",
+      "category": "web",
+      "description": "Search the web and fetch clean page content through Keenable.",
+      "docsUrl": "https://docs.keenable.ai/mcp-server",
+      "requires": "Network access",
+      "note": "The public endpoint does not require an API key (rate-limited per IP).",
+      "server": {
+        "type": "streamableHttp",
+        "url": "https://api.keenable.ai/mcp-public",
+        "enabledTools": ["search_web_pages", "fetch_page_content"],
+        "toolTimeoutSeconds": 45,
+        "approvalMode": "auto"
+      }
+    },
+    {
       "id": "microsoft-learn",
       "displayName": "Microsoft Learn",
       "category": "docs",
