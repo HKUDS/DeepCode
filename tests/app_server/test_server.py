@@ -1247,7 +1247,7 @@ def test_mcp_presets_and_real_probe_round_trip_through_app_server(
             for message in messages
             if "id" in message and "result" in message
         }
-        assert len(responses[2]["presets"]) == 16
+        assert len(responses[2]["presets"]) == 17
         assert responses[2]["sourceRevision"]
         context7 = next(
             server for server in responses[3]["servers"] if server["name"] == "context7"
