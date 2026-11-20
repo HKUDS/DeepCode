@@ -202,6 +202,76 @@ def test_mcp_cli_returns_failure_for_a_failed_real_probe(
     assert _json_output(capsys)["ok"] is False
 
 
+def test_mcp_cli_tests_every_enabled_server(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
+    fixture = Path(__file__).parent / "fixtures" / "mcp_runtime_server.py"
+    assert (
+        run(
+            [
+                "add",
+                "fixture",
+                "--enable",
+                "--command",
+                sys.executable,
+                str(fixture),
+            ]
+        )
+        == 0
+    )
+    assert run(["add", "broken", "--enable", "--command", "not-a-command"]) == 0
+    capsys.readouterr()
+
+    assert run(["test", "--all", "--json"]) == 1
+    report = _json_output(capsys)
+    assert report["ok"] is False
+    assert (report["total"], report["failed"]) == (2, 1)
+    status = {server["name"]: server["ok"] for server in report["servers"]}
+    assert status == {"fixture": True, "broken": False}
+
+
+def test_mcp_cli_test_all_skips_disabled_servers(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
+    fixture = Path(__file__).parent / "fixtures" / "mcp_runtime_server.py"
+    assert (
+        run(
+            [
+                "add",
+                "fixture",
+                "--enable",
+                "--command",
+                sys.executable,
+                str(fixture),
+            ]
+        )
+        == 0
+    )
+    assert run(["add", "broken", "--command", "not-a-command"]) == 0
+    capsys.readouterr()
+
+    assert run(["test", "--all", "--json"]) == 0
+    report = _json_output(capsys)
+    assert (report["total"], report["failed"]) == (1, 0)
+    assert [server["name"] for server in report["servers"]] == ["fixture"]
+
+
+def test_mcp_cli_test_requires_a_name_or_all(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
+    assert run(["test"]) == 2
+    assert "exactly one" in capsys.readouterr().err
+
+
 def test_mcp_list_names_concerns_and_states_default_posture_once(
     tmp_path: Path,
     monkeypatch,

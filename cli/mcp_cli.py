@@ -15,6 +15,7 @@ from core.application.views import (
     mcp_inventory_view,
     mcp_oauth_flow_view,
     mcp_preset_inventory_view,
+    mcp_probe_all_view,
     mcp_probe_view,
 )
 from core.domain.project import TrustState
@@ -38,8 +39,13 @@ def _parser() -> argparse.ArgumentParser:
     presets.add_argument("--json", action="store_true")
 
     probe = commands.add_parser("test", help="Perform a real MCP handshake.")
-    probe.add_argument("name")
+    probe.add_argument("name", nargs="?")
     _workspace_arguments(probe, allow_trust=False)
+    probe.add_argument(
+        "--all",
+        action="store_true",
+        help="Test every enabled MCP server instead of one named server.",
+    )
     probe.add_argument("--json", action="store_true")
 
     login = commands.add_parser("login", help="Authorize an OAuth MCP server.")
@@ -179,9 +185,21 @@ def run(argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "test":
-            result = mcp_probe_view(
-                application.mcp.probe(args.name, project_id=project_id)
-            )
+            if args.all == bool(args.name):
+                raise ValueError("pass exactly one of a server name or --all")
+            if args.all:
+                inventory = application.mcp.list(project_id)
+                result = mcp_probe_all_view(
+                    [
+                        application.mcp.probe(info.name, project_id=project_id)
+                        for info in inventory.servers
+                        if info.enabled
+                    ]
+                )
+            else:
+                result = mcp_probe_view(
+                    application.mcp.probe(args.name, project_id=project_id)
+                )
             exit_code = 0 if result["ok"] else 1
         elif args.command == "login":
             flow = application.mcp.oauth_start(
@@ -241,7 +259,7 @@ def run(argv: list[str] | None = None) -> int:
         elif args.command == "presets":
             _print_presets(result)
         elif args.command == "test":
-            _print_probe(result)
+            _print_probe_all(result) if args.all else _print_probe(result)
         elif args.command == "login":
             _print_oauth(result)
         elif args.command == "logout":
@@ -558,6 +576,23 @@ def _print_probe(result: dict[str, Any]) -> None:
         )
     else:
         print(f"Connection failed for {result['name']}: {result['error']}")
+
+
+def _print_probe_all(result: dict[str, Any]) -> None:
+    for server in result["servers"]:
+        if server["ok"]:
+            print(
+                f"PASS  {server['name']}: {server['toolCount']} tools, "
+                f"{server['resourceCount']} resources, {server['promptCount']} prompts "
+                f"in {server['elapsedSeconds']:.3f}s"
+            )
+        else:
+            print(f"FAIL  {server['name']}: {server['error']}")
+    passed = result["total"] - result["failed"]
+    print(
+        f"{passed} passed, {result['failed']} failed "
+        f"of {result['total']} enabled MCP servers."
+    )
 
 
 def _print_oauth(result: dict[str, Any]) -> None:
