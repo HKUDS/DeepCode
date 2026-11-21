@@ -13,7 +13,11 @@ from core.agent_runtime.tools.base import Tool, ToolResult
 from core.agent_runtime.tools.registry import ToolRegistry
 from core.mcp.connection import CredentialResolver, McpConnection, OAuthProviderFactory
 from core.mcp.models import McpRuntimePlan, McpStartupError, ResolvedMcpServer
-from core.mcp.naming import visible_tool_name
+from core.mcp.naming import (
+    IdentityCollision,
+    find_identity_collisions,
+    visible_tool_name,
+)
 from core.mcp.tools import McpToolAdapter
 
 # Servers whose startup timed out in this process. Every new session would
@@ -152,6 +156,14 @@ class McpSessionRuntime:
         self._lock = asyncio.Lock()
         self._started = False
         self._closed = False
+        # Provider-binding bookkeeping (arXiv:2611.21577). Two servers may
+        # advertise tools a model cannot tell apart; recording that here turns
+        # an invisible selection hazard into a warning. It never blocks a tool:
+        # the paper shows there is no client-side identity to compare, so the
+        # only honest first step is to make the overlap observable.
+        self._identity_entries: list[tuple[str, str, str]] = []
+        self._identity_collisions: tuple[IdentityCollision, ...] = ()
+        self._logged_collision_keys: set[tuple[str, str, tuple[str, ...]]] = set()
 
     @property
     def started(self) -> bool:
@@ -428,6 +440,14 @@ class McpSessionRuntime:
             self.registry.register(adapter)
             server_tools.append(name)
             exposed_count += 1
+            self._identity_entries.append(
+                (
+                    adapter.identity.server_id,
+                    adapter.identity.raw_name,
+                    adapter.identity.schema_digest,
+                )
+            )
+        self._publish_identity_collisions()
         self._warn_unmatched_filters(server, seen_raw)
         tools = tuple(server_tools)
         self._capabilities[server.server_id] = tools
@@ -445,6 +465,37 @@ class McpSessionRuntime:
             exposed_count,
         )
         return server_tools
+
+    def _publish_identity_collisions(self) -> None:
+        """Recompute provider-binding overlaps and warn once per new overlap.
+
+        A collision means two different servers advertised a tool that a model
+        cannot distinguish by name or by input shape (arXiv:2611.21577: metadata
+        helps recognition but does not prove origin). This is deliberately a
+        warning only -- there is no client-side provider identity to reject on,
+        and refusing to register a legitimate duplicate tool would break
+        deployments that expose the same capability twice. Downstream readers
+        can inspect :attr:`identity_collisions` instead of parsing logs.
+        """
+        collisions = tuple(find_identity_collisions(self._identity_entries))
+        self._identity_collisions = collisions
+        for collision in collisions:
+            if collision.key in self._logged_collision_keys:
+                continue
+            self._logged_collision_keys.add(collision.key)
+            what = "tool name" if collision.kind == "name" else "input schema"
+            logger.warning(
+                "MCP provider-binding overlap: {} {!r} is advertised by {} — "
+                "the metadata does not prove which provider a call reaches.",
+                what,
+                collision.value,
+                ", ".join(collision.server_ids),
+            )
+
+    @property
+    def identity_collisions(self) -> tuple[IdentityCollision, ...]:
+        """Tools two providers advertise indistinguishably (advisory only)."""
+        return self._identity_collisions
 
     async def aclose(self) -> None:
         async with self._lock:

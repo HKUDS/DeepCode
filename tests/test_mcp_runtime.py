@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import sys
 from pathlib import Path
@@ -466,3 +467,41 @@ async def test_probe_reports_a_server_side_cancellation_as_a_failure(
     result = await probe.probe_mcp_server(_server(tmp_path))
     assert result.ok is False
     assert result.error.startswith("CancelledError")
+
+
+@pytest.mark.asyncio
+async def test_two_servers_exposing_the_same_tools_report_a_binding_overlap(
+    tmp_path: Path,
+) -> None:
+    """A provider-binding overlap is observable, and nothing is refused.
+
+    Two servers running the same fixture advertise identical tool names *and*
+    identical input schemas -- exactly the shape arXiv:2611.21577 measures
+    (name collision plus a compatible schema is its strongest amplifier).
+
+    The runtime must report the overlap and still register every tool: there is
+    no client-side provider identity to reject on, and a legitimate deployment
+    may expose the same capability twice. Observability, not enforcement.
+    """
+    registry = ToolRegistry()
+    first = _server(tmp_path)
+    second = dataclasses.replace(first, server_id="fixture-b", name="fixture-b")
+    plan = McpRuntimePlan(tmp_path, (first, second), "test")
+    runtime = McpSessionRuntime(plan, registry)
+    await runtime.ensure_started()
+    try:
+        collisions = runtime.identity_collisions
+        by_name = {c.value: c for c in collisions if c.kind == "name"}
+        assert set(by_name) == {"read_value", "write_value", "slow"}
+        assert by_name["read_value"].server_ids == ("fixture", "fixture-b")
+        # Identical schemas on both servers surface as schema collisions too.
+        assert any(c.kind == "schema" for c in collisions)
+
+        # Fail-safe: both servers stay ready and every tool stays callable.
+        assert [status.state for status in runtime.statuses] == ["ready", "ready"]
+        assert [status.tool_count for status in runtime.statuses] == [3, 3]
+        assert len(registry.tool_names) == 6
+    finally:
+        await runtime.aclose()
+        await registry.aclose()
+    assert not registry.tool_names

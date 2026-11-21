@@ -537,6 +537,11 @@ class McpToolIdentity:
     server_name: str
     source: McpServerSource
     raw_name: str
+    # Short fingerprint of the normalised input schema. Names and descriptions
+    # are text a server chooses; the schema is the shape a call must match, so
+    # this is the field that lets two providers be compared on substance.
+    # Defaulted so every existing construction site keeps working.
+    schema_digest: str = ""
 
 
 @dataclass(frozen=True, slots=True)
