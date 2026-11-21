@@ -194,6 +194,11 @@ class BashTool(Tool):
         )
 
     async def execute(self, **kwargs: Any) -> Any:
+        """Run a command after preflight and policy screening.
+
+        @param kwargs: Tool arguments with a command and optional timeout.
+        @returns: Command output or a refusal/error message.
+        """
         command = kwargs.get("command", "")
         timeout = int(kwargs.get("timeout") or _DEFAULT_TIMEOUT)
         if not command.strip():
@@ -210,7 +215,9 @@ class BashTool(Tool):
         if screened:
             return (
                 f"Error: command blocked by policy screen ({screened}). "
-                "If this is intended, re-run with the matching DEEPCODE_* waiver."
+                "Do not retry the command unchanged. Use a narrower command or ask the user. "
+                "If a DEEPCODE_* variable is named above, only the operator can set it in "
+                "DeepCode's environment; adding it to the command has no effect."
             )
 
         try:
