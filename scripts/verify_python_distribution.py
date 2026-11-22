@@ -41,6 +41,18 @@ PACKAGE_NAME = "deepcode-hku"
 MINIMUM_MCP_VERSION = Version("1.29")
 UNSUPPORTED_MCP_VERSION = Version("2")
 SUPPORTED_PYTHON_VERSIONS = (Version("3.12"), Version("3.13"), Version("3.14"))
+PRODUCT_TOP_LEVEL_PACKAGES = frozenset(
+    {
+        "app_server",
+        "cli",
+        "core",
+        "eval",
+        "prompts",
+        "tools",
+        "utils",
+        "workflows",
+    }
+)
 
 
 class DistributionVerificationError(RuntimeError):
@@ -234,6 +246,22 @@ def _single_artifact(dist_dir: Path, pattern: str, label: str) -> Path:
     return candidates[0].resolve()
 
 
+def verify_wheel_packages(names: list[str], *, source: Path) -> None:
+    """Reject working-tree packages that are not part of the release surface."""
+
+    packages = {
+        name.split("/", 1)[0]
+        for name in names
+        if name.endswith("/__init__.py") and "/" in name
+    }
+    unexpected = sorted(packages - PRODUCT_TOP_LEVEL_PACKAGES)
+    if unexpected:
+        raise DistributionVerificationError(
+            f"{source} contains packages outside the product allowlist: "
+            + ", ".join(unexpected)
+        )
+
+
 def verify_artifacts(
     dist_dir: Path,
     *,
@@ -260,6 +288,7 @@ def verify_artifacts(
         source=sdist,
     )
     with zipfile.ZipFile(wheel) as archive:
+        verify_wheel_packages(archive.namelist(), source=wheel)
         verify_web_assets(
             archive.read, archive.namelist(), "app_server/web_assets/", expected_version
         )
