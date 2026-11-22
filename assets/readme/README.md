@@ -6,6 +6,7 @@
 | `goal-loop.png` | `README.md`, `README_ZH.md` | How a Goal reaches complete: the checklist, Turns of work, the stops and the completion check |
 | `web-ui.png`, `web-ui.zh.png` | `README.md`, `README_ZH.md` | The Web client after a real Goal, with the Goal card open on its completion check |
 | `settings-models.png`, `settings-models.zh.png` | `README.md`, `README_ZH.md` | Settings → Models: model connections and the agent model |
+| `stargazer-orgs.png` | `README.md`, `README_ZH.md` | Companies, universities and research institutes that people who starred DeepCode list on their GitHub profiles |
 | `framework2.png` | `docs/paper2code.md` | The Paper2Code architecture: blueprint generation, iterative coding, verification and repair |
 
 The READMEs load these images through absolute
@@ -28,6 +29,15 @@ and `goal-loop` at 1400×442, for example with Playwright's `page.screenshot`.
 Keep them abstract: block names, arrows and the key formulas, not
 configuration details. In `overview`, highlight only what DeepCode adds and
 mark anything not shipped yet as planned. Change them when the structure they show changes.
+
+## Stargazer organizations
+
+`stargazer-orgs.png` shows organizations taken from the public "company" field
+of the GitHub profiles of people who starred DeepCode. Affiliations are
+self-reported. Names were merged and checked by hand. Every organization shown
+appears in that data, and the "2,000+ more" stays below the reviewed count. The
+counts and the script that draws the card are kept outside the repository.
+Replace the image when the numbers are refreshed.
 
 ## Screenshots
 

@@ -114,6 +114,10 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 
 </div>
 
+<p align="center">
+  <a href="https://github.com/HKUDS/DeepCode/blob/main/assets/readme/stargazer-orgs.png"><img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/stargazer-orgs.png" width="900" alt="DeepCode was starred by people affiliated with the companies, universities and research institutes shown here." /></a>
+</p>
+
 ---
 
 ## 📑 Table of Contents

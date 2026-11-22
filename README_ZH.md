@@ -113,6 +113,10 @@ DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共
 
 </div>
 
+<p align="center">
+  <a href="https://github.com/HKUDS/DeepCode/blob/main/assets/readme/stargazer-orgs.png"><img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/stargazer-orgs.png" width="900" alt="为 DeepCode 点过 Star 的用户来自这些公司、高校和研究机构" /></a>
+</p>
+
 ---
 
 ## 📑 目录
