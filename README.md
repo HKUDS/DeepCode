@@ -67,10 +67,6 @@
   </a>
 </div>
 
-### 🖥️ **Interface Showcase**
-
-#### 🖥️ **DeepCode Desktop**
-
 <div align="center">
 
   <img src="https://github.com/Zongwei9888/Experiment_Images/raw/e389750e733ec2c1b94986cb990036899dcaec52/DeepCode_images/Area.gif" alt="DeepCode Desktop coding agent demo" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.3); margin: 15px 0;"/>
@@ -84,6 +80,10 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 [Quick start](#quick-start) for installation and your first task.
 
 ---
+
+<p align="center">
+  <a href="https://github.com/HKUDS/DeepCode/blob/main/assets/readme/stargazer-orgs.png"><img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/stargazer-orgs.png" width="900" alt="DeepCode was starred by people affiliated with the companies, universities and research institutes shown here." /></a>
+</p>
 
 <div align="center">
 
@@ -113,10 +113,6 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 > *"Where AI Agents Transform Ideas into Production-Ready Code"*
 
 </div>
-
-<p align="center">
-  <a href="https://github.com/HKUDS/DeepCode/blob/main/assets/readme/stargazer-orgs.png"><img src="https://raw.githubusercontent.com/HKUDS/DeepCode/main/assets/readme/stargazer-orgs.png" width="900" alt="DeepCode was starred by people affiliated with the companies, universities and research institutes shown here." /></a>
-</p>
 
 ---
 
