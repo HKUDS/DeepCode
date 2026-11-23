@@ -7,6 +7,19 @@ ROOT = Path(__file__).resolve().parent
 
 
 REPOSITORY = "https://github.com/HKUDS/DeepCode"
+# Packaging runs against a developer's working tree, not just the tracked files, so keep
+# the release surface explicit: ignored experiments or local helper directories at the
+# repository root must never enter a wheel.
+PRODUCT_PACKAGES = (
+    "app_server*",
+    "cli*",
+    "core*",
+    "eval*",
+    "prompts*",
+    "tools*",
+    "utils*",
+    "workflows*",
+)
 # Markdown links whose target is relative: ](docs/x.md), ](#anchor), ](LICENSE).
 _RELATIVE_LINK = re.compile(r"\]\((?![a-z][a-z0-9+.-]*:|//)([^)\s]+)\)", re.IGNORECASE)
 
@@ -72,9 +85,7 @@ setuptools.setup(
     ),
     long_description=long_description,
     long_description_content_type="text/markdown",
-    packages=setuptools.find_packages(
-        exclude=("tests*", "docs*", ".history*", ".git*", ".ruff_cache*")
-    ),
+    packages=setuptools.find_packages(include=PRODUCT_PACKAGES),
     py_modules=["deepcode"],
     classifiers=[
         "Development Status :: 4 - Beta",

@@ -114,6 +114,33 @@ def test_packaged_web_manifest_requires_its_entry_assets():
         release.verify_web_assets(files.__getitem__, list(files), "web/", "2.2.0")
 
 
+def test_wheel_package_allowlist_accepts_product_packages(tmp_path):
+    release.verify_wheel_packages(
+        [
+            "app_server/__init__.py",
+            "cli/__init__.py",
+            "core/application/__init__.py",
+            "deepcode.py",
+        ],
+        source=tmp_path / "artifact.whl",
+    )
+
+
+def test_wheel_package_allowlist_rejects_working_tree_experiments(tmp_path):
+    with pytest.raises(
+        release.DistributionVerificationError,
+        match="quant_trading",
+    ):
+        release.verify_wheel_packages(
+            [
+                "core/__init__.py",
+                "quant_trading/__init__.py",
+                "game_theory_arsenal/__init__.py",
+            ],
+            source=tmp_path / "artifact.whl",
+        )
+
+
 def test_smoke_failure_reports_output_that_the_reader_cannot_decode(tmp_path):
     """A rejected byte used to wipe out the whole diagnostic.
 
