@@ -128,6 +128,11 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
 
 ## What's new
 
+- **2026-11-23** — `deepcode mcp test --all` checks every enabled MCP server in
+  one run, a blocked shell command now tells the agent to use a narrower
+  command or ask you instead of pointing to a waiver that does not exist, the
+  Python package ships only DeepCode's own modules, and the README shows where
+  DeepCode's stargazers work and study.
 - **2026-11-17** — Long sessions keep your own words through compaction, a
   malformed tool call no longer stalls a session, commands that reach a
   protected file through a link are caught, and new README figures show what
@@ -137,17 +142,10 @@ Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see
   against protected paths, memory tidy-up keeps every topic link, and
   Paper2Code no longer mistakes reading several files for a loop or splits
   sections at a comment in a code block.
-- **2026-11-02** — Goals you can trust to finish: the agent proposes a
-  checklist, and once you confirm it DeepCode runs those commands itself
-  before it accepts "complete"; an optional independent reviewer checks every
-  requirement, switched on in Settings, and each check is shown on the Goal
-  card. A Goal can have a time limit, stops when it is stuck or keeps
-  repeating itself, wraps up when its budget runs out, and pauses when
-  DeepCode restarts.
-
 <details>
 <summary><strong>Earlier updates</strong></summary>
 
+- **2026-11-02** — Goals you can trust to finish: confirmed checks DeepCode runs itself, an optional independent reviewer, time limits and automatic stops
 - **2026-10-31** — Long tasks read better on the Web, a calmer Web and Desktop interface, and a terminal UI that wraps Chinese text
 - **2026-10-29** — Lighter compaction, checked Goal completion, folder browsing on the Web, and clearer approvals
 - **2026-10-28** — Agent presets that remove tools, file tools that ask before writing hooks, and unpinned MCP packages flagged

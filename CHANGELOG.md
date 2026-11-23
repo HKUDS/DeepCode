@@ -5,6 +5,24 @@ Released versions are named in the entry title; the version on PyPI is
 [deepcode-hku](https://pypi.org/project/deepcode-hku/). 中文版见
 [CHANGELOG_ZH.md](CHANGELOG_ZH.md).
 
+## 2026-11-23 · Community fixes
+
+- **Test every MCP server at once.** `deepcode mcp test --all` probes each
+  enabled server in turn, prints one line per server and a summary, and exits
+  1 when any fails, so it works as a startup or CI check; `--json` gives a
+  machine-readable report. A server that cannot be probed, such as a project
+  entry the workspace has not trusted, is reported as failed instead of
+  stopping the run. (#313)
+- **Clearer refusals for blocked commands.** When the command screen blocks a
+  shell command, the agent is told not to retry it unchanged but to use a
+  narrower command or ask you; it no longer points to a `DEEPCODE_*` waiver
+  that destructive commands do not have. (#314, fixes #312)
+- **The wheel ships only DeepCode's packages.** Packaging lists DeepCode's own
+  packages by name, so a local experiment folder in the working tree can no
+  longer end up in a wheel, and the release check rejects anything else. (#317)
+- **README.** The README shows the organizations of DeepCode's stargazers, and
+  the header links are grouped in three rows.
+
 ## 2026-11-17 · Long sessions keep your words, and community fixes
 
 - **Compaction keeps your own words.** When a long session is compacted, your
