@@ -28,7 +28,21 @@
 ### *基于多智能体系统推进代码生成技术*
 
 <p align="center">
-  <a href="https://hkuds.github.io/DeepCode/" target="_blank"><img alt="官网 — hkuds.github.io/DeepCode" src="https://img.shields.io/badge/%E5%AE%98%E7%BD%91-hkuds.github.io%2FDeepCode%20%E2%86%97-06B6D4?style=for-the-badge&labelColor=0B1116" height="36"></a>
+  <a href="#快速开始"><img alt="快速开始 — 立即开始" src="https://img.shields.io/badge/快速开始-立即开始-00d9ff?style=for-the-badge&logo=rocket&logoColor=white&labelColor=1a1a2e"></a>
+  <a href="https://hkuds.github.io/DeepCode/" target="_blank"><img alt="官网 — hkuds.github.io/DeepCode" src="https://img.shields.io/badge/%E5%AE%98%E7%BD%91-hkuds.github.io%2FDeepCode%20%E2%86%97-06B6D4?style=for-the-badge&labelColor=0B1116"></a>
+</p>
+
+<p align="center">
+  <a href="README.md"><img alt="English" src="https://img.shields.io/badge/English-00d4ff?style=for-the-badge&logo=readme&logoColor=white&labelColor=1a1a2e"></a>
+  <a href="README_ZH.md"><img alt="中文" src="https://img.shields.io/badge/中文-00d4ff?style=for-the-badge&logo=readme&logoColor=white&labelColor=1a1a2e"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/HKUDS/DeepCode/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/HKUDS/DeepCode?style=flat-square&logo=github&color=00d9ff&labelColor=1a1a2e"></a>
+  <img alt="Python 3.12+" src="https://img.shields.io/badge/Python-3.12%2B-4ecdc4?style=flat-square&logo=python&logoColor=white&labelColor=1a1a2e">
+  <a href="https://pypi.org/project/deepcode-hku/"><img alt="PyPI" src="https://img.shields.io/pypi/v/deepcode-hku.svg?style=flat-square&logo=pypi&logoColor=white&labelColor=1a1a2e&color=ff6b6b"></a>
+  <a href="https://discord.gg/yF2MmDJyGJ"><img alt="Discord 社区" src="https://img.shields.io/badge/Discord-社区-7289da?style=flat-square&logo=discord&logoColor=white&labelColor=1a1a2e"></a>
+  <a href="https://github.com/HKUDS/DeepCode/issues/11"><img alt="微信群组" src="https://img.shields.io/badge/微信-群组-07c160?style=flat-square&logo=wechat&logoColor=white&labelColor=1a1a2e"></a>
 </p>
 
 <!-- <p align="center">
@@ -38,32 +52,9 @@
   <img src="https://img.shields.io/badge/AI-Multi--Agent-9b59b6?style=for-the-badge&logo=brain&logoColor=white" alt="AI">
   <img src="https://img.shields.io/badge/HKU-Data_Intelligence_Lab-f39c12?style=for-the-badge&logo=university&logoColor=white" alt="HKU">
 </p> -->
-<p>
-  <a href="https://github.com/HKUDS/DeepCode/stargazers"><img src='https://img.shields.io/github/stars/HKUDS/DeepCode?color=00d9ff&style=for-the-badge&logo=star&logoColor=white&labelColor=1a1a2e' /></a>
-  <img src="https://img.shields.io/badge/🐍Python-3.12%2B-4ecdc4?style=for-the-badge&logo=python&logoColor=white&labelColor=1a1a2e">
-  <a href="https://pypi.org/project/deepcode-hku/"><img src="https://img.shields.io/pypi/v/deepcode-hku.svg?style=for-the-badge&logo=pypi&logoColor=white&labelColor=1a1a2e&color=ff6b6b"></a>
-</p>
-<p>
-  <a href="https://discord.gg/yF2MmDJyGJ"><img src="https://img.shields.io/badge/💬Discord-社区-7289da?style=for-the-badge&logo=discord&logoColor=white&labelColor=1a1a2e"></a>
-  <a href="https://github.com/HKUDS/DeepCode/issues/11"><img src="https://img.shields.io/badge/💬微信-群组-07c160?style=for-the-badge&logo=wechat&logoColor=white&labelColor=1a1a2e"></a>
-</p>
+
 <div align="center">
   <div style="width: 100%; height: 2px; margin: 20px 0; background: linear-gradient(90deg, transparent, #00d9ff, transparent);"></div>
-</div>
-
-<div align="center">
-  <a href="#快速开始" style="text-decoration: none;">
-    <img src="https://img.shields.io/badge/快速开始-立即开始-00d9ff?style=for-the-badge&logo=rocket&logoColor=white&labelColor=1a1a2e">
-  </a>
-</div>
-
-<div align="center" style="margin-top: 10px;">
-  <a href="README.md">
-    <img src="https://img.shields.io/badge/English-00d4ff?style=for-the-badge&logo=readme&logoColor=white&labelColor=1a1a2e" alt="English">
-  </a>
-  <a href="README_ZH.md">
-    <img src="https://img.shields.io/badge/中文-00d4ff?style=for-the-badge&logo=readme&logoColor=white&labelColor=1a1a2e" alt="中文">
-  </a>
 </div>
 
 <div align="center">
