@@ -58,13 +58,6 @@
   <div style="width: 100%; height: 2px; margin: 20px 0; background: linear-gradient(90deg, transparent, #00d9ff, transparent);"></div>
 </div>
 
-<div align="center">
-
-  <img src="https://github.com/Zongwei9888/Experiment_Images/raw/e389750e733ec2c1b94986cb990036899dcaec52/DeepCode_images/Area.gif" alt="DeepCode Desktop coding agent demo" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.3); margin: 15px 0;"/>
-
-*Work with DeepCode in a visual workspace for Sessions, goals, tool activity, code changes, and verification.*
-</div>
-
 DeepCode provides TUI, Desktop, and Web clients over one shared local service.
 They share Projects, Session history, models, Skills, permissions, Goals, and
 Automations. Use `deepcode`, `deepcode desktop`, or `deepcode web`; see

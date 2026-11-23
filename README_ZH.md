@@ -57,13 +57,6 @@
   <div style="width: 100%; height: 2px; margin: 20px 0; background: linear-gradient(90deg, transparent, #00d9ff, transparent);"></div>
 </div>
 
-<div align="center">
-
-  <img src="https://github.com/Zongwei9888/Experiment_Images/raw/e389750e733ec2c1b94986cb990036899dcaec52/DeepCode_images/Area.gif" alt="DeepCode Desktop 编程智能体演示" width="100%" style="border-radius: 10px; box-shadow: 0 8px 20px rgba(45,55,72,0.3); margin: 15px 0;"/>
-
-*在可视化工作台中使用 DeepCode，管理 Session 和目标，并查看工具活动、代码修改与验证过程。*
-</div>
-
 DeepCode 提供 TUI、Desktop 和 Web 三种客户端，连接同一个本地共享后台，
 共用 Project、Session 历史、模型、Skills、权限、Goals 与 Automations。
 分别使用 `deepcode`、`deepcode desktop` 和 `deepcode web` 启动；安装及首次任务
