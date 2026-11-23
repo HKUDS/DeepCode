@@ -10,8 +10,8 @@ session needs it or the user explicitly runs a connection test.
 The distribution contains a validated catalog based on the MCP templates in
 HKUDS Nanobot at the source revision recorded in `core/mcp/presets.json`. The
 catalog currently includes Browserbase, Playwright, Context7, Firecrawl,
-Parallel Search, Exa, Microsoft Learn, AWS Documentation, Brave Search,
-Postman, Figma, Xmind, Notion, Linear, GitHub, and Supabase.
+Parallel Search, Exa, Keenable, Microsoft Learn, AWS Documentation, Brave
+Search, Postman, Figma, Xmind, Notion, Linear, GitHub, and Supabase.
 
 "Bundled" means the configuration templates are available locally. DeepCode
 does not silently execute `npx`, `uvx`, or Docker, download a package, contact
