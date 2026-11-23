@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import subprocess
@@ -124,6 +125,20 @@ def test_wheel_package_allowlist_accepts_product_packages(tmp_path):
         ],
         source=tmp_path / "artifact.whl",
     )
+
+
+def test_wheel_package_allowlist_matches_setup_py():
+    tree = ast.parse((REPOSITORY_ROOT / "setup.py").read_text(encoding="utf-8"))
+    declared = next(
+        node.value
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "PRODUCT_PACKAGES"
+            for target in node.targets
+        )
+    )
+    assert set(ast.literal_eval(declared)) == release.PRODUCT_TOP_LEVEL_PACKAGES
 
 
 def test_wheel_package_allowlist_rejects_working_tree_experiments(tmp_path):
