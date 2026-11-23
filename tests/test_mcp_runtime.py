@@ -426,3 +426,43 @@ def test_mcp_approval_never_widens_global_policy(tmp_path: Path) -> None:
         )[0]
         is PermissionDecision.DENY
     )
+
+
+@pytest.mark.asyncio
+async def test_probe_lets_a_caller_cancellation_through(tmp_path, monkeypatch) -> None:
+    import asyncio
+
+    from core.mcp import probe
+
+    started = asyncio.Event()
+
+    async def hang(self):
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(probe.McpConnection, "start", hang)
+    task = asyncio.create_task(probe.probe_mcp_server(_server(tmp_path)))
+    await started.wait()
+    task.cancel()
+    # Ctrl-C under asyncio.run cancels the probe this way; it must not come
+    # back as a failed result, or `mcp test --all` would go on to the next
+    # server instead of stopping.
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_probe_reports_a_server_side_cancellation_as_a_failure(
+    tmp_path, monkeypatch
+) -> None:
+    import asyncio
+
+    from core.mcp import probe
+
+    async def cancelled(self):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(probe.McpConnection, "start", cancelled)
+    result = await probe.probe_mcp_server(_server(tmp_path))
+    assert result.ok is False
+    assert result.error.startswith("CancelledError")

@@ -19,6 +19,7 @@ from core.application.views import (
     mcp_probe_view,
 )
 from core.domain.project import TrustState
+from core.mcp.probe import McpProbeResult
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -188,14 +189,7 @@ def run(argv: list[str] | None = None) -> int:
             if args.all == bool(args.name):
                 raise ValueError("pass exactly one of a server name or --all")
             if args.all:
-                inventory = application.mcp.list(project_id)
-                result = mcp_probe_all_view(
-                    [
-                        application.mcp.probe(info.name, project_id=project_id)
-                        for info in inventory.servers
-                        if info.enabled
-                    ]
-                )
+                result = mcp_probe_all_view(_probe_enabled(application, project_id))
             else:
                 result = mcp_probe_view(
                     application.mcp.probe(args.name, project_id=project_id)
@@ -274,6 +268,9 @@ def run(argv: list[str] | None = None) -> int:
     except (ApplicationError, OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    except KeyboardInterrupt:
+        print("\ninterrupted", file=sys.stderr, flush=True)
+        return 130
     finally:
         application.close()
 
@@ -576,6 +573,45 @@ def _print_probe(result: dict[str, Any]) -> None:
         )
     else:
         print(f"Connection failed for {result['name']}: {result['error']}")
+
+
+def _probe_enabled(
+    application: DeepCodeApplication,
+    project_id: str | None,
+) -> list[McpProbeResult]:
+    """Probe every enabled server; one that cannot be probed is a failure.
+
+    Servers are probed by the ID the inventory reports. A project entry blocked
+    by workspace trust is never started, so it is reported with its blocking
+    reason instead of being probed.
+    """
+
+    results = []
+    for info in application.mcp.list(project_id).servers:
+        if not info.enabled:
+            continue
+        if info.configuration_state == "blocked":
+            error = info.configuration_message
+        else:
+            try:
+                results.append(application.mcp.probe(info.id, project_id=project_id))
+                continue
+            except (ApplicationError, ValueError) as exc:
+                error = str(exc)
+        results.append(
+            McpProbeResult(
+                server_id=info.id,
+                name=info.name,
+                ok=False,
+                transport=info.transport,
+                tool_count=0,
+                resource_count=0,
+                prompt_count=0,
+                elapsed_seconds=0.0,
+                error=error,
+            )
+        )
+    return results
 
 
 def _print_probe_all(result: dict[str, Any]) -> None:

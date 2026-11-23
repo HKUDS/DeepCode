@@ -262,6 +262,67 @@ def test_mcp_cli_test_all_skips_disabled_servers(
     assert [server["name"] for server in report["servers"]] == ["fixture"]
 
 
+def test_mcp_cli_test_all_reports_a_blocked_project_server(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setenv("DEEPCODE_HOME", str(tmp_path / "home"))
+    fixture = Path(__file__).parent / "fixtures" / "mcp_runtime_server.py"
+    trusted = tmp_path / "trusted"
+    untrusted = tmp_path / "untrusted"
+    trusted.mkdir()
+    untrusted.mkdir()
+    server = ["--enable", "--command", sys.executable, str(fixture)]
+    assert run(["add", "fixture", *server]) == 0
+    project = ["--scope", "project", "--workspace", str(trusted), "--trust"]
+    assert run(["add", "project-tools", *project, *server]) == 0
+    # The same project entry in a workspace nobody has trusted.
+    (untrusted / "deepcode_config.json").write_text(
+        (trusted / "deepcode_config.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+
+    assert run(["test", "--all", "--workspace", str(untrusted), "--json"]) == 1
+    report = _json_output(capsys)
+    servers = {server["name"]: server for server in report["servers"]}
+    assert (report["total"], report["failed"]) == (2, 1)
+    assert servers["fixture"]["ok"] is True
+    assert servers["project-tools"]["ok"] is False
+    assert "trusted" in servers["project-tools"]["error"]
+
+
+def test_mcp_cli_test_all_reports_every_server_when_probing_raises(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("DEEPCODE_HOME", str(home))
+    fixture = Path(__file__).parent / "fixtures" / "mcp_runtime_server.py"
+    server = ["--enable", "--command", sys.executable, str(fixture)]
+    assert run(["add", "first", *server]) == 0
+    assert run(["add", "second", *server]) == 0
+    # One malformed entry makes the resolver reject the whole user layer, so
+    # every probe raises; each server is still reported and the run finishes.
+    config_path = home / "deepcode_config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["mcpServers"]["broken"] = "not an object"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    capsys.readouterr()
+
+    assert run(["test", "--all", "--json"]) == 1
+    report = _json_output(capsys)
+    assert (report["total"], report["failed"]) == (3, 3)
+    assert [server["name"] for server in report["servers"]] == [
+        "broken",
+        "first",
+        "second",
+    ]
+    assert all(server["error"] for server in report["servers"])
+
+
 def test_mcp_cli_test_requires_a_name_or_all(
     tmp_path: Path,
     monkeypatch,

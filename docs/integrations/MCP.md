@@ -104,6 +104,13 @@ same one-shot probe. A successful test performs MCP initialization and bounded
 capability discovery, then closes the connection. Enabled servers are started
 again with session-owned lifecycle when an Agent turn needs its tools.
 
+`deepcode mcp test --all` runs the same probe on every enabled server, one at a
+time, and prints one line per server and a summary. It exits 1 when any server
+fails, so it can serve as a startup or CI check; add `--json` for a
+machine-readable report. Without `--workspace` it tests the user-level servers;
+add `--workspace DIR` to test the servers an Agent session in that project
+uses, including project and plugin servers.
+
 After enabling, users keep working normally in Desktop, TUI, or headless mode.
 DeepCode publishes the server's tool schemas to the model, which calls the
 appropriate MCP tool when the task requires it. Users do not need to type the

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass
 
@@ -47,6 +48,11 @@ async def probe_mcp_server(
             round(time.monotonic() - started, 3),
         )
     except BaseException as exc:  # noqa: BLE001 - typed probe result boundary
+        task = asyncio.current_task()
+        if task is not None and task.cancelling():
+            # The caller cancelled the probe (Ctrl-C under asyncio.run); that is
+            # not a result of this server, so let the cancellation through.
+            raise
         return McpProbeResult(
             server.server_id,
             server.name,
