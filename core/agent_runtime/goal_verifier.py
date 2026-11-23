@@ -105,6 +105,15 @@ class GoalVerdict:
     # Which step reached the verdict: "rule", "checks" or "reviewer"; "none"
     # when nothing was checked (no verifier and no confirmed checks).
     stage: str = ""
+    # A rejection is either *insufficient* (no record proves the claim) or a
+    # *conflict* (a record contradicts it). arXiv:2611.25760 shows why the two
+    # must not be collapsed: its strongest detector's one reported false alarm
+    # was a claim that a real side effect happened, flagged only because no
+    # later observation confirmed it. Task success and reporting faithfulness
+    # are separate properties, so "we did not see it" is not "it did not
+    # happen". Callers that gate on evidence can treat insufficient as a
+    # request for more evidence rather than as a failure.
+    conflict: bool = False
     summary: str = ""
     requirements: tuple[RequirementFinding, ...] = ()
     checked: tuple[str, ...] = ()
@@ -115,6 +124,28 @@ class GoalVerdict:
             raise ValueError("a confirmed verdict cannot also be impossible")
         if self.tokens < 0:
             raise ValueError("tokens cannot be negative")
+
+    @property
+    def faithfulness(self) -> str:
+        """What this verdict establishes about the *report*, not the work.
+
+        arXiv:2611.25760 separates the two properties and warns that evidence
+        of task success cannot vouch for reporting faithfulness, or the
+        reverse. This verdict only reads the Turn's records, so it speaks about
+        the claim:
+
+        * ``supported``    -- the records back the claim;
+        * ``unsupported``  -- no record backs it; a gap the model fills, not a
+          failure;
+        * ``contradicted`` -- a record contradicts it.
+
+        Task success is deliberately absent: the Goal's own state carries it.
+        Deriving this from ``confirmed``/``conflict`` instead of storing a third
+        field means the three can never disagree.
+        """
+        if self.confirmed:
+            return "supported"
+        return "contradicted" if self.conflict else "unsupported"
 
 
 class GoalCompletionVerifier(Protocol):
@@ -210,11 +241,13 @@ class RuleBasedVerifier:
                     "check", checks[-1], "Fix the problem and run the check again"
                 ),
                 pending_checks,
+                conflict=True,
             )
         if evidence[-1].status in _UNSUCCESSFUL:
             return _reject(
                 _unsuccessful("step", evidence[-1], "Resolve it"),
                 request.pending,
+                conflict=True,
             )
         return GoalVerdict(
             confirmed=True,
@@ -226,14 +259,28 @@ class RuleBasedVerifier:
         )
 
 
-def _reject(text: str, could_resolve: tuple[GoalEvidenceItem, ...]) -> GoalVerdict:
+def _reject(
+    text: str,
+    could_resolve: tuple[GoalEvidenceItem, ...],
+    *,
+    conflict: bool = False,
+) -> GoalVerdict:
+    """A rejection carries whether a record *contradicts* the claim.
+
+    Default is ``conflict=False`` -- insufficient evidence. Only a recorded
+    failure of the claimed work sets it, because arXiv:2611.25760 shows the
+    cost of the opposite mistake: treating "no confirming observation" as
+    failure flags claims that are true.
+    """
     if could_resolve:
         text += (
             f" {_describe(could_resolve[-1])} ran in the same step as this claim "
             "and has no recorded result yet; look at its result before claiming "
             "completion again."
         )
-    return GoalVerdict(confirmed=False, justification=text, stage="rule")
+    return GoalVerdict(
+        confirmed=False, justification=text, stage="rule", conflict=conflict
+    )
 
 
 CheckRunner = Callable[[tuple[GoalCheckSpec, ...]], Awaitable[tuple[GoalCheckRun, ...]]]
@@ -358,6 +405,13 @@ def review_record(
 
     ``result`` is ``passed``, ``rejected``, ``impossible`` or ``unavailable``
     (the review could not run; ``problem`` says why).
+
+    ``faithfulness`` is the **report** axis -- ``supported``, ``unsupported``,
+    ``contradicted``, or ``unassessed`` when no verdict exists. It is recorded
+    separately from task success on purpose: arXiv:2611.25760 shows a passing
+    test or a healthy service can accompany a claim that was never established,
+    so the Goal's completion state must not be read as a faithfulness score (or
+    the reverse). Never merge the two into one boolean.
     """
 
     runs = verdict.check_runs if verdict is not None else check_runs
@@ -367,6 +421,7 @@ def review_record(
         "recordedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "stage": (verdict.stage or "other") if verdict is not None else "reviewer",
         "result": result,
+        "faithfulness": verdict.faithfulness if verdict is not None else "unassessed",
         "justification": _clip(
             verdict.justification if verdict is not None else problem,
             _RECORD_TEXT_MAX_CHARS,
