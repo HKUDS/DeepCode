@@ -16,6 +16,7 @@ from core.mcp.models import (
     McpToolAnnotations,
     McpToolIdentity,
 )
+from core.mcp.naming import schema_digest
 from core.mcp.schema import normalize_schema_for_openai
 from core.observability import log_mcp_call
 
@@ -32,13 +33,19 @@ class McpToolAdapter(Tool):
     ) -> None:
         server = connection.server
         self.connection = connection
+        self._name = visible_name
+        # The schema is normalised before the identity is built: the digest is
+        # part of the identity, and an identity without it cannot answer "is
+        # this the same tool another provider is advertising?".
+        raw_schema = getattr(tool_definition, "inputSchema", None)
+        self._parameters = normalize_schema_for_openai(raw_schema)
         self.identity = McpToolIdentity(
             server_id=server.server_id,
             server_name=server.name,
             source=server.source,
             raw_name=str(tool_definition.name),
+            schema_digest=schema_digest(self._parameters),
         )
-        self._name = visible_name
         # Remote descriptions are untrusted and quality-uncontrolled — bound
         # length (they count against the prompt budget, keeping the historical
         # 8,000-character allowance) and replace degenerate/empty ones so the
@@ -48,8 +55,6 @@ class McpToolAdapter(Tool):
             name=visible_name,
             max_chars=_MCP_DESCRIPTION_MAX_CHARS,
         )
-        raw_schema = getattr(tool_definition, "inputSchema", None)
-        self._parameters = normalize_schema_for_openai(raw_schema)
         self.annotations = McpToolAnnotations.from_sdk(
             getattr(tool_definition, "annotations", None)
         )
