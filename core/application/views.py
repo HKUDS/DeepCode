@@ -339,6 +339,16 @@ def mcp_probe_view(result) -> dict[str, Any]:
     }
 
 
+def mcp_probe_all_view(results) -> dict[str, Any]:
+    probed = [mcp_probe_view(result) for result in results]
+    return {
+        "ok": all(item["ok"] for item in probed),
+        "total": len(probed),
+        "failed": sum(1 for item in probed if not item["ok"]),
+        "servers": probed,
+    }
+
+
 def mcp_oauth_flow_view(flow) -> dict[str, Any]:
     return {
         "flowId": flow.flow_id,
