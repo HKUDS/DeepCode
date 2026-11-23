@@ -194,11 +194,6 @@ class BashTool(Tool):
         )
 
     async def execute(self, **kwargs: Any) -> Any:
-        """Run a command after preflight and policy screening.
-
-        @param kwargs: Tool arguments with a command and optional timeout.
-        @returns: Command output or a refusal/error message.
-        """
         command = kwargs.get("command", "")
         timeout = int(kwargs.get("timeout") or _DEFAULT_TIMEOUT)
         if not command.strip():
