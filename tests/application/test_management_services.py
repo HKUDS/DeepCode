@@ -418,7 +418,7 @@ def test_mcp_presets_add_disabled_and_real_probe_reports_capabilities(
     )
     try:
         presets = application.mcp.list_presets(project.id)
-        assert len(presets.presets) == 16
+        assert len(presets.presets) == 17
         notion = next(item for item in presets.presets if item.id == "notion")
         assert notion.auth == "oauth"
         assert notion.configured is False

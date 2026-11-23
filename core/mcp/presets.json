@@ -158,6 +158,21 @@
       }
     },
     {
+      "id": "aimlapi",
+      "displayName": "AI/ML API",
+      "category": "api",
+      "description": "Find and compare AI models, run chat, embeddings, image, video and audio generation, and call Agent Tools such as web search and page extraction.",
+      "docsUrl": "https://docs.aimlapi.com/quickstart/mcp",
+      "requires": "AI/ML API account",
+      "server": {
+        "type": "streamableHttp",
+        "auth": "oauth",
+        "url": "https://mcp.aimlapi.com/mcp",
+        "toolTimeoutSeconds": 60,
+        "approvalMode": "writes"
+      }
+    },
+    {
       "id": "figma",
       "displayName": "Figma",
       "category": "design",
