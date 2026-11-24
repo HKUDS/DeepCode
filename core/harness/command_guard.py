@@ -40,6 +40,7 @@ import re
 import shlex
 from urllib.parse import urlparse
 
+from core.harness import exec_policy
 from core.network.hostnames import is_domain_allowed
 
 __all__ = [
@@ -813,6 +814,12 @@ def screen_all(
 ) -> str | None:
     """Run every screen and return the first reason, or ``None``.
 
+    A user policy (:mod:`core.harness.exec_policy`, opt-in via
+    ``DEEPCODE_EXEC_POLICY``) speaks first so a site-specific ``forbid`` is
+    reported with its own justification rather than the generic screen text.
+    Policy can only *add* a block: a policy ``allow`` never suppresses the
+    built-in destructive-command screen below.
+
     The destructive-command screen always runs. The egress and install screens
     run only under ``DEEPCODE_COMMAND_SCREEN=strict`` (see
     :func:`strict_screens_enabled`). Order matters only for the quality of the
@@ -820,7 +827,7 @@ def screen_all(
     speaks first.
     """
 
-    reason = screen_command(command)
+    reason = exec_policy.forbid_reason(command) or screen_command(command)
     if reason or not strict_screens_enabled():
         return reason
     return screen_egress(
