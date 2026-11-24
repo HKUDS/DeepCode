@@ -19,8 +19,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import tempfile
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from core.agent_runtime.processes import (
@@ -137,6 +139,46 @@ def _trimmed_reason(reason: Any) -> str | None:
     return trimmed or None
 
 
+#: Hook context goes straight into the transcript, so one chatty hook can spend
+#: the whole window before the model has even seen the request. Cap it, and keep
+#: the full text on disk instead of silently dropping it: a truncated hook that
+#: still shows *where* the rest went is debuggable, a silently shortened one is
+#: not. ~10k characters is roughly 2.5k tokens.
+_CONTEXT_CHAR_LIMIT = 10_000
+
+
+def _spill_context(text: str) -> str | None:
+    """Save the full hook output to a private file, returning its path."""
+
+    try:
+        directory = Path(tempfile.gettempdir()) / "deepcode-hook-output"
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd, name = tempfile.mkstemp(prefix="hook-", suffix=".txt", dir=directory)
+        with os.fdopen(fd, "w", encoding="utf-8", errors="replace") as handle:
+            handle.write(text)
+        # mkstemp already creates 0600; keep it explicit for non-POSIX backends.
+        os.chmod(name, 0o600)
+        return name
+    except OSError:  # pragma: no cover - platform dependent
+        return None
+
+
+def _bounded_context(text: Any) -> str | None:
+    """``additionalContext``, capped, with the overflow spilled to a file."""
+
+    trimmed = _trimmed_reason(text)
+    if trimmed is None or len(trimmed) <= _CONTEXT_CHAR_LIMIT:
+        return trimmed
+    head = trimmed[:_CONTEXT_CHAR_LIMIT]
+    path = _spill_context(trimmed)
+    if path is None:  # pragma: no cover - spill failure degrades to truncation
+        return f"{head}\n\n[hook output truncated at {_CONTEXT_CHAR_LIMIT} characters]"
+    return (
+        f"{head}\n\n[hook output truncated at {_CONTEXT_CHAR_LIMIT} characters; "
+        f"full text saved to {path}]"
+    )
+
+
 @dataclass(slots=True)
 class _Universal:
     continue_processing: bool = True
@@ -173,7 +215,9 @@ def _block_from_decision(obj: dict, event_label: str) -> HandlerDecision:
             dec.block_reason = reason
     hook_specific = obj.get("hookSpecificOutput")
     if isinstance(hook_specific, dict):
-        dec.additional_context = _trimmed_reason(hook_specific.get("additionalContext"))
+        dec.additional_context = _bounded_context(
+            hook_specific.get("additionalContext")
+        )
     return dec
 
 
@@ -212,7 +256,7 @@ def _decode_pre_tool_use(obj: dict) -> HandlerDecision:
             else:
                 dec.block = True
                 dec.block_reason = reason
-    dec.additional_context = _trimmed_reason(hs.get("additionalContext"))
+    dec.additional_context = _bounded_context(hs.get("additionalContext"))
     return dec
 
 
@@ -221,7 +265,9 @@ def _decode_additional_context_only(obj: dict) -> HandlerDecision:
     dec = HandlerDecision()
     hook_specific = obj.get("hookSpecificOutput")
     if isinstance(hook_specific, dict):
-        dec.additional_context = _trimmed_reason(hook_specific.get("additionalContext"))
+        dec.additional_context = _bounded_context(
+            hook_specific.get("additionalContext")
+        )
     return dec
 
 
@@ -320,7 +366,9 @@ def parse_handler_output(event_name: str, result: CommandResult) -> HandlerDecis
             )
         # Plain-text stdout becomes context for the context events; ignored else.
         if event_name in _TEXT_CONTEXT_EVENTS:
-            return HandlerDecision(status="completed", additional_context=stripped)
+            return HandlerDecision(
+                status="completed", additional_context=_bounded_context(stripped)
+            )
         return HandlerDecision(status="completed")
 
     decoder = _DECODERS.get(event_name)
