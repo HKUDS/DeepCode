@@ -4,6 +4,12 @@ DeepCode 的主要变化，最新的在前，每天一条。正式版本号写�
 PyPI 上的包名是 [deepcode-hku](https://pypi.org/project/deepcode-hku/)。
 English: [CHANGELOG.md](CHANGELOG.md).
 
+## 2026-11-26 · 修复
+
+- **模型响应慢不再中断 Paper2Code。** 代码实现阶段的五分钟停滞检测重新排除等待
+  模型的时间，以及进入实现循环之前（例如创建文件树）花掉的时间，一次较慢的响应
+  不会再让整次运行以“进度停滞”结束。
+
 ## 2026-11-23 · 社区修复
 
 - **一次测试所有 MCP 服务器。** `deepcode mcp test --all` 依次检查每个已启用的
