@@ -315,6 +315,16 @@ class _ImplementationHook(AgentHook):
     def __init__(self, state: _RunState):
         super().__init__()
         self._state = state
+        self._model_request_started: Optional[float] = None
+
+    async def before_model_request(self, context: AgentHookContext) -> None:
+        self._model_request_started = time.time()
+
+    async def on_model_response(self, context: AgentHookContext) -> None:
+        # A slow model round-trip is not a stalled run.
+        started, self._model_request_started = self._model_request_started, None
+        if started is not None:
+            self._state.loop_detector.note_llm_wait(time.time() - started)
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         self._state.in_tools_phase = True
@@ -967,6 +977,9 @@ Requirements:
             llm_timeout_s=0,
         )
 
+        # The detector was built with the workflow; the file-tree phase ran
+        # since then and is not a stall of this loop.
+        self.loop_detector.record_progress()
         runner = AgentRunner(provider)
         result = await runner.run(spec)
 

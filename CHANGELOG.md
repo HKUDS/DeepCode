@@ -5,6 +5,13 @@ Released versions are named in the entry title; the version on PyPI is
 [deepcode-hku](https://pypi.org/project/deepcode-hku/). 中文版见
 [CHANGELOG_ZH.md](CHANGELOG_ZH.md).
 
+## 2026-11-26 · Fixes
+
+- **Slow model calls no longer abort Paper2Code.** The implementation phase
+  again leaves time spent waiting on the model, and time spent before the
+  loop starts (such as creating the file tree), out of its five-minute stall
+  check, so one slow response no longer ends the run as a progress stall.
+
 ## 2026-11-23 · Community fixes
 
 - **Test every MCP server at once.** `deepcode mcp test --all` probes each

@@ -12,6 +12,7 @@ real MCP servers. They pin the P0 exit criteria:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -600,3 +601,60 @@ async def test_file_tree_commands_run_in_the_code_directory(tmp_path, monkeypatc
     await CodeImplementationWorkflow().create_file_structure("plan", str(tmp_path))
 
     assert seen == [str(tmp_path / "generate_code")]
+
+
+class SlowImplProvider(ImplScriptedProvider):
+    """Each tool-loop call takes ``delay`` seconds, like a slow model."""
+
+    def __init__(self, responses: list[LLMResponse], delay: float):
+        super().__init__(responses)
+        self.delay = delay
+
+    async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
+        if kwargs.get("tools"):
+            await asyncio.sleep(self.delay)
+        return await super().chat_with_retry(**kwargs)
+
+
+def _write_planned_files() -> list[LLMResponse]:
+    return [
+        LLMResponse(
+            content=f"Implementing {path}",
+            tool_calls=[
+                _tool_call(f"w{i}", "write_file", {"file_path": path, "content": "x"})
+            ],
+            finish_reason="tool_calls",
+        )
+        for i, path in enumerate(PLANNED_FILES)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_slow_model_calls_do_not_count_as_a_stall(tmp_path, monkeypatch):
+    workflow = _make_workflow(monkeypatch)
+    workflow.loop_detector.stall_threshold = 0.2
+    provider = SlowImplProvider(_write_planned_files(), delay=0.3)
+
+    await _run(workflow, provider, tmp_path)
+
+    state = workflow._last_run_state
+    assert state["status"] == "completed", state["reason"]
+    assert state["files_completed"] == len(PLANNED_FILES)
+
+
+@pytest.mark.asyncio
+async def test_time_before_the_implementation_loop_is_not_a_stall(
+    tmp_path, monkeypatch
+):
+    workflow = _make_workflow(monkeypatch)
+    # The detector is built with the workflow; the file-tree phase runs
+    # (and may take minutes) before the implementation loop starts.
+    detector = workflow.loop_detector
+    detector.last_progress_time -= detector.stall_threshold + 60
+    provider = ImplScriptedProvider(_write_planned_files())
+
+    await _run(workflow, provider, tmp_path)
+
+    state = workflow._last_run_state
+    assert state["status"] == "completed", state["reason"]
+    assert state["files_completed"] == len(PLANNED_FILES)
