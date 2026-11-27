@@ -13,6 +13,8 @@ These are pure mechanism: file I/O + the permission/sandbox seams from P1.
 :class:`~core.events.session.AgentSession` can consume.
 """
 
+import os
+
 from core.domain.execution_security import (
     ExecutionAccessPreset,
     ExecutionSecurityProfile,
@@ -27,6 +29,18 @@ from core.harness.tools.replace import (
     replace,
 )
 from core.harness.tools.run_steps import RunStepsTool
+
+
+def _run_steps_enabled() -> bool:
+    """Whether the fused run_steps tool is registered (env DEEPCODE_RUN_STEPS).
+
+    Off by default: the default tool set is part of the capability contract,
+    so fusion is opt-in and callers that want it say so explicitly.
+    """
+    value = os.environ.get("DEEPCODE_RUN_STEPS", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 from core.harness.tools.search import GlobTool, GrepTool
 from core.harness.tools.shell import BashTool
 from core.harness.tools.web import WebFetchTool
@@ -153,7 +167,8 @@ def default_coding_tools(
         # One bash instance serves both entry points: ``run_steps`` fuses the
         # sequencing, but screening/sandboxing stay in exactly one place.
         _bash,
-        RunStepsTool(_bash),
+        # Opt-in action fusion; the default capability set stays unchanged.
+        *([RunStepsTool(_bash)] if _run_steps_enabled() else []),
         GrepTool(workspace, protect_sensitive_paths=protect_sensitive_paths),
         GlobTool(workspace, protect_sensitive_paths=protect_sensitive_paths),
         MemoryTool(workspace),

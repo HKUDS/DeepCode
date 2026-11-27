@@ -494,17 +494,25 @@ def test_tool_omits_timeout_when_not_declared():
 # --------------------------------------------------------------------------
 
 
-def test_run_steps_is_registered_and_shares_the_bash_instance(tmp_path):
-    """The registered tool must delegate to the registered bash tool."""
+def test_run_steps_is_opt_in_and_shares_the_bash_instance(tmp_path, monkeypatch):
+    """Fusion is opt-in; when enabled it must delegate to the registered bash."""
     from core.harness.tools import default_coding_tools
 
+    def names_of(registry):
+        return (
+            registry.tool_names
+            if isinstance(registry.tool_names, list)
+            else registry.tool_names()
+        )
+
+    # Default: the capability contract is unchanged, so fusion is absent.
+    monkeypatch.delenv("DEEPCODE_RUN_STEPS", raising=False)
+    assert "run_steps" not in names_of(default_coding_tools(str(tmp_path)))
+
+    # Opted in: registered, and it reuses the one bash instance.
+    monkeypatch.setenv("DEEPCODE_RUN_STEPS", "1")
     registry = default_coding_tools(str(tmp_path))
-    names = (
-        registry.tool_names
-        if isinstance(registry.tool_names, list)
-        else registry.tool_names()
-    )
-    assert "run_steps" in names
+    assert "run_steps" in names_of(registry)
     bash = registry.get("bash")
     tool = registry.get("run_steps")
     assert isinstance(tool, RunStepsTool)
