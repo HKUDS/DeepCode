@@ -26,6 +26,7 @@ from core.harness.tools.replace import (
     NotFoundError,
     replace,
 )
+from core.harness.tools.run_steps import RunStepsTool
 from core.harness.tools.search import GlobTool, GrepTool
 from core.harness.tools.shell import BashTool
 from core.harness.tools.web import WebFetchTool
@@ -41,6 +42,7 @@ __all__ = [
     "NotFoundError",
     "PatchError",
     "ReadTool",
+    "RunStepsTool",
     "WriteTool",
     "WebFetchTool",
     "default_coding_tools",
@@ -133,6 +135,7 @@ def default_coding_tools(
         or execution_security_profile.access_preset
         is not ExecutionAccessPreset.FULL_ACCESS
     )
+    _bash = BashTool(workspace, sandbox_enabled=command_sandbox)
     tools = [
         ReadTool(workspace),
         WriteTool(
@@ -147,7 +150,10 @@ def default_coding_tools(
             workspace,
             allow_outside_workspace=allow_outside_workspace,
         ),
-        BashTool(workspace, sandbox_enabled=command_sandbox),
+        # One bash instance serves both entry points: ``run_steps`` fuses the
+        # sequencing, but screening/sandboxing stay in exactly one place.
+        _bash,
+        RunStepsTool(_bash),
         GrepTool(workspace, protect_sensitive_paths=protect_sensitive_paths),
         GlobTool(workspace, protect_sensitive_paths=protect_sensitive_paths),
         MemoryTool(workspace),
