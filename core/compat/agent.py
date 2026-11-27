@@ -280,8 +280,19 @@ class AugmentedLLM:
         else:
             max_iterations = requested_iterations
 
+        # P3-A (GenAI lesson 04): attach the prompt cue as transient turn
+        # context — applied to routed requests, never to the compaction
+        # summarizer prefix (keeps the dsh prefix/KV-cache alignment intact).
+        try:
+            from core.loop.cue import build_cue_context
+
+            cue_context = build_cue_context()
+        except Exception:
+            cue_context = ()
+
         spec = AgentRunSpec(
             initial_messages=messages,
+            transient_context_messages=cue_context,
             tools=tools,
             model=params.model or self.provider.default_model,
             max_iterations=max_iterations,
